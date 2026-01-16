@@ -402,3 +402,325 @@ export async function buildPlanInfo(productCode: string, productName?: string): 
     pendingOrderQuantity,
   };
 }
+
+// ============================================================================
+// 齐套模式V2 数据服务函数
+// ============================================================================
+
+// 物料对象类型ID
+const MATERIAL_OBJECT_TYPE_ID = 'd56voju9olk4bpa66vcg';
+
+/**
+ * 物料信息接口（从API获取）
+ */
+export interface MaterialInfo {
+  material_code: string;
+  material_name: string;
+  material_type: '自制' | '外购' | '委外';
+  delivery_duration: string;    // 格式: "10天/次" 或 "1000/天"
+  specification?: string;
+  unit_price?: number;
+}
+
+/**
+ * 产品扩展信息（包含assembly_time）
+ */
+export interface ProductExtendedInfo extends APIProduct {
+  assembly_time?: string;       // 格式: "1000/天"
+}
+
+/**
+ * 解析交付时长/生产效率字符串
+ *
+ * 支持两种格式:
+ * - "10天/次" -> { type: 'duration', value: 10 } 表示固定交付周期10天
+ * - "1000/天" -> { type: 'rate', value: 1000 } 表示每天可生产1000件
+ *
+ * @param durationStr 交付时长字符串
+ * @returns 解析结果
+ */
+export function parseDeliveryDuration(durationStr: string | undefined | null): {
+  type: 'duration' | 'rate';
+  value: number;
+} {
+  if (!durationStr || typeof durationStr !== 'string') {
+    // 默认返回15天交付周期
+    return { type: 'duration', value: 15 };
+  }
+
+  const trimmed = durationStr.trim();
+
+  // 匹配 "10天/次" 格式（固定交付周期）
+  const durationMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*天\s*[\/\\]?\s*次?$/);
+  if (durationMatch) {
+    return { type: 'duration', value: parseFloat(durationMatch[1]) };
+  }
+
+  // 匹配 "1000/天" 格式（生产效率）
+  const rateMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*[\/\\]?\s*天$/);
+  if (rateMatch) {
+    return { type: 'rate', value: parseFloat(rateMatch[1]) };
+  }
+
+  // 尝试匹配纯数字（假定为天数）
+  const numberMatch = trimmed.match(/^(\d+(?:\.\d+)?)$/);
+  if (numberMatch) {
+    return { type: 'duration', value: parseFloat(numberMatch[1]) };
+  }
+
+  console.warn(`[parseDeliveryDuration] 无法解析: "${durationStr}", 使用默认值15天`);
+  return { type: 'duration', value: 15 };
+}
+
+/**
+ * 解析产品组装时长
+ *
+ * 格式: "1000/天" -> 每天可生产1000件
+ *
+ * @param assemblyTimeStr 组装时长字符串
+ * @returns 每天生产数量
+ */
+export function parseProductionRate(assemblyTimeStr: string | undefined | null): number {
+  if (!assemblyTimeStr || typeof assemblyTimeStr !== 'string') {
+    // 默认返回每天1000件
+    return 1000;
+  }
+
+  const trimmed = assemblyTimeStr.trim();
+
+  // 匹配 "1000/天" 格式
+  const rateMatch = trimmed.match(/^(\d+(?:\.\d+)?)\s*[\/\\]?\s*天$/);
+  if (rateMatch) {
+    return parseFloat(rateMatch[1]);
+  }
+
+  // 尝试匹配纯数字
+  const numberMatch = trimmed.match(/^(\d+(?:\.\d+)?)$/);
+  if (numberMatch) {
+    return parseFloat(numberMatch[1]);
+  }
+
+  console.warn(`[parseProductionRate] 无法解析: "${assemblyTimeStr}", 使用默认值1000/天`);
+  return 1000;
+}
+
+/**
+ * 计算组装/交付时长（天数）
+ *
+ * @param quantity 需求数量
+ * @param deliveryDuration 交付时长字符串
+ * @param materialType 物料类型
+ * @returns 天数
+ */
+export function calculateDuration(
+  quantity: number,
+  deliveryDuration: string | undefined | null,
+  materialType: '自制' | '外购' | '委外'
+): number {
+  const parsed = parseDeliveryDuration(deliveryDuration);
+
+  if (materialType === '自制') {
+    // 自制物料（组件）：按生产效率计算
+    if (parsed.type === 'rate' && parsed.value > 0) {
+      return Math.ceil(quantity / parsed.value);
+    }
+    // 如果是duration类型，可能是数据异常，使用默认生产效率
+    console.warn(`[calculateDuration] 自制物料使用了duration格式: ${deliveryDuration}`);
+    return Math.ceil(quantity / 1000);
+  } else {
+    // 外购/委外物料：使用固定交付周期
+    if (parsed.type === 'duration') {
+      return parsed.value;
+    }
+    // 如果是rate类型，可能是数据异常，使用默认交付周期
+    console.warn(`[calculateDuration] 外购/委外物料使用了rate格式: ${deliveryDuration}`);
+    return 15;
+  }
+}
+
+/**
+ * 获取物料详细信息（包含delivery_duration和material_type）
+ *
+ * @param materialCodes 物料编码列表
+ * @returns 物料信息Map
+ */
+export async function fetchMaterialDetails(
+  materialCodes: string[]
+): Promise<Map<string, MaterialInfo>> {
+  if (materialCodes.length === 0) {
+    return new Map();
+  }
+
+  console.log(`[mpsDataService] fetchMaterialDetails: 查询 ${materialCodes.length} 个物料`);
+
+  // 使用in操作查询多个物料
+  const condition: QueryCondition = {
+    operation: 'in',
+    field: 'material_code',
+    value: materialCodes,
+    value_from: 'const',
+  };
+
+  const response = await ontologyApi.queryObjectInstances(MATERIAL_OBJECT_TYPE_ID, {
+    condition,
+    limit: 10000,
+  });
+
+  const materialMap = new Map<string, MaterialInfo>();
+
+  for (const item of response.entries) {
+    const materialCode = item.material_code;
+    if (materialCode) {
+      materialMap.set(materialCode, {
+        material_code: materialCode,
+        material_name: item.material_name || materialCode,
+        material_type: item.material_type || '外购',
+        delivery_duration: item.delivery_duration || '',
+        specification: item.specification,
+        unit_price: item.unit_price ? parseFloat(item.unit_price) : undefined,
+      });
+    }
+  }
+
+  console.log(`[mpsDataService] fetchMaterialDetails: 获取到 ${materialMap.size} 个物料信息`);
+  return materialMap;
+}
+
+/**
+ * 获取产品扩展信息（包含assembly_time）
+ *
+ * @param productCode 产品编码
+ * @returns 产品扩展信息
+ */
+export async function fetchProductExtendedInfo(
+  productCode: string
+): Promise<ProductExtendedInfo | null> {
+  const condition: QueryCondition = {
+    operation: '==',
+    field: 'product_code',
+    value: productCode,
+    value_from: 'const',
+  };
+
+  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
+    condition,
+    limit: 1,
+  });
+
+  if (response.entries.length === 0) {
+    return null;
+  }
+
+  const item = response.entries[0];
+  return {
+    product_code: item.product_code || '',
+    product_name: item.product_name || '',
+    product_model: item.product_model,
+    product_series: item.product_series,
+    product_type: item.product_type,
+    amount: item.amount ? parseFloat(item.amount) : undefined,
+    assembly_time: item.assembly_time,
+  };
+}
+
+/**
+ * 批量获取库存信息
+ *
+ * @param materialCodes 物料编码列表
+ * @returns 库存信息Map (material_code -> available_quantity)
+ */
+export async function fetchInventoryBatch(
+  materialCodes: string[]
+): Promise<Map<string, number>> {
+  if (materialCodes.length === 0) {
+    return new Map();
+  }
+
+  console.log(`[mpsDataService] fetchInventoryBatch: 查询 ${materialCodes.length} 个物料库存`);
+
+  const condition: QueryCondition = {
+    operation: 'in',
+    field: 'material_code',
+    value: materialCodes,
+    value_from: 'const',
+  };
+
+  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
+    condition,
+    limit: 10000,
+  });
+
+  const inventoryMap = new Map<string, number>();
+
+  for (const item of response.entries) {
+    const materialCode = item.material_code;
+    if (materialCode) {
+      // 优先使用available_quantity，其次inventory_data
+      const quantity = item.available_quantity
+        ? parseFloat(item.available_quantity)
+        : (item.inventory_data ? parseFloat(item.inventory_data) : 0);
+      inventoryMap.set(materialCode, quantity);
+    }
+  }
+
+  console.log(`[mpsDataService] fetchInventoryBatch: 获取到 ${inventoryMap.size} 个库存记录`);
+  return inventoryMap;
+}
+
+/**
+ * 获取齐套模式V2所需的完整数据
+ *
+ * @param productCode 产品编码
+ * @returns 齐套模式V2数据包
+ */
+export async function fetchMaterialReadyV2Data(productCode: string): Promise<{
+  product: ProductExtendedInfo | null;
+  productionPlan: ProductionPlan | null;
+  bomItems: BOMItem[];
+  materialDetails: Map<string, MaterialInfo>;
+  inventoryMap: Map<string, number>;
+}> {
+  console.log(`[mpsDataService] ========== fetchMaterialReadyV2Data 开始 ==========`);
+  console.log(`[mpsDataService] 产品编码: ${productCode}`);
+
+  // Step 1: 获取产品信息和生产计划
+  const [product, productionPlans] = await Promise.all([
+    fetchProductExtendedInfo(productCode),
+    fetchProductionPlan(productCode),
+  ]);
+
+  // 取第一个生产计划（或优先级最高的）
+  const productionPlan = productionPlans.length > 0
+    ? productionPlans.sort((a, b) => (a.priority || 999) - (b.priority || 999))[0]
+    : null;
+
+  console.log(`[mpsDataService] 产品信息:`, product);
+  console.log(`[mpsDataService] 生产计划:`, productionPlan);
+
+  // Step 2: 获取BOM数据
+  const bomItems = await fetchBOMData(productCode);
+  console.log(`[mpsDataService] BOM数据: ${bomItems.length} 条`);
+
+  // Step 3: 提取所有物料编码
+  const allMaterialCodes = new Set<string>();
+  for (const bom of bomItems) {
+    allMaterialCodes.add(bom.child_code);
+  }
+  const materialCodeList = Array.from(allMaterialCodes);
+
+  // Step 4: 并行获取物料详情和库存
+  const [materialDetails, inventoryMap] = await Promise.all([
+    fetchMaterialDetails(materialCodeList),
+    fetchInventoryBatch(materialCodeList),
+  ]);
+
+  console.log(`[mpsDataService] ========== fetchMaterialReadyV2Data 完成 ==========`);
+
+  return {
+    product,
+    productionPlan,
+    bomItems,
+    materialDetails,
+    inventoryMap,
+  };
+}

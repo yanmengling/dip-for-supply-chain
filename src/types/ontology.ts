@@ -871,6 +871,11 @@ export interface PlanInfo {
 // ============================================================================
 
 /**
+ * 生产计划模式类型
+ */
+export type ProductionPlanMode = 'default' | 'material-ready-v2';
+
+/**
  * 甘特图任务实体
  */
 export interface GanttTask {
@@ -887,6 +892,112 @@ export interface GanttTask {
   bomNode?: BOMNode;
   left?: number;
   width?: number;
+}
+
+/**
+ * 齐套模式V2甘特任务（扩展GanttTask）
+ * 支持倒排排程和库存就绪状态显示
+ */
+export interface MaterialReadyGanttTask extends Omit<GanttTask, 'status'> {
+  code: string;                     // 编码（产品编码/物料编码）
+
+  // 状态属性
+  status: 'ready' | 'not-ready' | 'overdue' | 'normal';
+  isReady: boolean;                 // 库存是否就绪
+
+  // 数量属性
+  requiredQuantity: number;         // 需求数量
+  availableInventory: number;       // 可用库存
+
+  // 生产/交付属性（根据类型不同，使用不同字段）
+  productionRate?: number;          // 生产效率（产品/组件），如1000表示每天1000件
+  deliveryDuration?: number;        // 交付周期（物料），天数
+  assemblyTime?: number;            // 组装时长（天数）
+
+  // 物料类型（用于区分组件和物料）
+  materialType?: '自制' | '外购' | '委外';
+
+  // 损耗率
+  lossRate?: number;                // 损耗率（0-1之间的小数）
+
+  // 子件用量
+  childQuantity?: number;           // BOM中的子件用量
+
+  // 树形结构
+  children?: MaterialReadyGanttTask[];
+  isExpanded: boolean;
+  canExpand: boolean;
+  parentId?: string;
+}
+
+/**
+ * 齐套模式V2计算结果
+ */
+export interface MaterialReadyCalculationResult {
+  tasks: MaterialReadyGanttTask[];
+  totalCycle: number;               // 总周期（天）
+  planStartDate: Date;              // 计划开始时间
+  planEndDate: Date;                // 计划结束时间
+  actualStartDate: Date;            // 实际开始时间
+  actualEndDate: Date;              // 实际结束时间
+  isOverdue: boolean;               // 是否超期
+  overdueDays: number;              // 超期天数（负数表示提前完成）
+  readyMaterials: string[];         // 就绪物料编码列表
+  notReadyMaterials: string[];      // 未就绪物料编码列表
+  risks: RiskAlert[];               // 风险提示列表
+}
+
+/**
+ * 物料需求分析结果
+ */
+export interface MaterialRequirementAnalysis {
+  materialCode: string;
+  materialName: string;
+  requiredQuantity: number;         // 需求数量
+  currentInventory: number;         // 当前库存
+  shortage: number;                 // 短缺数量
+  deliveryCycle: number;            // 交付周期（天）
+  arrivalDate: Date;                // 预计到货日期
+  canSupportQuantity: number;       // 库存可支持的生产数量
+  quantityPerUnit: number;          // 每单位产品所需数量
+}
+
+/**
+ * 生产阶段（用于交付优先模式）
+ */
+export interface ProductionPhase {
+  phaseId: string;
+  phaseName: string;
+  phaseType: 'production' | 'waiting';
+  startDate: Date;
+  endDate: Date;
+  quantity?: number;                // 生产数量（生产阶段）
+  reason?: string;                  // 等待原因（等待阶段）
+  waitingMaterials?: string[];      // 等待的物料列表
+}
+
+/**
+ * 扩展的甘特任务（用于旧版计算器）
+ */
+export interface GanttTaskExtended extends GanttTask {
+  mode?: ProductionPlanMode;
+  isExpanded?: boolean;
+  canExpand?: boolean;
+  parentId?: string;
+  bomItem?: BOMItem;
+  materialAnalysis?: MaterialRequirementAnalysis[];
+  phases?: ProductionPhase[];
+}
+
+/**
+ * 甘特图计算结果（通用）
+ */
+export interface GanttCalculationResult {
+  totalCycle: number;
+  tasks: GanttTaskExtended[];
+  risks: RiskAlert[];
+  materialAnalysis: MaterialRequirementAnalysis[];
+  completionDate: Date;
 }
 
 /**
