@@ -533,8 +533,8 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
 
       {/* Chart */}
       {hasGenerated && forecastData.length > 0 && (
-        <div className="h-72">
-          <ResponsiveContainer width="100%" height="100%">
+        <div className="h-72 min-h-[288px] w-full">
+          <ResponsiveContainer width="100%" height="100%" minHeight={288}>
             <AreaChart data={forecastData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
               <defs>
                 <linearGradient id={actualGradientId} x1="0" y1="0" x2="0" y2="1">

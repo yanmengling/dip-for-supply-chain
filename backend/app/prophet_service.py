@@ -26,10 +26,20 @@ PROPHET_AVAILABLE = False
 try:
     from prophet import Prophet
     import cmdstanpy
-    # Test if cmdstan is installed
-    cmdstanpy.cmdstan_path()
-    PROPHET_AVAILABLE = True
-    logger.info("Prophet with CmdStan is available")
+    import os
+    # Test if cmdstan is installed and set path explicitly
+    cmdstan_path = cmdstanpy.cmdstan_path()
+    if cmdstan_path and os.path.exists(cmdstan_path):
+        cmdstanpy.set_cmdstan_path(cmdstan_path)
+        # 设置环境变量以确保 Prophet 能找到 CmdStan
+        os.environ['CMDSTAN'] = cmdstan_path
+        os.environ['CMDSTAN_HOME'] = os.path.dirname(cmdstan_path)
+        # 强制使用 CMDSTANPY 后端
+        os.environ['PROPHET_STAN_BACKEND'] = 'CMDSTANPY'
+        PROPHET_AVAILABLE = True
+        logger.info(f"Prophet with CmdStan is available at {cmdstan_path}")
+    else:
+        logger.warning(f"CmdStan path not found: {cmdstan_path}")
 except Exception as e:
     logger.warning(f"Prophet/CmdStan not available: {e}. Using Holt-Winters fallback.")
 
@@ -111,17 +121,48 @@ class ProphetForecastService:
         """Use actual Prophet for forecasting."""
         from prophet import Prophet
         import cmdstanpy
+        import os
+        
+        # 显式设置 CmdStan 路径（如果已安装）
+        cmdstan_path = cmdstanpy.cmdstan_path()
+        if cmdstan_path and os.path.exists(cmdstan_path):
+            cmdstanpy.set_cmdstan_path(cmdstan_path)
+            # 设置环境变量以确保 Prophet 能找到 CmdStan
+            # 注意：必须设置为 cmdstan 的实际安装路径，而不是包含版本号的子目录
+            os.environ['CMDSTAN'] = cmdstan_path
+            os.environ['CMDSTAN_HOME'] = os.path.dirname(cmdstan_path)
+            # 强制 Prophet 使用 CMDSTANPY 后端，而不是查找内部路径
+            os.environ['PROPHET_STAN_BACKEND'] = 'CMDSTANPY'
+        
         cmdstanpy.utils.get_logger().setLevel(logging.WARNING)
 
-        model = Prophet(
-            growth=params.growth,
-            seasonality_mode=params.seasonality_mode,
-            yearly_seasonality=params.yearly_seasonality,
-            weekly_seasonality=params.weekly_seasonality,
-            changepoint_prior_scale=params.changepoint_prior_scale,
-            seasonality_prior_scale=params.seasonality_prior_scale,
-            interval_width=params.interval_width,
-        )
+        # 创建 Prophet 实例
+        # 显式指定 stan_backend='CMDSTANPY'，并确保在设置之前 cmdstanpy 已正确配置
+        # 必须在设置环境变量和 cmdstan 路径之后才能创建 Prophet 实例
+        try:
+            # 再次确认 cmdstan 路径（在运行时可能不同）
+            current_cmdstan_path = cmdstanpy.cmdstan_path()
+            if current_cmdstan_path and os.path.exists(current_cmdstan_path):
+                cmdstanpy.set_cmdstan_path(current_cmdstan_path)
+                os.environ['CMDSTAN'] = current_cmdstan_path
+                os.environ['CMDSTAN_HOME'] = os.path.dirname(current_cmdstan_path)
+            
+            model = Prophet(
+                stan_backend='CMDSTANPY',
+                growth=params.growth,
+                seasonality_mode=params.seasonality_mode,
+                yearly_seasonality=params.yearly_seasonality,
+                weekly_seasonality=params.weekly_seasonality,
+                changepoint_prior_scale=params.changepoint_prior_scale,
+                seasonality_prior_scale=params.seasonality_prior_scale,
+                interval_width=params.interval_width,
+            )
+        except (ValueError, AttributeError) as e:
+            # 如果遇到 cmdstan 路径验证错误，记录警告并重新抛出
+            # 让上层调用者处理（可能会降级到 Holt-Winters）
+            logger.error(f"Prophet initialization failed: {e}")
+            logger.error("This may be due to CmdStan version mismatch. Please ensure CmdStan is properly installed.")
+            raise
 
         model.fit(df)
         future = model.make_future_dataframe(periods=forecast_periods, freq='MS')
