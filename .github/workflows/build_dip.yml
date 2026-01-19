@@ -49,10 +49,11 @@ jobs:
         
         # Run packaging script with python3
         python3 buildkit/scripts/build_package.py --arch amd64
+        find . -name "*.dip"
 
     - name: Upload DIP Artifact
       uses: actions/upload-artifact@v4
       with:
         name: dip-package
-        path: buildkit/.cache/**/*.dip
+        path: "**/*.dip"
         if-no-files-found: error
