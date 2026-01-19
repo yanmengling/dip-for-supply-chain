@@ -43,12 +43,12 @@ jobs:
 
     - name: Package DIP
       run: |
-        # Make script executable
-        chmod +x buildkit/scripts/build_package.py
+        # Verify tools
+        helm version
+        skopeo --version
         
-        # Run packaging script
-        # Note: Docker is available by default on ubuntu-latest runners
-        python buildkit/scripts/build_package.py --arch amd64
+        # Run packaging script with python3
+        python3 buildkit/scripts/build_package.py --arch amd64
 
     - name: Upload DIP Artifact
       uses: actions/upload-artifact@v4
