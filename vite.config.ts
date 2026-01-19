@@ -56,17 +56,12 @@ export default defineConfig({
           });
         },
       },
-      // 转发 forecast 到云端环境
+      // 转发 forecast 到本地 Prophet 预测服务
       '/proxy-forecast': {
-        target: 'https://dip.aishu.cn',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-forecast/, '/api/forecast'),
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, _req, _res) => {
-            proxyReq.setHeader('Origin', 'https://dip.aishu.cn');
-          });
-        },
+        rewrite: (path) => path.replace(/^\/proxy-forecast/, ''),
       },
       // 转发 metricModel 到云端环境
       '/proxy-metric-data-model': {

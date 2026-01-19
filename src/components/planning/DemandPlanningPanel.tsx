@@ -12,6 +12,7 @@ import type { DemandPlanningState, ForecastAlgorithm, ProductOption, ProductDema
 import { demandPlanningService } from '../../services/demandPlanningService';
 import AlgorithmSelector from './AlgorithmSelector';
 import ProductForecastSection from './ProductForecastSection';
+import { AlgorithmParameterPanel, DEFAULT_PARAMETERS, type AlgorithmParameters } from '../product-supply-optimization/AlgorithmParameterPanel';
 
 const DemandPlanningPanel = ({ active }: PlanningPanelProps) => {
   const [state, setState] = useState<DemandPlanningState>({
@@ -25,6 +26,11 @@ const DemandPlanningPanel = ({ active }: PlanningPanelProps) => {
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [productsLoading, setProductsLoading] = useState<boolean>(true);
   const [productsError, setProductsError] = useState<string | null>(null);
+  
+  // Algorithm parameters state management (FR-010.4, FR-010.5)
+  const [algorithmParameters, setAlgorithmParameters] = useState<AlgorithmParameters>(
+    DEFAULT_PARAMETERS[state.selectedAlgorithm as 'prophet' | 'simple_exponential' | 'holt_linear' | 'holt_winters']
+  );
 
   // Fetch product list on mount to get product names
   useEffect(() => {
@@ -73,6 +79,12 @@ const DemandPlanningPanel = ({ active }: PlanningPanelProps) => {
       selectedAlgorithm: algorithm,
       error: null,
     }));
+    // Reset algorithm parameters to defaults when algorithm changes (FR-010.4)
+    const supportedAlgorithms: Array<'prophet' | 'simple_exponential' | 'holt_linear' | 'holt_winters'> = 
+      ['prophet', 'simple_exponential', 'holt_linear', 'holt_winters'];
+    if (supportedAlgorithms.includes(algorithm as any)) {
+      setAlgorithmParameters(DEFAULT_PARAMETERS[algorithm as 'prophet' | 'simple_exponential' | 'holt_linear' | 'holt_winters']);
+    }
   };
 
   // Handle forecast generation
@@ -97,12 +109,13 @@ const DemandPlanningPanel = ({ active }: PlanningPanelProps) => {
       // Get existing forecast for this product (if any)
       const existingForecast = state.productForecasts.get(state.selectedProduct);
 
-      // Generate demand plan (adds or replaces algorithm forecast)
+      // Generate demand plan with algorithm parameters (FR-010.4)
       const updatedForecast = await demandPlanningService.generateDemandPlan(
         state.selectedProduct,
         productName,
         state.selectedAlgorithm,
-        existingForecast
+        existingForecast,
+        algorithmParameters
       );
 
       // Update productForecasts Map
@@ -165,6 +178,15 @@ const DemandPlanningPanel = ({ active }: PlanningPanelProps) => {
           selectedAlgorithm={state.selectedAlgorithm}
           onAlgorithmChange={handleAlgorithmChange}
         />
+        </div>
+        
+        {/* Algorithm Parameter Panel (FR-010.4) */}
+        <div className="mt-4">
+          <AlgorithmParameterPanel
+            algorithm={state.selectedAlgorithm as 'prophet' | 'simple_exponential' | 'holt_linear' | 'holt_winters'}
+            parameters={algorithmParameters}
+            onParametersChange={setAlgorithmParameters}
+          />
         </div>
       </div>
 

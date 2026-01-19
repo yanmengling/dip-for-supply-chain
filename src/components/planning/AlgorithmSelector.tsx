@@ -21,7 +21,7 @@ const ALGORITHM_OPTIONS: Array<{
   {
     value: 'prophet',
     label: 'Prophet',
-    description: 'Facebook 开发的时序预测算法，适用于具有季节性模式的数据',
+    description: 'Prophet 适合具有强季节性和长期趋势的需求预测，由 Meta 开发',
   },
   {
     value: 'simple_exponential',
@@ -65,13 +65,6 @@ const AlgorithmSelector = ({ selectedAlgorithm, onAlgorithmChange }: AlgorithmSe
           </option>
         ))}
       </select>
-
-      {/* Display selected algorithm's scenario description */}
-      {selectedOption && (
-        <div className="text-xs text-slate-500 mt-1 px-1">
-          {selectedOption.description}
-        </div>
-      )}
     </div>
   );
 };

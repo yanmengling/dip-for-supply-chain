@@ -62,6 +62,14 @@ const SEASON_LENGTH_OPTIONS = [
   { value: 12, label: '12个月 (年度)' },
 ];
 
+// Algorithm descriptions
+const ALGORITHM_DESCRIPTIONS: Record<PanelForecastAlgorithm, string> = {
+  prophet: 'Prophet 适合具有强季节性和长期趋势的需求预测，由 Meta 开发',
+  simple_exponential: '适用于无明显趋势和季节性的数据',
+  holt_linear: '适用于具有线性趋势但无季节性的数据',
+  holt_winters: '适用于具有趋势和季节性的数据',
+};
+
 interface Props {
   algorithm: PanelForecastAlgorithm;
   parameters: AlgorithmParameters;
@@ -77,12 +85,32 @@ const ParameterSlider: React.FC<{
   step: number;
   onChange: (value: number) => void;
   hint?: string;
-}> = ({ label, value, min, max, step, onChange, hint }) => (
-  <div className="flex-1">
-    <div className="flex items-center justify-between mb-1">
-      <label className="text-sm font-medium text-slate-600">{label}</label>
-      <span className="text-sm font-semibold text-slate-800">{value.toFixed(2)}</span>
-    </div>
+}> = ({ label, value, min, max, step, onChange, hint }) => {
+  // Parse label to extract text before and inside parentheses
+  const parseLabel = (labelText: string) => {
+    const match = labelText.match(/^(.+?)\s*\((.+?)\)$/);
+    if (match) {
+      return { main: match[1], paren: match[2] };
+    }
+    return { main: labelText, paren: null };
+  };
+
+  const { main, paren } = parseLabel(label);
+
+  return (
+    <div className="flex-1">
+      <div className="flex items-center justify-between mb-1">
+        <label className="text-sm font-medium text-slate-600">
+          {main}
+          {paren && (
+            <>
+              {' '}
+              <span className="text-xs font-normal text-slate-500">({paren})</span>
+            </>
+          )}
+        </label>
+        <span className="text-sm font-semibold text-slate-800">{value.toFixed(2)}</span>
+      </div>
     <input
       type="range"
       min={min}
@@ -96,11 +124,9 @@ const ParameterSlider: React.FC<{
       <span>{min}</span>
       <span>{max}</span>
     </div>
-    {hint && (
-      <p className="text-xs text-slate-500 mt-1">{hint}</p>
-    )}
-  </div>
-);
+    </div>
+  );
+};
 
 export const AlgorithmParameterPanel: React.FC<Props> = ({
   algorithm,
@@ -121,13 +147,12 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
         return (
           <div className="space-y-4">
             <ParameterSlider
-              label="α (平滑系数)"
+              label="α (平滑系数：值越大对近期数据越敏感，适合波动较大的数据)"
               value={parameters.alpha ?? 0.2}
               min={0.01}
               max={1}
               step={0.01}
               onChange={(v) => updateParam('alpha', v)}
-              hint="值越大对近期数据越敏感，适合波动较大的数据"
             />
           </div>
         );
@@ -137,7 +162,7 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <ParameterSlider
-                label="α (水平平滑)"
+                label="α (水平平滑：控制水平变化敏感度)"
                 value={parameters.alpha ?? 0.3}
                 min={0.01}
                 max={1}
@@ -145,7 +170,7 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
                 onChange={(v) => updateParam('alpha', v)}
               />
               <ParameterSlider
-                label="β (趋势平滑)"
+                label="β (趋势平滑：控制趋势变化敏感度)"
                 value={parameters.beta ?? 0.1}
                 min={0.01}
                 max={1}
@@ -153,9 +178,6 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
                 onChange={(v) => updateParam('beta', v)}
               />
             </div>
-            <p className="text-xs text-slate-500">
-              α控制水平变化敏感度，β控制趋势变化敏感度
-            </p>
           </div>
         );
 
@@ -202,9 +224,6 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
                 ))}
               </select>
             </div>
-            <p className="text-xs text-slate-500">
-              适合有明显季节性模式的产品需求预测
-            </p>
           </div>
         );
 
@@ -252,29 +271,23 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
             {/* Changepoint Prior Scale & Confidence Interval Width */}
             <div className="grid grid-cols-2 gap-4">
               <ParameterSlider
-                label="变化点灵敏度"
+                label="变化点灵敏度 (值越大对趋势变化越敏感，可能导致过拟合)"
                 value={parameters.changepointPriorScale ?? 0.05}
                 min={0.001}
                 max={0.5}
                 step={0.001}
                 onChange={(v) => updateParam('changepointPriorScale', v)}
-                hint="值越大对趋势变化越敏感，可能导致过拟合"
               />
 
               <ParameterSlider
-                label="置信区间宽度"
+                label="置信区间宽度 (预测区间的概率覆盖范围)"
                 value={parameters.intervalWidth ?? 0.95}
                 min={0.5}
                 max={0.99}
                 step={0.01}
                 onChange={(v) => updateParam('intervalWidth', v)}
-                hint="预测区间的概率覆盖范围"
               />
             </div>
-
-            <p className="text-xs text-slate-500 mt-2">
-              Prophet 适合具有强季节性和长期趋势的需求预测，由 Meta 开发
-            </p>
           </div>
         );
 
@@ -287,7 +300,12 @@ export const AlgorithmParameterPanel: React.FC<Props> = ({
     <div className="bg-gradient-to-br from-slate-50 to-slate-100/50 border border-slate-200 rounded-xl p-4 mb-4">
       <div className="flex items-center gap-2 mb-3">
         <Info className="text-slate-400" size={16} />
-        <span className="text-sm font-medium text-slate-600">算法参数配置</span>
+        <span className="text-sm font-medium text-slate-600">
+          算法参数配置
+          <span className="text-xs font-normal text-slate-500 ml-2">
+            ({ALGORITHM_DESCRIPTIONS[algorithm]})
+          </span>
+        </span>
       </div>
       {renderParameters()}
     </div>

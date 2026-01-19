@@ -10,6 +10,13 @@ import { dataViewApi } from '../api/dataViewApi';
 import { metricModelApi, type MetricQueryRequest, type MetricFilter } from '../api/metricModelApi';
 import { httpClient } from '../api/httpClient';
 import { getEnvironmentConfig } from '../config/apiConfig';
+import {
+  simpleExponentialSmoothing,
+  holtLinearSmoothing,
+  holtWintersSmoothing,
+  type SmoothingParams,
+} from './forecastAlgorithmService';
+import { forecastOperatorService, type ProphetForecastInput } from './forecastOperatorService';
 import type {
   ForecastAlgorithm,
   ProductOption,
@@ -821,14 +828,16 @@ export class DemandPlanningService {
   }
 
   /**
-   * Generate Prophet forecast
+   * Generate Prophet forecast using shared forecastOperatorService (FR-010.1)
    * @param productId Product ID
    * @param history Historical sales data
-   * @returns Array of 13 forecast values (one per month)
+   * @param parameters Optional Prophet parameters
+   * @returns Array of 18 forecast values (past 2 years same period 12 months + future 6 months)
    */
   async generateProphetForecast(
     productId: string,
-    history: ProductSalesHistory[]
+    history: ProductSalesHistory[],
+    parameters?: Record<string, any>
   ): Promise<number[]> {
     if (history.length === 0) {
       console.warn(`No historical data for product ${productId}, returning zero forecast`);
@@ -836,83 +845,72 @@ export class DemandPlanningService {
     }
 
     try {
-      // Try to get forecast API base URL from environment config
-      const envConfig = getEnvironmentConfig();
-      const forecastBaseUrl = (envConfig as any).forecastBaseUrl;
+      // Use shared forecastOperatorService (FR-010.1)
+      const prophetInput: ProphetForecastInput = {
+        product_id: productId,
+        historical_data: history.map((h) => ({ month: h.month, quantity: h.quantity })),
+        forecast_periods: 18, // 18 months: past 2 years same period 12 months + future 6 months
+        parameters: parameters as any || {
+          seasonalityMode: 'multiplicative',
+          yearlySeasonality: true,
+          weeklySeasonality: false,
+        },
+      };
 
-      if (forecastBaseUrl) {
-        // Call Prophet forecast API
-        const url = `${forecastBaseUrl}/forecast/demand`;
-        const requestBody = {
-          product_id: productId,
-          forecast_periods: 18, // 18 months: past 2 years same period 12 months + future 6 months
-          include_uncertainty: false,
-          historical_data: history.map((h) => ({
-            month: h.month,
-            quantity: h.quantity,
-          })),
-        };
-
-        const response = await httpClient.post<{
-          forecast: number[];
-          confidence_intervals?: Array<{ lower: number; upper: number }>;
-        }>(url, requestBody);
-
-        if (response.data.forecast && Array.isArray(response.data.forecast)) {
-          // Ensure we return exactly 18 values
-          const forecast = response.data.forecast.slice(0, 18);
-          while (forecast.length < 18) {
-            forecast.push(forecast[forecast.length - 1] || 0);
-          }
-          return forecast;
-        }
+      const result = await forecastOperatorService.forecast('prophet', prophetInput);
+      
+      // Ensure we return exactly 18 values
+      const forecast = result.forecast_values.slice(0, 18);
+      while (forecast.length < 18) {
+        forecast.push(forecast[forecast.length - 1] || 0);
       }
+      
+      return forecast;
     } catch (error) {
-      console.warn(`Prophet API call failed for product ${productId}:`, error);
-      // Fall through to fallback implementation
+      console.error(`Prophet forecast failed for product ${productId}:`, error);
+      // Fallback: Use simple moving average if API is not available
+      if (history.length > 0) {
+        const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
+        const recentValues = sortedHistory.slice(-6).map((h) => h.quantity); // Last 6 months
+        const avg = recentValues.reduce((a, b) => a + b, 0) / recentValues.length;
+        return new Array(18).fill(avg);
+      }
+      return new Array(18).fill(0);
     }
-
-    // Fallback: Use simple moving average if API is not available
-    // This is a temporary solution until Prophet API is fully integrated
-    if (history.length > 0) {
-      const sortedHistory = [...history].sort((a, b) => a.month.localeCompare(b.month));
-      const recentValues = sortedHistory.slice(-6).map((h) => h.quantity); // Last 6 months
-      const avg = recentValues.reduce((a, b) => a + b, 0) / recentValues.length;
-      return new Array(18).fill(avg);
-    }
-
-    return new Array(18).fill(0);
   }
 
   /**
-   * Generate exponential smoothing forecast
+   * Generate exponential smoothing forecast using shared forecastAlgorithmService (FR-010.1)
    * @param productId Product ID
    * @param history Historical sales data
-   * @param algorithm Algorithm type
-   * @returns Array of 18 forecast values (one per month: past 2 years same period 12 months + future 6 months)
+   * @param algorithm Algorithm type (simple_exponential, holt_linear, holt_winters)
+   * @param parameters Optional algorithm parameters
+   * @returns Array of 18 forecast values (past 2 years same period 12 months + future 6 months)
    */
   async generateExponentialSmoothingForecast(
     productId: string,
     history: ProductSalesHistory[],
-    algorithm: 'simple_exponential' | 'holt_linear' | 'holt_winters'
+    algorithm: 'simple_exponential' | 'holt_linear' | 'holt_winters',
+    parameters?: Record<string, any>
   ): Promise<number[]> {
-    // Import forecast algorithm service
-    const {
-      simpleExponentialSmoothing,
-      holtLinearSmoothing,
-      holtWintersSmoothing,
-    } = await import('./forecastAlgorithmService');
+    // Use shared forecastAlgorithmService (FR-010.1)
+    console.log(`[DemandPlanningService] Generating ${algorithm} forecast for product ${productId} with ${history.length} history points`);
 
-    // Log algorithm usage for debugging (using productId to avoid unused parameter warning)
-    console.log(`Generating ${algorithm} forecast for product ${productId} with ${history.length} history points`);
+    // Convert parameters to SmoothingParams format
+    const smoothingParams: SmoothingParams = {
+      alpha: parameters?.alpha,
+      beta: parameters?.beta,
+      gamma: parameters?.gamma,
+      seasonLength: parameters?.seasonLength || 12,
+    };
 
     switch (algorithm) {
       case 'simple_exponential':
-        return simpleExponentialSmoothing(history, 18);
+        return simpleExponentialSmoothing(history, 18, smoothingParams);
       case 'holt_linear':
-        return holtLinearSmoothing(history, 18);
+        return holtLinearSmoothing(history, 18, smoothingParams);
       case 'holt_winters':
-        return holtWintersSmoothing(history, 18, { seasonLength: 12 });
+        return holtWintersSmoothing(history, 18, smoothingParams);
       default:
         throw new Error(`Unknown algorithm: ${algorithm}`);
     }
@@ -1067,29 +1065,38 @@ export class DemandPlanningService {
    * @param history Historical sales data
    * @returns AlgorithmForecast object
    */
+  /**
+   * Generate algorithm forecast using shared algorithm services
+   * Refactored to use forecastAlgorithmService and forecastOperatorService (FR-010.1)
+   * @param productId Product ID
+   * @param algorithm Forecast algorithm (prophet, simple_exponential, holt_linear, holt_winters)
+   * @param history Historical sales data
+   * @param parameters Optional algorithm parameters
+   * @returns AlgorithmForecast with forecast values
+   */
   async generateAlgorithmForecast(
     productId: string,
     algorithm: ForecastAlgorithm,
-    history: ProductSalesHistory[]
+    history: ProductSalesHistory[],
+    parameters?: Record<string, any>
   ): Promise<AlgorithmForecast> {
+    // Only support 4 algorithms (FR-010.2, FR-010.3)
+    if (algorithm !== 'prophet' && algorithm !== 'simple_exponential' && 
+        algorithm !== 'holt_linear' && algorithm !== 'holt_winters') {
+      throw new Error(`Unsupported algorithm: ${algorithm}. Only prophet, simple_exponential, holt_linear, and holt_winters are supported.`);
+    }
+
     let forecastValues: number[];
 
     if (algorithm === 'prophet') {
-      forecastValues = await this.generateProphetForecast(productId, history);
-    } else if (algorithm === 'arima' || algorithm === 'ensemble') {
-      // ARIMA and ensemble require backend API support
-      // Fall back to holt_winters for now
-      console.warn(`[DemandPlanningService] Algorithm ${algorithm} requires backend API, falling back to holt_winters`);
-      forecastValues = await this.generateExponentialSmoothingForecast(
-        productId,
-        history,
-        'holt_winters'
-      );
+      forecastValues = await this.generateProphetForecast(productId, history, parameters);
     } else {
+      // Use shared forecastAlgorithmService for exponential smoothing algorithms
       forecastValues = await this.generateExponentialSmoothingForecast(
         productId,
         history,
-        algorithm
+        algorithm,
+        parameters
       );
     }
 
@@ -1211,18 +1218,20 @@ export class DemandPlanningService {
   }
 
   /**
-   * Generate complete demand plan (updated to support multi-algorithm)
+   * Generate complete demand plan (updated to support multi-algorithm and parameters)
    * @param productId Product ID
    * @param productName Product name (for display)
    * @param algorithm Forecast algorithm to use
    * @param existingForecast Existing ProductDemandForecast (if any, for multi-algorithm support)
+   * @param parameters Optional algorithm parameters (FR-010.4)
    * @returns ProductDemandForecast object
    */
   async generateDemandPlan(
     productId: string,
     productName: string,
     algorithm: ForecastAlgorithm,
-    existingForecast?: ProductDemandForecast
+    existingForecast?: ProductDemandForecast,
+    parameters?: Record<string, any>
   ): Promise<ProductDemandForecast> {
     if (!productId) {
       throw new Error('A product must be selected');
@@ -1309,11 +1318,12 @@ export class DemandPlanningService {
       existingForecast
     );
 
-    // Generate algorithm forecast
+    // Generate algorithm forecast with parameters (FR-010.4)
     const algorithmForecast = await this.generateAlgorithmForecast(
       productId,
       algorithm,
-      history
+      history,
+      parameters
     );
 
     // Update product forecast with new algorithm forecast
