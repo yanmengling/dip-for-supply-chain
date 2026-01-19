@@ -30,7 +30,7 @@ import { useHeaderHeight } from './hooks/useHeaderHeight';
 import { useConversation } from './hooks/useConversation';
 import ConfigBackendLayout from './components/config-backend/ConfigBackendLayout';
 import { populateEntityConfigs } from './utils/entityConfigService';
-import { recreateAllMockDataRecords } from './utils/entityConfigService';
+import { initializeEntityData } from './utils/entityConfigService';
 import { DataModeProvider } from './contexts/DataModeContext';
 
 // Navigation configuration
@@ -69,8 +69,8 @@ const SupplyChainAppContent = () => {
 
   // Initialize entity configurations on app mount
   useEffect(() => {
-    // Recreate mock data records first, then populate entity configs
-    recreateAllMockDataRecords();
+    // Initialize entity data first, then populate entity configs
+    initializeEntityData();
     const init = async () => {
       await populateEntityConfigs();
     };

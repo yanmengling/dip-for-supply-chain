@@ -5,6 +5,25 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiConfigService } from '../../../services/apiConfigService';
+
+/**
+ * Get DAG ID from configuration service with fallback
+ */
+function getInventoryWorkflowDagId(): string {
+    try {
+        const workflow = apiConfigService.getWorkflowByDagId('602382917091510487');
+        if (workflow && workflow.enabled) {
+            console.log('[InventoryAIAnalysisPanel] Using configured DAG ID:', workflow.dagId);
+            return workflow.dagId;
+        }
+    } catch (error) {
+        console.warn('[InventoryAIAnalysisPanel] Failed to get DAG ID from config:', error);
+    }
+    // Fallback to hardcoded value
+    console.log('[InventoryAIAnalysisPanel] Using hardcoded DAG ID: 602382917091510487');
+    return '602382917091510487';
+}
 
 // Inventory AI Analysis Panel - 库存优化专用AI分析面板
 
@@ -19,7 +38,7 @@ const InventoryAIAnalysisPanel = () => {
     const [fetchTrigger, setFetchTrigger] = useState(0); // Used to trigger refetch
 
     // 库存优化专用的 DAG ID
-    const DAG_ID = '602382917091510487';
+    const DAG_ID = getInventoryWorkflowDagId();
 
     useEffect(() => {
         if (mode === 'api') {

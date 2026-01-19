@@ -134,13 +134,8 @@ export const getAlternativeSuppliersWithMode = async (
   mode: 'mock' | 'api',
   limit: number = 5
 ): Promise<AlternativeSupplier[]> => {
-  if (mode === 'api') {
-    // Brain Mode: Use HD BOM data
-    return await getHDAlternativeSuppliers(materialCode, limit);
-  } else {
-    // Mock Mode: Use existing logic
-    return await getAlternativeSuppliers(materialCode, limit);
-  }
+  // Always use Brain Mode (HD Data), ignoring mode parameter
+  return await getHDAlternativeSuppliers(materialCode, limit);
 };
 
 /**
@@ -495,9 +490,8 @@ export const getSupplierComparisonWithMode = async (
   mode: 'mock' | 'api',
   alternativeSupplierIds?: string[]
 ): Promise<SupplierComparison | null> => {
-  if (mode === 'mock') {
-    return getSupplierComparison(materialCode, currentSupplierId, alternativeSupplierIds);
-  }
+  // Always use API Mode (Brain Mode), ignoring mock parameter
+  // if (mode === 'mock') { ... }
 
   // API Mode (Brain Mode)
   try {

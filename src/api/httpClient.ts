@@ -74,12 +74,15 @@ class HttpClient {
 
     // 添加认证头（根据当前环境获取对应的 token）
     if (!config?.skipAuth) {
-      const environment = getCurrentEnvironment();
-      const envConfig = getEnvironmentConfig(environment);
-      headers['Authorization'] = `Bearer ${envConfig.token}`;
+      const token = getAuthToken(); // Use dynamic token getter
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
 
-      // Always log the environment and token prefix for debugging
-      console.log(`[HTTP Client] Using environment: ${envConfig.name}, Token prefix: ${envConfig.token?.substring(0, 20)}...`);
+        // Always log the token prefix for debugging
+        const environment = getCurrentEnvironment();
+        const envConfig = getEnvironmentConfig(environment);
+        console.log(`[HTTP Client] Using environment: ${envConfig.name}, Token prefix: ${token.substring(0, 20)}...`);
+      }
     }
 
     // 添加自定义头

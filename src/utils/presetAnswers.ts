@@ -25,7 +25,7 @@ export const getPresetAnswer = (
   questionId: string,
   context?: QueryContext
 ): string | { text: string; richContent?: CopilotRichContent } => {
-  // Import mockData dynamically to avoid circular dependencies
+  // Import entity data dynamically to avoid circular dependencies
   // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
   // @ts-ignore - require is available at runtime
   const { productsData, materialsData, suppliersData, ordersData } = require('./entityConfigService') as {

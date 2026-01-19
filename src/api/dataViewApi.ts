@@ -6,6 +6,8 @@
 
 import { httpClient } from './httpClient';
 import { getServiceConfig, getCurrentEnvironment } from '../config/apiConfig';
+import { apiConfigService } from '../services/apiConfigService';
+import type { DataViewConfig } from '../types/apiConfig';
 
 // ============================================================================
 // Type Definitions
@@ -58,6 +60,51 @@ export const DATA_VIEW_MAPPING = {
   // 订单
   ORDER: '2000819229587759106',
 } as const;
+
+/**
+ * Entity type to data view mapping
+ * Maps entity types to their corresponding keys in DATA_VIEW_MAPPING
+ */
+const ENTITY_TYPE_MAPPING: Record<string, keyof typeof DATA_VIEW_MAPPING> = {
+  'supplier': 'SUPPLIER',
+  'material': 'MATERIAL',
+  'product': 'PRODUCT',
+  'bom': 'BOM_EVENT',
+  'inventory': 'INVENTORY_EVENT',
+  'order': 'ORDER',
+  'customer': 'CUSTOMER',
+  'warehouse': 'WAREHOUSE',
+  'factory': 'FACTORY'
+};
+
+/**
+ * Get data view ID by entity type
+ * First tries to get from configuration service, falls back to hardcoded mapping
+ * @param entityType - Entity type (e.g., 'supplier', 'material')
+ * @returns Data view ID or null if not found
+ */
+export function getDataViewIdByEntityType(entityType: string): string | null {
+  // Try to get from configuration service first
+  try {
+    const config = apiConfigService.getDataViewByEntityType(entityType);
+    if (config && config.enabled) {
+      console.log(`[DataViewApi] Using configured view ID for ${entityType}: ${config.viewId}`);
+      return config.viewId;
+    }
+  } catch (error) {
+    console.warn(`[DataViewApi] Failed to get view ID from config for ${entityType}:`, error);
+  }
+
+  // Fallback to hardcoded mapping
+  const mappingKey = ENTITY_TYPE_MAPPING[entityType];
+  if (mappingKey && DATA_VIEW_MAPPING[mappingKey]) {
+    console.log(`[DataViewApi] Using hardcoded view ID for ${entityType}: ${DATA_VIEW_MAPPING[mappingKey]}`);
+    return DATA_VIEW_MAPPING[mappingKey];
+  }
+
+  console.warn(`[DataViewApi] No view ID found for entity type: ${entityType}`);
+  return null;
+}
 
 /**
  * Query options for data views

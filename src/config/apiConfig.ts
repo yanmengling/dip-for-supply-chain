@@ -57,9 +57,46 @@ export interface GlobalApiConfig {
 }
 
 // ============================================================================
-// 🔑 全局 Token 配置 - 只需修改这一处即可应用到所有 API
 // ============================================================================
-const GLOBAL_API_TOKEN = 'ory_at_0kLE7s2M3WNO-BB3H3aFZICSyth6fHFVC9RvJ_mfd4k.W_IaAez2Jqkat_JaZCMYiFvl4gq2uRi7F9_-QXwoaGQ';
+// 🔑 全局 Token 配置
+// ============================================================================
+
+// 默认 Token（作为 fallback）
+const DEFAULT_API_TOKEN = 'ory_at_oF4wm7MPv3HJ49Qb6j-Ax4Zy2zb7z66mpzDUltXgF70.1wWoxSqdzqzhsXVU2MA7x6tMuy_wklZZe37Vjioho1s';
+
+// 动态获取 Token：优先从 globalSettingsService 读取，否则使用默认值
+function getGlobalApiToken(): string {
+  try {
+    // 延迟导入以避免循环依赖
+    const { globalSettingsService } = require('../services/globalSettingsService');
+    const token = globalSettingsService.getApiToken();
+    return token || DEFAULT_API_TOKEN;
+  } catch (error) {
+    console.warn('[ApiConfig] Failed to load token from settings, using default:', error);
+    return DEFAULT_API_TOKEN;
+  }
+}
+
+
+
+// 动态获取知识网络 ID
+function getGlobalKnowledgeNetworkId(defaultId?: string): string {
+  try {
+    const { globalSettingsService } = require('../services/globalSettingsService');
+    const knId = globalSettingsService.getKnowledgeNetworkId();
+    // If service returns default, but we have a specific env default, prioritize env default if service's is just generic default?
+    // Actually service handles defaults. But we prefer what's in settings.
+    return knId || defaultId || DEFAULT_KNOWLEDGE_NETWORK_ID;
+  } catch (error) {
+    console.warn('[ApiConfig] Failed to load KN ID from settings:', error);
+    return defaultId || DEFAULT_KNOWLEDGE_NETWORK_ID;
+  }
+}
+
+// 全局 Token（动态获取）
+const GLOBAL_API_TOKEN = getGlobalApiToken();
+
+
 
 // ============================================================================
 // 环境变量读取
@@ -132,10 +169,9 @@ function getEnvConfig(): Partial<{
 
 /**
  * API 环境类型
- * - huida-legacy: 通用数据模式，对接原有整套 API
  * - huida-new: 惠达供应链大脑模式，对接新的惠达数据 API
  */
-export type ApiEnvironment = 'huida-legacy' | 'huida-new';
+export type ApiEnvironment = 'huida-new';
 
 /** 环境配置接口 */
 export interface EnvironmentConfig {
@@ -159,27 +195,11 @@ export interface EnvironmentConfig {
 /**
  * 环境配置集合
  * 
- * 两种数据模式：
- * - huida-legacy (Mock 数据): 对接原有整套 API，包含完整的业务数据
+ * 数据模式：
  * - huida-new (惠达供应链大脑): 对接新的惠达数据 API，提供优化后的数据服务
  */
 export const ENVIRONMENTS: Record<ApiEnvironment, EnvironmentConfig> = {
-  'huida-legacy': {
-    name: '通用数据',
-    description: '对接原有整套 API',
-    baseUrl: '',
-    token: GLOBAL_API_TOKEN,
-    services: {
-      // Proxy agent via generic proxy service to handle path rewrites
-      agent: '/proxy-agent-service/agent-app/v1',
-      // Proxy metric model to cloud (local 500 error)
-      metricModel: '/proxy-metric/v1',
-      // Proxy via /proxy-manager (Ontology Manager) which supports legacy IDs too. Old /api/ontology is 404.
-      ontology: '/proxy-manager/v1',
-      // Forecast API
-      forecast: '/proxy-forecast/v1',
-    }
-  },
+
 
   'huida-new': {
     name: '惠达供应链大脑',
@@ -200,7 +220,7 @@ export const ENVIRONMENTS: Record<ApiEnvironment, EnvironmentConfig> = {
 };
 
 /** 默认环境 */
-export const DEFAULT_ENVIRONMENT: ApiEnvironment = 'huida-legacy';
+export const DEFAULT_ENVIRONMENT: ApiEnvironment = 'huida-new';
 
 /** localStorage 存储键 */
 const ENVIRONMENT_STORAGE_KEY = 'api-environment';
@@ -211,7 +231,7 @@ const ENVIRONMENT_STORAGE_KEY = 'api-environment';
 export function getCurrentEnvironment(): ApiEnvironment {
   try {
     const stored = localStorage.getItem(ENVIRONMENT_STORAGE_KEY);
-    return (stored === 'huida-legacy' || stored === 'huida-new')
+    return (stored === 'huida-new')
       ? stored
       : DEFAULT_ENVIRONMENT;
   } catch (error) {
@@ -228,13 +248,8 @@ export function setCurrentEnvironment(env: ApiEnvironment): void {
     localStorage.setItem(ENVIRONMENT_STORAGE_KEY, env);
 
     // Auto-switch Knowledge Network ID based on environment
-    if (env === 'huida-new') {
-      // Brain Mode: Use specific ID
-      setKnowledgeNetworkId('d56v1l69olk4bpa66uv0');
-    } else {
-      // Mock Mode: Use default ID
-      setKnowledgeNetworkId(DEFAULT_KNOWLEDGE_NETWORK_ID);
-    }
+    // Brain Mode: Use specific ID
+    setKnowledgeNetworkId('d56v1l69olk4bpa66uv0');
 
     // CRITICAL: Update currentConfig to match the new environment
     const envConfig = ENVIRONMENTS[env];
@@ -339,18 +354,11 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
 // ============================================================================
 
 /** 默认知识网络ID */
-const DEFAULT_KNOWLEDGE_NETWORK_ID = 'd4rt3135s3q8va76m8fg';
+const DEFAULT_KNOWLEDGE_NETWORK_ID = 'd56v1l69olk4bpa66uv0';
 
 /** 知识网络预设配置 */
 export const knowledgeNetworkPresets: KnowledgeNetworkPreset[] = [
-  {
-    id: 'd4rt3135s3q8va76m8fg',
-    name: '默认供应链网络',
-    description: '标准供应链场景环境',
-    isDefault: true,
-    category: 'production',
-    tags: ['default', 'supply-chain'],
-  },
+
   {
     id: 'd56v1l69olk4bpa66uv0',
     name: '惠达供应链大脑网络',
@@ -371,9 +379,10 @@ const initialEnv = getCurrentEnvironment();
 const initialEnvConfig = ENVIRONMENTS[initialEnv];
 
 /** 当前知识网络ID（可运行时修改） */
-let currentKnowledgeNetworkId: string =
-  envConfig.knowledgeNetworkId ||
+const envDefaultKnId = envConfig.knowledgeNetworkId ||
   (initialEnv === 'huida-new' ? 'd56v1l69olk4bpa66uv0' : DEFAULT_KNOWLEDGE_NETWORK_ID);
+
+let currentKnowledgeNetworkId: string = getGlobalKnowledgeNetworkId(envDefaultKnId);
 
 // ============================================================================
 // 配置管理器
@@ -553,6 +562,14 @@ export function getKnowledgeNetworkId(): string {
  */
 export function setKnowledgeNetworkId(id: string): void {
   currentKnowledgeNetworkId = id;
+
+  // Sync to global settings persistence
+  try {
+    const { globalSettingsService } = require('../services/globalSettingsService');
+    globalSettingsService.updateKnowledgeNetworkId(id);
+  } catch (error) {
+    console.warn('[ApiConfig] Failed to persist KN ID to settings:', error);
+  }
 
   if (currentConfig.debug) {
     console.log('[API Config] Knowledge Network ID updated:', id);

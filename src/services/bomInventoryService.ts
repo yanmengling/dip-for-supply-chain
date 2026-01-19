@@ -10,6 +10,7 @@
  */
 
 import { httpClient } from '../api/httpClient';
+import { getDataViewIdByEntityType } from '../api/dataViewApi';
 
 // ============================================================================
 // 类型定义
@@ -18,12 +19,12 @@ import { httpClient } from '../api/httpClient';
 /** 目标产品列表 */
 export const TARGET_PRODUCTS = ['T01-000055', 'T01-000167', 'T01-000173'];
 
-/** API View IDs */
+/** API View IDs - Now using configuration service with fallback */
 const VIEW_IDS = {
-    products: '2004376134620897282',
-    bom: '2004376134629285892',
-    inventory: '2004376134625091585',
-    materials: '2004376134629285891',  // 物料信息（含单价）
+    get products() { return getDataViewIdByEntityType('product') || '2004376134620897282'; },
+    get bom() { return getDataViewIdByEntityType('bom') || '2004376134629285892'; },
+    get inventory() { return getDataViewIdByEntityType('inventory') || '2004376134625091585'; },
+    get materials() { return getDataViewIdByEntityType('material') || '2004376134629285891'; },
 };
 
 /** 原始产品数据 */
