@@ -160,7 +160,8 @@ export function GanttGridChart({ tasks, onTaskHover, onTaskLeave }: GanttGridCha
         ))}
 
         {/* Task rows */}
-        {sortedTasks.flatMap((task, rowIndex) => {
+        {sortedTasks.flatMap((taskItem, rowIndex) => {
+          const task = taskItem as GanttTask | MaterialReadyGanttTask;
           const position = taskPositions[rowIndex];
           if (!position) {
             return [];
@@ -243,3 +244,4 @@ export function GanttGridChart({ tasks, onTaskHover, onTaskLeave }: GanttGridCha
     </div>
   );
 }
+

@@ -10,7 +10,7 @@
  */
 
 import { useState, useMemo, useEffect } from 'react';
-import { Package } from 'lucide-react';
+import { Package, AlertTriangle } from 'lucide-react';
 import type { BOMItem, GanttTask, ProductionPlanMode, MaterialReadyGanttTask, MaterialReadyCalculationResult } from '../../types/ontology';
 import { fetchProductList, buildPlanInfo, fetchMaterialReadyV2Data } from '../../services/mpsDataService';
 import { calculateMaterialReadyModeV2 } from '../../utils/materialReadyCalculatorV2';

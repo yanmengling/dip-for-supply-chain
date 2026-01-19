@@ -357,140 +357,7 @@ export function calculateMaterialReadyMode(
  * 2. 缺货物料并行采购，等待时间 = max(所有缺货物料交付周期)
  * 3. 物料到齐后继续生产
  */
-export function calculateDeliveryPriorityMode(
-  bomItems: BOMItem[],
-  plannedQuantity: number,
-  inventoryMap: Map<string, number>,
-  deliveryCycleMap: Map<string, number>,
-  capacityPerDay: number = DEFAULT_CAPACITY_PER_DAY,
-  startDate: Date = new Date()
-): GanttCalculationResult {
-  const risks: RiskAlert[] = [];
-  const phases: ProductionPhase[] = [];
 
-  console.log(`[交付优先模式] ========== 开始计算 ==========`);
-
-  // Step 1: Analyze material requirements
-  const materialAnalysis = analyzeMaterialRequirements(
-    bomItems,
-    plannedQuantity,
-    inventoryMap,
-    deliveryCycleMap,
-    startDate
-  );
-
-  // Step 2: 计算现有库存能支持生产的数量（取所有物料的最小支持数）
-  const canProduceImmediately = materialAnalysis.length > 0
-    ? Math.min(plannedQuantity, ...materialAnalysis.map(m => m.canSupportQuantity))
-    : 0;
-
-  console.log(`[交付优先模式] 计划数量：${plannedQuantity}，现有库存可支持：${canProduceImmediately}`);
-
-  // Step 3: 构建生产阶段（修复：物料并行采购）
-  let currentDate = new Date(startDate);
-
-  if (canProduceImmediately > 0) {
-    // Phase 1: 立即生产
-    const phase1Duration = Math.ceil(canProduceImmediately / capacityPerDay);
-    const phase1End = new Date(currentDate);
-    phase1End.setDate(phase1End.getDate() + phase1Duration);
-
-    phases.push({
-      phaseId: 'phase-1',
-      phaseName: '立即生产',
-      phaseType: 'production',
-      startDate: new Date(currentDate),
-      endDate: phase1End,
-      quantity: canProduceImmediately,
-    });
-
-    console.log(`[交付优先模式] Phase 1: 立即生产 ${canProduceImmediately} 个，耗时 ${phase1Duration} 天`);
-
-    currentDate = phase1End;
-  }
-
-  const remainingQuantity = plannedQuantity - canProduceImmediately;
-
-  if (remainingQuantity > 0) {
-    // Phase 2: 等待物料（并行采购，取最长交付周期）
-    const shortageMaterials = materialAnalysis.filter(m => m.shortage > 0);
-
-    if (shortageMaterials.length > 0) {
-      const maxDeliveryCycle = Math.max(...shortageMaterials.map(m => m.deliveryCycle));
-      const waitEndDate = new Date(currentDate);
-      waitEndDate.setDate(waitEndDate.getDate() + maxDeliveryCycle);
-
-      phases.push({
-        phaseId: 'phase-2',
-        phaseName: '等待物料到货',
-        phaseType: 'waiting',
-        startDate: new Date(currentDate),
-        endDate: waitEndDate,
-        reason: `等待${shortageMaterials.length}种物料到货（并行采购）`,
-        waitingMaterials: shortageMaterials.map(m => m.materialName),
-      });
-
-      console.log(`[交付优先模式] Phase 2: 等待物料 ${maxDeliveryCycle} 天（并行采购${shortageMaterials.length}种物料）`);
-
-      currentDate = waitEndDate;
-
-      for (const material of shortageMaterials) {
-        risks.push({
-          type: 'material_shortage',
-          level: 'warning',
-          message: `物料 ${material.materialName} 短缺，需等待 ${material.deliveryCycle} 天（并行采购）`,
-          itemId: material.materialCode,
-          itemName: material.materialName,
-          aiSuggestion: `建议提前采购或寻找替代供应商`,
-        });
-      }
-    }
-
-    // Phase 3: 继续生产
-    const phase3Duration = Math.ceil(remainingQuantity / capacityPerDay);
-    const phase3End = new Date(currentDate);
-    phase3End.setDate(phase3End.getDate() + phase3Duration);
-
-    phases.push({
-      phaseId: 'phase-3',
-      phaseName: '继续生产',
-      phaseType: 'production',
-      startDate: new Date(currentDate),
-      endDate: phase3End,
-      quantity: remainingQuantity,
-    });
-
-    console.log(`[交付优先模式] Phase 3: 继续生产 ${remainingQuantity} 个，耗时 ${phase3Duration} 天`);
-
-    currentDate = phase3End;
-  }
-
-  // Step 4: 构建任务
-  const completionDate = phases.length > 0
-    ? new Date(phases[phases.length - 1].endDate)
-    : startDate;
-
-  const totalCycle = Math.ceil((completionDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-  console.log(`[交付优先模式] 总周期：${totalCycle}天`);
-  console.log(`[交付优先模式] ========== 计算完成 ==========`);
-
-  const tasks = buildTasksWithPhases(
-    bomItems,
-    phases,
-    materialAnalysis,
-    completionDate,
-    0
-  );
-
-  return {
-    totalCycle,
-    tasks,
-    risks,
-    materialAnalysis,
-    completionDate,
-  };
-}
 
 /**
  * Main calculation function - routes to appropriate mode calculator
@@ -505,7 +372,7 @@ export function calculateProductionPlan(
   startDate: Date = new Date()
 ): GanttCalculationResult {
   switch (mode) {
-    case 'material-ready':
+    case 'material-ready-v2':
       return calculateMaterialReadyMode(
         bomItems,
         plannedQuantity,
@@ -514,15 +381,7 @@ export function calculateProductionPlan(
         capacityPerDay,
         startDate
       );
-    case 'delivery-priority':
-      return calculateDeliveryPriorityMode(
-        bomItems,
-        plannedQuantity,
-        inventoryMap,
-        deliveryCycleMap,
-        capacityPerDay,
-        startDate
-      );
+
     case 'default':
     default:
       return calculateDefaultMode(bomItems, plannedQuantity, startDate);
@@ -710,76 +569,7 @@ function buildTasksWithMaterialReady(
 /**
  * Build tasks for delivery-priority mode with phases
  */
-function buildTasksWithPhases(
-  bomItems: BOMItem[],
-  phases: ProductionPhase[],
-  materialAnalysis: MaterialRequirementAnalysis[],
-  productionEndDate: Date,
-  level: number,
-  parentId?: string
-): GanttTaskExtended[] {
-  const tasks: GanttTaskExtended[] = [];
-  const materialMap = new Map(materialAnalysis.map(m => [m.materialCode, m]));
 
-  for (const item of bomItems) {
-    const hasChildren = item.children && item.children.length > 0;
-    const analysis = materialMap.get(item.child_code);
-
-    let processingTime: number;
-    switch (item.type) {
-      case 'product':
-        processingTime = item.processingTime || DEFAULT_ASSEMBLY_TIME;
-        break;
-      case 'module':
-        processingTime = item.processingTime || DEFAULT_COMPONENT_PROCESSING_TIME + 1;
-        break;
-      case 'component':
-        processingTime = item.processingTime || DEFAULT_COMPONENT_PROCESSING_TIME;
-        break;
-      case 'material':
-      default:
-        processingTime = item.processingTime || DEFAULT_MATERIAL_PROCESSING_TIME;
-    }
-
-    // Backward scheduling from production end
-    const taskEndDate = new Date(productionEndDate);
-    const taskStartDate = new Date(taskEndDate);
-    taskStartDate.setDate(taskStartDate.getDate() - processingTime);
-
-    const task: GanttTaskExtended = {
-      id: `${item.child_code}-${level}`,
-      name: item.child_name,
-      type: item.type || 'material',
-      level,
-      startDate: taskStartDate,
-      endDate: taskEndDate,
-      duration: processingTime,
-      status: analysis && analysis.shortage > 0 ? 'warning' : 'normal',
-      mode: 'delivery-priority',
-      phases: level === 0 ? phases : undefined, // Only product level has phases
-      isExpanded: level === 0,
-      canExpand: hasChildren,
-      parentId,
-      bomItem: item,
-      materialAnalysis: analysis ? [analysis] : undefined,
-    };
-
-    if (hasChildren) {
-      task.children = buildTasksWithPhases(
-        item.children!,
-        phases,
-        materialAnalysis,
-        taskStartDate,
-        level + 1,
-        task.id
-      );
-    }
-
-    tasks.push(task);
-  }
-
-  return tasks;
-}
 
 /**
  * Build inventory map from Inventory array

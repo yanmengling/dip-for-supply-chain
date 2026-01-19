@@ -248,7 +248,7 @@ export function calculateDuration(plan: ProductionPlan): number {
  */
 export function calculateCompletionRate(plan: ProductionPlan): number {
   if (plan.quantity === 0) return 0;
-  return (plan.ordered / plan.quantity) * 100;
+  return ((plan.ordered ?? 0) / plan.quantity) * 100;
 }
 
 /**
@@ -258,7 +258,7 @@ export function calculateCompletionRate(plan: ProductionPlan): number {
  * @returns 高优先级计划列表
  */
 export function getHighPriorityPlans(plans: ProductionPlan[]): ProductionPlan[] {
-  return plans.filter(plan => plan.priority <= 3);
+  return plans.filter(plan => (plan.priority ?? 999) <= 3);
 }
 
 /**
@@ -290,7 +290,7 @@ export function calculateTotalOrdered(
 ): number {
   return plans
     .filter(plan => plan.code === productCode)
-    .reduce((sum, plan) => sum + plan.ordered, 0);
+    .reduce((sum, plan) => sum + (plan.ordered ?? 0), 0);
 }
 
 /**
@@ -311,12 +311,12 @@ export function calculatePlanStats(plans: ProductionPlan[]): {
 } {
   const statusGroups = groupByStatus(plans);
   const totalPlannedQuantity = plans.reduce((sum, p) => sum + p.quantity, 0);
-  const totalOrderedQuantity = plans.reduce((sum, p) => sum + p.ordered, 0);
+  const totalOrderedQuantity = plans.reduce((sum, p) => sum + (p.ordered ?? 0), 0);
   const overallCompletionRate = totalPlannedQuantity > 0
     ? (totalOrderedQuantity / totalPlannedQuantity) * 100
     : 0;
   const averagePriority = plans.length > 0
-    ? plans.reduce((sum, p) => sum + p.priority, 0) / plans.length
+    ? plans.reduce((sum, p) => sum + (p.priority ?? 0), 0) / plans.length
     : 0;
 
   return {
