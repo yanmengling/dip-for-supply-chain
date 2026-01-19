@@ -240,8 +240,15 @@ def main() -> None:
     if packaged_charts[0].resolve() != target_chart.resolve():
         shutil.move(str(packaged_charts[0]), target_chart)
 
+    print(f"All components prepared. Zipping into DIP package...")
     dip_output = task_dir / "package" / f"{name}-{tag}_{args.arch}.dip"
     build_dip_package(task_dir / "package" / args.arch, dip_output)
+    
+    print(f"Successfully created DIP package at: {dip_output.absolute()}")
+    # Also copy to a more predictable location for CI
+    final_output = project_root / f"{name}-{tag}_{args.arch}.dip"
+    shutil.copy2(dip_output, final_output)
+    print(f"Copied package to root: {final_output.absolute()}")
 
 
 if __name__ == "__main__":
