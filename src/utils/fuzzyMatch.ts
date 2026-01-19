@@ -1,7 +1,7 @@
 /**
  * Fuzzy Matching Utility for Material Names
  * 
- * Matches material name variations in user queries to actual material names in mockData.
+ * Matches material name variations in user queries to actual material names in entity data.
  */
 
 import type { Material } from '../types/ontology';
@@ -25,7 +25,7 @@ export const fuzzyMatchMaterialName = (
 ): Material[] => {
   const queryLower = query.trim().toLowerCase();
   const matches: Material[] = [];
-  
+
   // Step 1: Check direct matches (case-insensitive substring)
   materials.forEach(material => {
     const materialNameLower = material.materialName.toLowerCase();
@@ -35,7 +35,7 @@ export const fuzzyMatchMaterialName = (
       }
     }
   });
-  
+
   // Step 2: Check alias mappings
   Object.entries(materialAliases).forEach(([alias, names]) => {
     const aliasLower = alias.toLowerCase();
@@ -47,7 +47,7 @@ export const fuzzyMatchMaterialName = (
       });
     }
   });
-  
+
   return matches;
 };
 

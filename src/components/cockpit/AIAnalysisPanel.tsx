@@ -5,8 +5,27 @@ import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
 import { saveAs } from 'file-saver';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { apiConfigService } from '../../services/apiConfigService';
 
 // AI Analysis Panel - 显示来自自动化工作流的AI分析报告
+
+/**
+ * Get DAG ID from configuration service with fallback
+ */
+function getWorkflowDagId(): string {
+    try {
+        const workflow = apiConfigService.getWorkflowByDagId('600729428670073214');
+        if (workflow && workflow.enabled) {
+            console.log('[AIAnalysisPanel] Using configured DAG ID:', workflow.dagId);
+            return workflow.dagId;
+        }
+    } catch (error) {
+        console.warn('[AIAnalysisPanel] Failed to get DAG ID from config:', error);
+    }
+    // Fallback to hardcoded value
+    console.log('[AIAnalysisPanel] Using hardcoded DAG ID: 600729428670073214');
+    return '600729428670073214';
+}
 
 
 const AIAnalysisPanel = () => {
@@ -33,7 +52,7 @@ const AIAnalysisPanel = () => {
                     const headers = await import('../../config/apiConfig').then(m => m.getAuthHeaders());
 
                     // 2. Fetch latest successful execution
-                    const DAG_ID = '600729428670073214';
+                    const DAG_ID = getWorkflowDagId();
                     const listUrl = `/proxy-agent-service/automation/v2/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=20`;
                     console.log('[AIAnalysisPanel] Fetching DAG results from:', listUrl);
 
@@ -206,7 +225,7 @@ const AIAnalysisPanel = () => {
     }, [mode, fetchTrigger]);
 
     // Trigger workflow and refresh
-    const DAG_ID = '600729428670073214';
+    const DAG_ID = getWorkflowDagId();
 
     const regenerateAnalysis = useCallback(async () => {
         try {

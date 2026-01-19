@@ -2,7 +2,7 @@
  * Entity Configuration Service
  * 
  * Service layer for CRUD operations on entities and entity configurations.
- * All operations read from and write to mockData.ts.
+ * All operations read from and write to in-memory storage.
  */
 
 import type {
@@ -49,7 +49,7 @@ export let supplierEvaluationsData: any[] = []; // Deprecated but kept for compa
 export let supplier360ScorecardsData: Supplier360Scorecard[] = [];
 export let mainMaterialSuppliersData: MainMaterialSupplier[] = [];
 
-// Static data for entities not yet in ontology (Mock replacement)
+// Static data for entities not yet in ontology
 export let factoriesData: any[] = [
   { factoryId: 'FAC-001', factoryCode: 'F001', factoryName: '深圳生产基地', capacity: 10000, location: 'Shenzhen', productList: ['PROD-T20', 'PROD-T40'], materialList: ['MAT-001'], warehouseList: ['WH-001'] }
 ];
@@ -68,7 +68,7 @@ export let actionHistories: ActionHistory[] = [];
 // Configuration storage
 export const entityConfigs = new Map<string, EntityConfig>();
 
-// Static user data (formerly in mockData)
+// Static user data
 export const usersData: Record<number, User> = {
   1: { userId: 1, name: '管理员', role: 'admin', email: 'admin@huida.com', phone: '13888888888', avatar: '👨‍💼', department: 'IT', status: 'active' },
   2: { userId: 2, name: '采购专员', role: 'procurement', email: 'buyer@huida.com', phone: '13888888889', avatar: '👩‍💼', department: '采购部', status: 'active' }
@@ -468,7 +468,7 @@ export const getRoleById = (roleId: string): Role | null => {
 /**
  * Populate entity configurations from mock data
  * This function should be called after recreateAllMockDataRecords() to ensure
- * data consistency between frontend mockData and entityConfigs Map.
+ * data consistency between in-memory data and entityConfigs Map.
  */
 export const populateEntityConfigs = async (): Promise<void> => {
   // Clear existing entityConfigs to avoid stale data
@@ -1421,7 +1421,7 @@ export const populateEntityConfigs = async (): Promise<void> => {
       creditRating: customer.creditRating || 'BBB',
       orderHistory: customer.orderHistory || customerOrders.map(o => o.orderId),
       totalOrderCount: customerOrders.length,
-      totalOrderAmount: customerOrders.reduce((sum, o) => sum + o.quantity * 5, 0), // Mock calculation
+      totalOrderAmount: customerOrders.reduce((sum, o) => sum + o.quantity * 5, 0), // Estimated calculation
     };
 
     const relations: EntityRelation[] = [
@@ -1451,11 +1451,11 @@ export const populateEntityConfigs = async (): Promise<void> => {
 };
 
 /**
- * Recreate all mock data records
+ * Initialize entity data
  * Triggers async population of entity configs from API/CSV
  */
-export const recreateAllMockDataRecords = (): void => {
+export const initializeEntityData = (): void => {
   populateEntityConfigs().catch(error => {
-    console.error('Failed to recreate mock data records:', error);
+    console.error('Failed to initialize entity data:', error);
   });
 };

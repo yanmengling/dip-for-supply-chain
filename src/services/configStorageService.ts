@@ -1,0 +1,555 @@
+/**
+ * Configuration Storage Service
+ * 
+ * Handles persistence of API configurations using localStorage.
+ * Provides load, save, import, export, and validation functionality.
+ */
+
+import {
+    ApiConfigType,
+    type ApiConfigCollection,
+    type KnowledgeNetworkConfig,
+    type DataViewConfig,
+    type MetricModelConfig,
+    type AgentConfig,
+    type WorkflowConfig,
+    type ConfigImportExportOptions,
+    type ConfigValidationError
+} from '../types/apiConfig';
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+const STORAGE_KEY = 'supply_chain_api_config_collection';
+const CONFIG_VERSION = '1.0.1';
+
+// ============================================================================
+// Configuration Storage Service
+// ============================================================================
+
+class ConfigStorageService {
+    private readonly storageKey = STORAGE_KEY;
+    private readonly version = CONFIG_VERSION;
+
+    /**
+     * Load configuration from localStorage
+     */
+    loadConfig(): ApiConfigCollection {
+        try {
+            const stored = localStorage.getItem(this.storageKey);
+
+            if (!stored) {
+                console.log('[ConfigStorage] No stored configuration found, using defaults');
+                return this.getDefaultConfig();
+            }
+
+            const parsed = JSON.parse(stored) as ApiConfigCollection;
+
+            // Validate version compatibility & Migrate
+            if (parsed.version !== this.version) {
+                console.warn(`[ConfigStorage] Version mismatch: stored=${parsed.version}, current=${this.version}`);
+
+                // MIGRATION 1.0.1: Remove legacy 'Default Supply Chain Network'
+                if (parsed.knowledgeNetworks) {
+                    const beforeCount = parsed.knowledgeNetworks.length;
+                    parsed.knowledgeNetworks = parsed.knowledgeNetworks.filter(kn =>
+                        kn.name !== '默认供应链网络' &&
+                        kn.id !== 'kn_default'
+                    );
+                    const afterCount = parsed.knowledgeNetworks.length;
+
+                    if (beforeCount > afterCount) {
+                        console.log('[ConfigStorage] Migration: Removed legacy knowledge networks');
+                    }
+                }
+
+                // Update version and save immediately
+                parsed.version = this.version;
+                this.saveConfig(parsed);
+            }
+
+            console.log('[ConfigStorage] Loaded configuration:', {
+                knowledgeNetworks: parsed.knowledgeNetworks.length,
+                dataViews: parsed.dataViews.length,
+                metricModels: parsed.metricModels.length,
+                agents: parsed.agents.length,
+                workflows: parsed.workflows.length
+            });
+
+            return parsed;
+        } catch (error) {
+            console.error('[ConfigStorage] Failed to load configuration:', error);
+            return this.getDefaultConfig();
+        }
+    }
+
+    /**
+     * Save configuration to localStorage
+     */
+    saveConfig(config: ApiConfigCollection): void {
+        try {
+            config.version = this.version;
+            config.lastUpdated = Date.now();
+
+            const serialized = JSON.stringify(config);
+            localStorage.setItem(this.storageKey, serialized);
+
+            console.log('[ConfigStorage] Configuration saved successfully');
+        } catch (error) {
+            console.error('[ConfigStorage] Failed to save configuration:', error);
+            throw new Error('Failed to save configuration to localStorage');
+        }
+    }
+
+    /**
+     * Export configuration as JSON string
+     */
+    exportConfig(options?: ConfigImportExportOptions): string {
+        const config = this.loadConfig();
+        let exportData: Partial<ApiConfigCollection> = { ...config };
+
+        // Apply filters
+        if (options?.types && options.types.length > 0) {
+            const types = new Set(options.types);
+
+            if (!types.has(ApiConfigType.KNOWLEDGE_NETWORK)) {
+                exportData.knowledgeNetworks = [];
+            }
+            if (!types.has(ApiConfigType.DATA_VIEW)) {
+                exportData.dataViews = [];
+            }
+            if (!types.has(ApiConfigType.METRIC_MODEL)) {
+                exportData.metricModels = [];
+            }
+            if (!types.has(ApiConfigType.AGENT)) {
+                exportData.agents = [];
+            }
+            if (!types.has(ApiConfigType.WORKFLOW)) {
+                exportData.workflows = [];
+            }
+        }
+
+        // Filter by enabled status
+        if (!options?.includeDisabled) {
+            exportData.knowledgeNetworks = exportData.knowledgeNetworks?.filter(c => c.enabled) || [];
+            exportData.dataViews = exportData.dataViews?.filter(c => c.enabled) || [];
+            exportData.metricModels = exportData.metricModels?.filter(c => c.enabled) || [];
+            exportData.agents = exportData.agents?.filter(c => c.enabled) || [];
+            exportData.workflows = exportData.workflows?.filter(c => c.enabled) || [];
+        }
+
+        // Filter by tags
+        if (options?.tags && options.tags.length > 0) {
+            const tagSet = new Set(options.tags);
+            const hasMatchingTag = (config: { tags?: string[] }) =>
+                config.tags?.some(tag => tagSet.has(tag)) || false;
+
+            exportData.knowledgeNetworks = exportData.knowledgeNetworks?.filter(hasMatchingTag) || [];
+            exportData.dataViews = exportData.dataViews?.filter(hasMatchingTag) || [];
+            exportData.metricModels = exportData.metricModels?.filter(hasMatchingTag) || [];
+            exportData.agents = exportData.agents?.filter(hasMatchingTag) || [];
+            exportData.workflows = exportData.workflows?.filter(hasMatchingTag) || [];
+        }
+
+        const indent = options?.prettyPrint ? 2 : 0;
+        return JSON.stringify(exportData, null, indent);
+    }
+
+    /**
+     * Import configuration from JSON string
+     */
+    importConfig(jsonString: string, merge: boolean = false): void {
+        try {
+            const imported = JSON.parse(jsonString) as Partial<ApiConfigCollection>;
+
+            // Validate imported data
+            const errors = this.validateConfig(imported);
+            if (errors.length > 0) {
+                throw new Error(`Configuration validation failed: ${errors.map(e => e.message).join(', ')}`);
+            }
+
+            if (merge) {
+                // Merge with existing configuration
+                const existing = this.loadConfig();
+                const merged: ApiConfigCollection = {
+                    knowledgeNetworks: this.mergeConfigs(existing.knowledgeNetworks, imported.knowledgeNetworks || []),
+                    dataViews: this.mergeConfigs(existing.dataViews, imported.dataViews || []),
+                    metricModels: this.mergeConfigs(existing.metricModels, imported.metricModels || []),
+                    agents: this.mergeConfigs(existing.agents, imported.agents || []),
+                    workflows: this.mergeConfigs(existing.workflows, imported.workflows || []),
+                    version: this.version,
+                    lastUpdated: Date.now()
+                };
+                this.saveConfig(merged);
+            } else {
+                // Replace entire configuration
+                const newConfig: ApiConfigCollection = {
+                    knowledgeNetworks: imported.knowledgeNetworks || [],
+                    dataViews: imported.dataViews || [],
+                    metricModels: imported.metricModels || [],
+                    agents: imported.agents || [],
+                    workflows: imported.workflows || [],
+                    version: this.version,
+                    lastUpdated: Date.now()
+                };
+                this.saveConfig(newConfig);
+            }
+
+            console.log('[ConfigStorage] Configuration imported successfully');
+        } catch (error) {
+            console.error('[ConfigStorage] Failed to import configuration:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clear all stored configuration
+     */
+    clearConfig(): void {
+        localStorage.removeItem(this.storageKey);
+        console.log('[ConfigStorage] Configuration cleared');
+    }
+
+    /**
+     * Reset to default configuration
+     */
+    resetToDefaults(): void {
+        const defaults = this.getDefaultConfig();
+        this.saveConfig(defaults);
+        console.log('[ConfigStorage] Configuration reset to defaults');
+    }
+
+    /**
+     * Validate configuration data
+     */
+    validateConfig(config: Partial<ApiConfigCollection>): ConfigValidationError[] {
+        const errors: ConfigValidationError[] = [];
+
+        // Check version
+        if (config.version && config.version !== this.version) {
+            errors.push({
+                field: 'version',
+                message: `Version mismatch: expected ${this.version}, got ${config.version}`,
+                code: 'VERSION_MISMATCH'
+            });
+        }
+
+        // Validate each configuration array
+        if (config.knowledgeNetworks) {
+            config.knowledgeNetworks.forEach((kn, index) => {
+                if (!kn.id || !kn.name || !kn.knowledgeNetworkId) {
+                    errors.push({
+                        field: `knowledgeNetworks[${index}]`,
+                        message: 'Missing required fields: id, name, or knowledgeNetworkId',
+                        code: 'MISSING_REQUIRED_FIELD'
+                    });
+                }
+            });
+        }
+
+        if (config.dataViews) {
+            config.dataViews.forEach((dv, index) => {
+                if (!dv.id || !dv.name || !dv.viewId || !dv.entityType) {
+                    errors.push({
+                        field: `dataViews[${index}]`,
+                        message: 'Missing required fields: id, name, viewId, or entityType',
+                        code: 'MISSING_REQUIRED_FIELD'
+                    });
+                }
+            });
+        }
+
+        if (config.metricModels) {
+            config.metricModels.forEach((mm, index) => {
+                if (!mm.id || !mm.name || !mm.modelId) {
+                    errors.push({
+                        field: `metricModels[${index}]`,
+                        message: 'Missing required fields: id, name, or modelId',
+                        code: 'MISSING_REQUIRED_FIELD'
+                    });
+                }
+            });
+        }
+
+        if (config.agents) {
+            config.agents.forEach((agent, index) => {
+                if (!agent.id || !agent.name || !agent.agentKey || !agent.appKey) {
+                    errors.push({
+                        field: `agents[${index}]`,
+                        message: 'Missing required fields: id, name, agentKey, or appKey',
+                        code: 'MISSING_REQUIRED_FIELD'
+                    });
+                }
+            });
+        }
+
+        if (config.workflows) {
+            config.workflows.forEach((wf, index) => {
+                if (!wf.id || !wf.name || !wf.dagId) {
+                    errors.push({
+                        field: `workflows[${index}]`,
+                        message: 'Missing required fields: id, name, or dagId',
+                        code: 'MISSING_REQUIRED_FIELD'
+                    });
+                }
+            });
+        }
+
+        return errors;
+    }
+
+    /**
+     * Get default configuration
+     * Migrates from existing hardcoded values
+     */
+    private getDefaultConfig(): ApiConfigCollection {
+        const now = Date.now();
+
+        return {
+            knowledgeNetworks: [
+                {
+                    id: 'kn_huida',
+                    type: ApiConfigType.KNOWLEDGE_NETWORK,
+                    name: '惠达供应链大脑网络',
+                    description: '惠达供应链大脑标准业务环境',
+                    knowledgeNetworkId: 'd56v1l69olk4bpa66uv0',
+                    enabled: true,
+                    objectTypes: {
+                        supplier: { id: 'supplier', name: '供应商', icon: 'Users' },
+                        material: { id: 'material', name: '物料', icon: 'Package' },
+                        product: { id: 'product', name: '产品', icon: 'Box' },
+                        factory: { id: 'factory', name: '工厂', icon: 'Factory' },
+                        warehouse: { id: 'warehouse', name: '仓库', icon: 'Warehouse' },
+                        order: { id: 'order', name: '订单', icon: 'ShoppingCart' },
+                        customer: { id: 'customer', name: '客户', icon: 'Award' }
+                    },
+                    tags: ['huida', 'brain', 'default'],
+                    createdAt: now,
+                    updatedAt: now
+                }
+            ],
+            dataViews: [
+                {
+                    id: 'dv_supplier_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达供应商数据视图',
+                    description: '惠达供应链大脑 - 供应商数据',
+                    viewId: '2004376134633480193',
+                    entityType: 'supplier',
+                    enabled: true,
+                    tags: ['huida', 'supplier'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_material_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达物料数据视图',
+                    description: '惠达供应链大脑 - 物料数据',
+                    viewId: '2004376134629285891',
+                    entityType: 'material',
+                    enabled: true,
+                    tags: ['huida', 'material'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_product_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达产品数据视图',
+                    description: '惠达供应链大脑 - 产品数据',
+                    viewId: '2004376134620897282',
+                    entityType: 'product',
+                    enabled: true,
+                    tags: ['huida', 'product'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_bom_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达BOM数据视图',
+                    description: '惠达供应链大脑 - BOM数据',
+                    viewId: '2004376134629285892',
+                    entityType: 'bom',
+                    enabled: true,
+                    tags: ['huida', 'bom'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_inventory_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达库存数据视图',
+                    description: '惠达供应链大脑 - 库存数据',
+                    viewId: '2004376134625091585',
+                    entityType: 'inventory',
+                    enabled: true,
+                    tags: ['huida', 'inventory'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_order_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达订单数据视图',
+                    description: '惠达供应链大脑 - 订单数据',
+                    viewId: '2004376134629285890',
+                    entityType: 'order',
+                    enabled: true,
+                    tags: ['huida', 'order'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'dv_customer_huida',
+                    type: ApiConfigType.DATA_VIEW,
+                    name: '惠达客户数据视图',
+                    description: '惠达供应链大脑 - 客户数据',
+                    viewId: '2004376134633480194',
+                    entityType: 'customer',
+                    enabled: true,
+                    tags: ['huida', 'customer'],
+                    createdAt: now,
+                    updatedAt: now
+                }
+            ],
+            metricModels: [
+
+                // 供应链图谱指标 - API 模式 (惠达)
+                {
+                    id: 'mm_order_demand_count_api',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '订单需求数量 (惠达)',
+                    description: '供应链图谱 - 惠达订单需求总数统计',
+                    modelId: 'd58fu5lg5lk40hvh48kg',
+                    groupName: '供应链图谱',
+                    modelName: '订单需求数',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'huida', 'order'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_product_count_api',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '产品数量 (惠达)',
+                    description: '供应链图谱 - 惠达产品总数统计',
+                    modelId: 'd58fv0lg5lk40hvh48l0',
+                    groupName: '供应链图谱',
+                    modelName: '产品数',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'huida', 'product'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_material_count_api',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '物料数量 (惠达)',
+                    description: '供应链图谱 - 惠达物料总数统计',
+                    modelId: 'd58g085g5lk40hvh48lg',
+                    groupName: '供应链图谱',
+                    modelName: '物料数',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'huida', 'material'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_supplier_count_api',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '供应商数量 (惠达)',
+                    description: '供应链图谱 - 惠达供应商总数统计',
+                    modelId: 'd58g53lg5lk40hvh48m0',
+                    groupName: '供应链图谱',
+                    modelName: '供应商数',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'huida', 'supplier'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_product_inventory_detail',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '产品库存分析明细',
+                    description: '供应链图谱 - 产品库存分析明细（带维度）',
+                    modelId: 'd58keb5g5lk40hvh48og',
+                    groupName: '供应链图谱',
+                    modelName: '产品库存明细',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'inventory', 'product'],
+                    createdAt: now,
+                    updatedAt: now
+                }
+            ],
+            agents: [
+                {
+                    id: 'agent_supply_chain',
+                    type: ApiConfigType.AGENT,
+                    name: '供应链智能助手',
+                    description: '供应链大脑 AI 助手',
+                    agentKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
+                    appKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
+                    agentVersion: 'v2',
+                    enabled: true,
+                    enableStreaming: true,
+                    enableHistory: true,
+                    tags: ['default', 'assistant'],
+                    createdAt: now,
+                    updatedAt: now
+                }
+            ],
+            workflows: [
+                {
+                    id: 'wf_ai_analysis',
+                    type: ApiConfigType.WORKFLOW,
+                    name: 'AI 分析工作流',
+                    description: '供应链 AI 智能分析工作流',
+                    dagId: '600565437910010238',
+                    triggerType: 'manual' as const,
+                    enabled: true,
+                    tags: ['ai', 'analysis'],
+                    createdAt: now,
+                    updatedAt: now
+                }
+            ],
+            version: this.version,
+            lastUpdated: now
+        };
+    }
+
+    /**
+     * Merge configuration arrays (by ID)
+     */
+    private mergeConfigs<T extends { id: string }>(existing: T[], imported: T[]): T[] {
+        const merged = [...existing];
+        const existingIds = new Set(existing.map(c => c.id));
+
+        for (const config of imported) {
+            if (existingIds.has(config.id)) {
+                // Update existing
+                const index = merged.findIndex(c => c.id === config.id);
+                merged[index] = config;
+            } else {
+                // Add new
+                merged.push(config);
+            }
+        }
+
+        return merged;
+    }
+}
+
+// ============================================================================
+// Export Singleton
+// ============================================================================
+
+export const configStorageService = new ConfigStorageService();
+export default configStorageService;
