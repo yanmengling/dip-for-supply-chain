@@ -11,10 +11,31 @@ import { getMaterialInventorySummary } from '../../utils/cockpitDataService';
 import { useDimensionMetricData, useMetricData, latestValueTransform } from '../../hooks/useMetricData';
 import { Loader2, AlertTriangle, CheckCircle } from 'lucide-react';
 
-// 指标模型 ID 配置
-const METRIC_IDS = {
-    TOTAL_MATERIAL_STOCK: 'd58je8lg5lk40hvh48n0',
-    STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
+import { apiConfigService } from '../../services/apiConfigService';
+
+// 获取指标 ID 的辅助函数
+const getMetricIds = () => {
+    try {
+        const metrics = apiConfigService.getMetricModelConfigs();
+        const stockMetric = metrics.find(m =>
+            m.tags?.includes('material') &&
+            m.tags?.includes('inventory_data')
+        );
+        const stagnantMetric = metrics.find(m =>
+            m.tags?.includes('material') &&
+            m.tags?.includes('stagnant')
+        );
+
+        return {
+            TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58je8lg5lk40hvh48n0',
+            STAGNANT_MATERIALS: stagnantMetric?.modelId || 'd58jomlg5lk40hvh48o0',
+        };
+    } catch (error) {
+        return {
+            TOTAL_MATERIAL_STOCK: 'd58je8lg5lk40hvh48n0',
+            STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
+        };
+    }
 };
 
 const COLORS = {
@@ -23,6 +44,8 @@ const COLORS = {
 };
 
 const MaterialInventoryCharts = () => {
+    // 动态获取指标 ID
+    const METRIC_IDS = useMemo(() => getMetricIds(), []);
     // 只在组件挂载时计算一次
     const summary = useMemo(() => {
         return {

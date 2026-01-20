@@ -19,29 +19,27 @@ const getMetricIds = () => {
   try {
     const metrics = apiConfigService.getMetricModelConfigs();
 
-    // 查找特定标签的指标
+    // 查找物料库存量指标 (标签: material, inventory_data)
     const stockMetric = metrics.find(m =>
-      m.tags?.includes('inventory') &&
       m.tags?.includes('material') &&
-      m.tags?.includes('optimization') &&
-      m.tags?.includes('huida')
+      m.tags?.includes('inventory_data')
     );
 
-    const typeMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('count')); // 假设总种类数有这些标签
+    const typeMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('count'));
 
     return {
-      // 用户指定的 "物料库存优化模型 (惠达)"
-      TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58ihclg5lk40hvh48mg',
-      // 其他指标也尝试动态获取，否则使用默认值
+      // 物料库存量 (惠达)
+      TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58je8lg5lk40hvh48n0',
+      // 其他指标
       TOTAL_MATERIAL_TYPES: typeMetric?.modelId || 'd58ihclg5lk40hvh48mg',
-      STAGNANT_MATERIALS: 'd58ihclg5lk40hvh48mg',
+      STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
     };
   } catch (error) {
     console.warn('[MaterialInventoryPanel] Failed to load metric IDs, using defaults');
     return {
-      TOTAL_MATERIAL_STOCK: 'd58ihclg5lk40hvh48mg',
+      TOTAL_MATERIAL_STOCK: 'd58je8lg5lk40hvh48n0',
       TOTAL_MATERIAL_TYPES: 'd58ihclg5lk40hvh48mg',
-      STAGNANT_MATERIALS: 'd58ihclg5lk40hvh48mg',
+      STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
     };
   }
 };
