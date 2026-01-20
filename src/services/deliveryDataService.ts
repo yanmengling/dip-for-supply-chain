@@ -6,10 +6,31 @@
  */
 
 import { ontologyApi } from '../api';
+import { apiConfigService } from './apiConfigService';
+import { ApiConfigType, type OntologyObjectConfig } from '../types/apiConfig';
 import type { DeliveryOrder } from '../types/ontology';
 
-// Object type ID for delivery orders (sales orders)
-const DELIVERY_ORDER_OBJECT_TYPE_ID = 'd56vh169olk4bpa66v80'; // Sales Order object type
+// Default Object type ID for delivery orders (sales orders) - used as fallback
+const DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID = 'd56vh169olk4bpa66v80'; // Sales Order object type
+
+/**
+ * Get delivery order object type ID from configuration
+ * @returns Object type ID for sales orders
+ */
+function getDeliveryOrderObjectTypeId(): string {
+  const configs = apiConfigService.getConfigsByType(ApiConfigType.ONTOLOGY_OBJECT) as OntologyObjectConfig[];
+  const salesOrderConfig = configs.find(c =>
+    c.enabled && c.tags?.some(tag => tag === 'sales' || tag === 'order' || tag === 'cockpit')
+  );
+
+  if (salesOrderConfig) {
+    console.log(`[DeliveryDataService] Using configured object type ID: ${salesOrderConfig.objectTypeId} (${salesOrderConfig.name})`);
+    return salesOrderConfig.objectTypeId;
+  }
+
+  console.warn(`[DeliveryDataService] No sales order configuration found, using default: ${DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID}`);
+  return DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID;
+}
 
 /**
  * Load delivery orders from API
@@ -21,90 +42,151 @@ export async function loadDeliveryOrders(): Promise<DeliveryOrder[]> {
   console.log('[DeliveryDataService] Loading delivery orders from API...');
 
   try {
-    const response = await ontologyApi.queryObjectInstances(DELIVERY_ORDER_OBJECT_TYPE_ID, {
+    // Get configurable object type ID
+    const objectTypeId = getDeliveryOrderObjectTypeId();
+
+    // Use GET method with query parameters as per ontology API documentation
+    // URL: /api/ontology-query/v1/knowledge-networks/{kn_id}/object-types/{ot_id}?include_type_info=true&include_logic_params=false
+    const response = await ontologyApi.queryObjectInstances(objectTypeId, {
       limit: 10000,
       need_total: false,
+      include_type_info: true,
+      include_logic_params: false,
     });
 
-    const deliveryOrders: DeliveryOrder[] = response.entries.map((item: any) => ({
-      // Basic order information
-      orderId: item.sales_order_id || item.order_id || item.delivery_order_id || '',
-      orderNumber: item.sales_order_number || item.order_number || item.delivery_order_number || '',
-      orderName: item.order_name || item.sales_order_name || `订单-${item.sales_order_number || item.order_number || ''}`,
-      lineNumber: item.line_number ? parseInt(item.line_number) : undefined,
+    console.log(`[DeliveryDataService] API returned ${response.entries.length} entries`);
 
-      // Customer information
-      customerId: item.customer_id || item.client_id || '',
-      customerName: item.customer_name || item.customer || item.client || '',
+    // Debug: Log first entry to see actual field names
+    if (response.entries.length > 0) {
+      console.log('[DeliveryDataService] First entry sample:', response.entries[0]);
+      console.log('[DeliveryDataService] Available fields:', Object.keys(response.entries[0]));
+    }
 
-      // Product information
-      productId: item.product_id || item.product_code || '',
-      productCode: item.product_code || item.product_id || '',
-      productName: item.product_name || '',
-      quantity: item.quantity || item.signing_quantity ? parseInt(item.quantity || item.signing_quantity) : 0,
-      unit: item.unit || item.quantity_unit || '件',
+    const deliveryOrders: DeliveryOrder[] = response.entries.map((item: any, index: number) => {
+      // Actual API fields: contract_number, product_category, product_code, shipping_quantity,
+      // id, shipping_date, product_name, signing_quantity, signing_date, promised_delivery_date
 
-      // Amount information (optional)
-      standardPrice: item.standard_price ? parseFloat(item.standard_price) : undefined,
-      discountRate: item.discount_rate ? parseFloat(item.discount_rate) : undefined,
-      actualPrice: item.actual_price ? parseFloat(item.actual_price) : undefined,
-      subtotalAmount: item.subtotal_amount ? parseFloat(item.subtotal_amount) : undefined,
-      taxAmount: item.tax_amount ? parseFloat(item.tax_amount) : undefined,
-      totalAmount: item.total_amount ? parseFloat(item.total_amount) : undefined,
+      // Generate order status based on dates
+      let orderStatus = '未知';
+      const today = new Date();
+      const shippingDate = item.shipping_date ? new Date(item.shipping_date) : null;
+      const signingDate = item.signing_date ? new Date(item.signing_date) : null;
+      const promisedDate = item.promised_delivery_date ? new Date(item.promised_delivery_date) : null;
 
-      // Date information
-      documentDate: item.document_date || item.order_date || new Date().toISOString().split('T')[0],
-      orderDate: item.order_date || item.document_date || new Date().toISOString().split('T')[0],
-      plannedDeliveryDate: item.planned_delivery_date || item.delivery_date || '',
-      createdDate: item.created_date || item.create_time || new Date().toISOString().split('T')[0],
+      // Map quantities first to use in status logic
+      const shippingQty = Number(item.shipping_quantity || 0);
+      const signingQty = Number(item.signing_quantity || 0);
 
-      // Status information
-      orderStatus: item.order_status || item.status || '生产中',
-      documentStatus: item.document_status || item.doc_status || '已确认',
-      deliveryStatus: item.delivery_status || item.shipping_status,
+      if (shippingDate) {
+        // If shipping quantity matches signing quantity, it's Completed
+        if (shippingQty === signingQty && signingQty > 0) {
+          orderStatus = '已完成';
+        } else {
+          // Otherwise it's In Transit (Partial or generic)
+          orderStatus = '运输中';
+        }
+      } else if (signingDate) {
+        orderStatus = '生产中';
+      }
 
-      // Business information
-      transactionType: item.transaction_type || item.business_type,
-      salesDepartment: item.sales_department || item.department,
-      salesperson: item.salesperson || item.sales_person,
-      isUrgent: item.is_urgent === true || item.urgent === '是' || item.priority === 'high',
-      contractNumber: item.contract_number || item.contract_no,
-      projectName: item.project_name,
-      endCustomer: item.end_customer || item.final_customer,
+      return {
+        // Basic order information - using contract_number as order identifier
+        orderId: item.id ? String(item.id) : '',
+        orderNumber: item.contract_number || `ORDER-${item.id || index}`,
+        orderName: `${item.product_name || '未知产品'} - ${item.contract_number || ''}`,
+        lineNumber: item.id,
 
-      // Logistics information
-      shipmentId: item.shipment_id,
-      shipmentNumber: item.shipment_number || item.shipping_number,
-      shipmentDate: item.shipment_date || item.shipping_date,
-      warehouseId: item.warehouse_id,
-      warehouseName: item.warehouse_name,
-      consignee: item.consignee || item.receiver,
-      consigneePhone: item.consignee_phone || item.receiver_phone,
-      deliveryAddress: item.delivery_address || item.address || item.shipping_address,
-      logisticsProvider: item.logistics_provider || item.carrier,
-      trackingNumber: item.tracking_number || item.logistics_number,
-      estimatedDeliveryDate: item.estimated_delivery_date,
-      actualDeliveryDate: item.actual_delivery_date || item.actual_shipping_date,
+        // Customer information - not available in this API
+        customerId: '',
+        customerName: '',
 
-      // Production information
-      productionOrderId: item.production_order_id,
-      productionOrderNumber: item.production_order_number,
-      factoryId: item.factory_id,
-      factoryName: item.factory_name,
-      productionLine: item.production_line,
-      plannedStartDate: item.planned_start_date,
-      plannedFinishDate: item.planned_finish_date,
-      workOrderStatus: item.work_order_status,
-      priority: item.priority,
+        // Product information
+        productId: item.product_code || '',
+        productCode: item.product_code || '',
+        productName: item.product_name || '',
+        quantity: signingQty, // Default to signing quantity as the "Order Quantity"
+        shippingQuantity: shippingQty,
+        signingQuantity: signingQty,
+        unit: '件',
 
-      // Notes
-      notes: item.notes || item.remark,
+        // Amount information - not available
+        standardPrice: undefined,
+        discountRate: undefined,
+        actualPrice: undefined,
+        subtotalAmount: undefined,
+        taxAmount: undefined,
+        totalAmount: undefined,
 
-      // Status identifier
-      status: (item.status === 'Active' || item.status === 'Inactive') ? item.status : 'Active',
-    }));
+        // Date information
+        documentDate: item.signing_date || new Date().toISOString().split('T')[0],
+        orderDate: item.signing_date || new Date().toISOString().split('T')[0],
+        plannedDeliveryDate: item.promised_delivery_date || item.shipping_date || '',
+        createdDate: item.signing_date || new Date().toISOString().split('T')[0],
+        actualDeliveryDate: item.shipping_date || undefined,
+
+        // Status information - derived from dates
+        orderStatus: orderStatus,
+        documentStatus: item.signing_date ? '已确认' : '待确认',
+        deliveryStatus: shippingDate && shippingDate <= today ? '已签收' : undefined,
+
+        // Business information
+        transactionType: item.product_category,
+        salesDepartment: undefined,
+        salesperson: undefined,
+        isUrgent: false,
+        contractNumber: item.contract_number,
+        projectName: undefined,
+        endCustomer: undefined,
+
+        // Logistics information
+        shipmentId: undefined,
+        shipmentNumber: undefined,
+        shipmentDate: item.shipping_date,
+        warehouseId: undefined,
+        warehouseName: undefined,
+        consignee: undefined,
+        consigneePhone: undefined,
+        deliveryAddress: undefined,
+        logisticsProvider: undefined,
+        trackingNumber: undefined,
+        estimatedDeliveryDate: item.promised_delivery_date,
+
+        // Production information
+        productionOrderId: undefined,
+        productionOrderNumber: undefined,
+        factoryId: undefined,
+        factoryName: undefined,
+        productionLine: undefined,
+        plannedStartDate: undefined,
+        plannedFinishDate: undefined,
+        workOrderStatus: undefined,
+        priority: undefined,
+
+        // Notes
+        notes: undefined,
+
+        // Status identifier
+        status: 'Active',
+      };
+    });
 
     console.log(`[DeliveryDataService] Loaded ${deliveryOrders.length} delivery orders`);
+
+    // Debug: Log status distribution
+    const statusCounts: Record<string, number> = {};
+    deliveryOrders.forEach(order => {
+      statusCounts[order.orderStatus] = (statusCounts[order.orderStatus] || 0) + 1;
+    });
+    console.log('[DeliveryDataService] Status distribution:', statusCounts);
+
+    // Debug: Log delivery performance
+    const completed = deliveryOrders.filter(o => o.orderStatus === '已完成');
+    const delayed = completed.filter(o => {
+      if (!o.actualDeliveryDate || !o.plannedDeliveryDate) return false;
+      return new Date(o.actualDeliveryDate) > new Date(o.plannedDeliveryDate);
+    });
+    console.log(`[DeliveryDataService] Delivery performance: ${completed.length} completed, ${delayed.length} delayed`);
+
     return deliveryOrders;
   } catch (error) {
     console.error('[DeliveryDataService] Failed to load delivery orders:', error);

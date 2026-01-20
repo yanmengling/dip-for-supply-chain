@@ -11,6 +11,7 @@ import type {
     AnyApiConfig,
     ApiConfigType,
     KnowledgeNetworkConfig,
+    OntologyObjectConfig,
     DataViewConfig,
     MetricModelConfig,
     AgentConfig,
@@ -73,12 +74,12 @@ function getDefaultFormData(type: ApiConfigType): Partial<AnyApiConfig> {
                 objectTypes: {}
             } as Partial<KnowledgeNetworkConfig>;
 
-        case 'data_view':
+        case 'ontology_object':
             return {
                 ...base,
-                viewId: '',
+                objectTypeId: '',
                 entityType: ''
-            } as Partial<DataViewConfig>;
+            } as Partial<OntologyObjectConfig>;
 
         case 'metric_model':
             return {
@@ -127,10 +128,10 @@ function validateConfig(config: Partial<AnyApiConfig>): ConfigValidationError[] 
             }
             break;
 
-        case 'data_view':
+        case 'ontology_object':
             const dv = config as Partial<DataViewConfig>;
-            if (!dv.viewId?.trim()) {
-                errors.push({ field: 'viewId', message: '视图 ID 不能为空' });
+            if (!dv.objectTypeId?.trim()) {
+                errors.push({ field: 'objectTypeId', message: '对象类型 ID 不能为空' });
             }
             if (!dv.entityType?.trim()) {
                 errors.push({ field: 'entityType', message: '实体类型不能为空' });
@@ -271,15 +272,15 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                     </>
                 );
 
-            case 'data_view':
+            case 'ontology_object':
                 const dv = formData as Partial<DataViewConfig>;
                 return (
                     <>
-                        <FormField label="视图 ID" required error={getFieldError('viewId')}>
+                        <FormField label="对象类型 ID" required error={getFieldError('objectTypeId')}>
                             <input
                                 type="text"
-                                value={dv.viewId || ''}
-                                onChange={(e) => handleChange('viewId', e.target.value)}
+                                value={dv.objectTypeId || ''}
+                                onChange={(e) => handleChange('objectTypeId', e.target.value)}
                                 className="form-input"
                                 placeholder="例如: 2004376134633480193"
                             />
@@ -428,8 +429,8 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
     /**
      * Get field error message
      */
-    const getFieldError = (field: string): string | undefined => {
-        return validationErrors.find(e => e.field === field)?.message;
+    const getFieldError = (field: string): string => {
+        return validationErrors.find(e => e.field === field)?.message || '';
     };
 
     return (

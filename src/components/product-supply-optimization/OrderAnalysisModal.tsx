@@ -1,14 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { ShoppingCart, X, CheckCircle2, Clock, CalendarRange, Truck, Loader2, AlertTriangle, Package, AlertCircle } from 'lucide-react';
 import { ontologyApi } from '../../api';
+import { apiConfigService } from '../../services/apiConfigService';
 import { fetchInventory } from '../../services/mpsDataService';
 import type { QueryCondition } from '../../api/ontologyApi';
 
-// 对象类型ID常量
-const OBJECT_TYPE_IDS = {
-  SALES_ORDER: 'd56vh169olk4bpa66v80',  // 销售订单对象类型
-  INVENTORY: 'd56vcuu9olk4bpa66v3g',    // 库存对象类型
-} as const;
+// Note: Object Type IDs are now loaded from config service
+// - Sales Order: oo_sales_order_huida
+// - Inventory: oo_inventory_huida
 
 // 销售订单接口
 interface SalesOrder {
@@ -77,7 +76,15 @@ export const OrderAnalysisModal: React.FC<Props> = ({ isOpen, onClose, productId
           value_from: 'const',
         };
 
-        const orderResponse = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.SALES_ORDER, {
+        // Load object type ID from config
+        // Load object type ID from config
+        const salesOrderOtId = apiConfigService.getOntologyObjectId('oo_sales_order_huida');
+
+        if (!salesOrderOtId) {
+          throw new Error('Sales Order Object Type ID not configured');
+        }
+
+        const orderResponse = await ontologyApi.queryObjectInstances(salesOrderOtId, {
           condition: orderCondition,
           limit: 1000,
         });
@@ -108,8 +115,8 @@ export const OrderAnalysisModal: React.FC<Props> = ({ isOpen, onClose, productId
         });
 
         const pendingQuantity = Math.max(0, totalSignedQuantity - deliveredTotalQuantity);
-        const completionRate = totalSignedQuantity > 0 
-          ? (deliveredTotalQuantity / totalSignedQuantity) * 100 
+        const completionRate = totalSignedQuantity > 0
+          ? (deliveredTotalQuantity / totalSignedQuantity) * 100
           : 0;
 
         // 4. 按月份分组待交付订单（shipping_quantity < signing_quantity）
@@ -121,11 +128,11 @@ export const OrderAnalysisModal: React.FC<Props> = ({ isOpen, onClose, productId
 
         pendingOrders.forEach(order => {
           if (!order.promised_delivery_date) return;
-          
+
           // 提取月份 YYYY-MM
           const date = new Date(order.promised_delivery_date);
           const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-          
+
           const existing = monthlyMap.get(month) || { orderCount: 0, pendingQuantity: 0 };
           monthlyMap.set(month, {
             orderCount: existing.orderCount + 1,

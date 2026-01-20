@@ -70,7 +70,7 @@ const SupplierComparisonModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-500 bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
           <h3 className="text-xl font-bold text-slate-800">

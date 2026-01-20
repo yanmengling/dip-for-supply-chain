@@ -12,11 +12,38 @@ import { materialsData, materialStocksData } from '../../utils/entityConfigServi
 import { calculateMaterialLogicRules } from '../../utils/logicRuleService';
 import { generateMaterialRecommendations } from '../../utils/recommendationService';
 import { useMetricData, useDimensionMetricData, latestValueTransform } from '../../hooks/useMetricData';
-// Metric Model IDs
-const METRIC_IDS = {
-  TOTAL_MATERIAL_STOCK: 'd58je8lg5lk40hvh48n0',
-  TOTAL_MATERIAL_TYPES: 'd58ihclg5lk40hvh48mg',
-  STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
+import { apiConfigService } from '../../services/apiConfigService';
+
+// 获取指标 ID 的辅助函数
+const getMetricIds = () => {
+  try {
+    const metrics = apiConfigService.getMetricModelConfigs();
+
+    // 查找特定标签的指标
+    const stockMetric = metrics.find(m =>
+      m.tags?.includes('inventory') &&
+      m.tags?.includes('material') &&
+      m.tags?.includes('optimization') &&
+      m.tags?.includes('huida')
+    );
+
+    const typeMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('count')); // 假设总种类数有这些标签
+
+    return {
+      // 用户指定的 "物料库存优化模型 (惠达)"
+      TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58ihclg5lk40hvh48mg',
+      // 其他指标也尝试动态获取，否则使用默认值
+      TOTAL_MATERIAL_TYPES: typeMetric?.modelId || 'd58ihclg5lk40hvh48mg',
+      STAGNANT_MATERIALS: 'd58ihclg5lk40hvh48mg',
+    };
+  } catch (error) {
+    console.warn('[MaterialInventoryPanel] Failed to load metric IDs, using defaults');
+    return {
+      TOTAL_MATERIAL_STOCK: 'd58ihclg5lk40hvh48mg',
+      TOTAL_MATERIAL_TYPES: 'd58ihclg5lk40hvh48mg',
+      STAGNANT_MATERIALS: 'd58ihclg5lk40hvh48mg',
+    };
+  }
 };
 
 interface Props {
@@ -24,6 +51,9 @@ interface Props {
 }
 
 const MaterialInventoryPanel = ({ onNavigate }: Props) => {
+  // 动态获取指标 ID
+  const currentMetricIds = useMemo(() => getMetricIds(), []);
+
   const summary = {
     totalTypes: 0,
     totalStock: 0,
@@ -38,20 +68,22 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
 
 
   // 从真实 API 获取物料总种类数（item_type=Material 的数量）
-  // 从真实 API 获取物料总种类数（item_type=Material 的数量）
+  // 对 Hook 选项进行 memo，避免每次 render 传入新对象导致 useEffect 触发
+  const materialTypesOptions = useMemo(() => ({
+    instant: true,
+    transform: latestValueTransform,
+  }), []);
+
   const {
     value: totalMaterialTypesFromApi,
     loading: totalMaterialTypesLoading,
     error: totalMaterialTypesError,
-  } = useMetricData(METRIC_IDS.TOTAL_MATERIAL_TYPES, {
-    instant: true,  // 即时查询，获取最新值
-    transform: latestValueTransform,
-  });
+  } = useMetricData(currentMetricIds.TOTAL_MATERIAL_TYPES, materialTypesOptions);
 
   // 调试：打印API调用结果
   if (import.meta.env.DEV) {
     console.log('[MaterialInventoryPanel] API调用结果:', {
-      modelId: METRIC_IDS.TOTAL_MATERIAL_TYPES,
+      modelId: currentMetricIds.TOTAL_MATERIAL_TYPES,
     });
   }
 
@@ -60,32 +92,34 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
 
   // 在惠达供应链大脑模式下，直接获取总库存量（API不支持维度分析）
   // 在Mock模式下，通过维度分析获取详细数据
-  // 在惠达供应链大脑模式下，直接获取总库存量（API不支持维度分析）
+  const stockOptions = useMemo(() => ({
+    instant: true,
+    transform: latestValueTransform,
+  }), []);
+
   const {
     value: totalMaterialStockFromApi,
     loading: totalMaterialStockLoading,
     error: totalMaterialStockError,
   } = useMetricData(
-    METRIC_IDS.TOTAL_MATERIAL_STOCK,
-    {
-      instant: true,
-      transform: latestValueTransform,
-    }
+    currentMetricIds.TOTAL_MATERIAL_STOCK,
+    stockOptions
   );
 
   // 从真实 API 获取物料库存排名
   // Mock模式：按 item_name 分组
   // 大脑模式：按 material_name 和 inventory_data 分组
-  // 从真实 API 获取物料库存排名
-  // 大脑模式：按 material_name 和 inventory_data 分组
+  const rankingDimensions = useMemo(() => ['material_code', 'material_name', 'inventory_data'], []);
+  const rankingOptions = useMemo(() => ({ instant: true }), []);
+
   const {
     items: materialStockRankingItems,
     loading: materialStockRankingLoading,
     error: materialStockRankingError,
   } = useDimensionMetricData(
-    METRIC_IDS.TOTAL_MATERIAL_STOCK,
-    ['material_code', 'material_name', 'inventory_data'],
-    { instant: true }
+    currentMetricIds.TOTAL_MATERIAL_STOCK,
+    rankingDimensions,
+    rankingOptions
   );
 
   // 计算总库存量

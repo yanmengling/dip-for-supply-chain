@@ -30,8 +30,11 @@ const validateMetricModel = async (modelId: string) => {
   }
 };
 
-const PRODUCT_INVENTORY_METRIC_ID = 'd58keb5g5lk40hvh48og';
-const MATERIAL_INVENTORY_METRIC_ID = 'd58je8lg5lk40hvh48n0';
+import { apiConfigService } from '../../services/apiConfigService';
+
+// 动态获取指标模型ID
+const getProductInventoryMetricId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
+const getMaterialInventoryMetricId = () => apiConfigService.getMetricModelId('mm_material_inventory_optimization_huida') || 'd58je8lg5lk40hvh48n0';
 
 interface Props {
   toggleCopilot?: () => void;
@@ -68,7 +71,8 @@ const InventoryView = ({ toggleCopilot }: Props) => {
   useEffect(() => {
     const fetchMaterialModelInfo = async () => {
       try {
-        const validation = await validateMetricModel(MATERIAL_INVENTORY_METRIC_ID);
+        const metricId = getMaterialInventoryMetricId();
+        const validation = await validateMetricModel(metricId);
         if (!validation.exists) {
           setMaterialAvailableDimensions(['item_id', 'item_code', 'item_name', 'warehouse_name']);
           setMaterialModelLoading(false);
@@ -76,7 +80,7 @@ const InventoryView = ({ toggleCopilot }: Props) => {
         }
         const range = createLastDaysRange(1);
         const result = await metricModelApi.queryByModelId(
-          MATERIAL_INVENTORY_METRIC_ID,
+          metricId,
           { instant: true, start: range.start, end: range.end },
           { includeModel: true }
         );
@@ -110,7 +114,7 @@ const InventoryView = ({ toggleCopilot }: Props) => {
     items: materialInventoryItems,
     loading: materialInventoryLoading,
   } = useDimensionMetricData(
-    MATERIAL_INVENTORY_METRIC_ID,
+    getMaterialInventoryMetricId(),
     materialDimensionsToUse,
     { instant: true, immediate: true }
   );
@@ -187,17 +191,19 @@ const InventoryView = ({ toggleCopilot }: Props) => {
         onOpenReverseCalculator={handleOpenReverseCalculator}
       />
 
+      {/* AI Analysis Panel - Full Width */}
+      <InventoryAIAnalysisPanel />
+
       {/* Main Content Area */}
-      <div className="grid grid-cols-12 gap-6">
-        {/* Left Column: Product & Material Inventory */}
-        <div className="col-span-12 lg:col-span-8 space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Product Inventory */}
+        <div className="space-y-6">
           <ProductInventoryPanel />
-          <MaterialInventoryPanel />
         </div>
 
-        {/* Right Column: AI Analysis */}
-        <div className="col-span-12 lg:col-span-4 space-y-6">
-          <InventoryAIAnalysisPanel />
+        {/* Material Inventory */}
+        <div className="space-y-6">
+          <MaterialInventoryPanel />
         </div>
       </div>
 

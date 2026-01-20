@@ -6,6 +6,7 @@ import { saveAs } from 'file-saver';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiConfigService } from '../../services/apiConfigService';
+import { ApiConfigType, type WorkflowConfig } from '../../types/apiConfig';
 
 // AI Analysis Panel - 显示来自自动化工作流的AI分析报告
 
@@ -14,17 +15,25 @@ import { apiConfigService } from '../../services/apiConfigService';
  */
 function getWorkflowDagId(): string {
     try {
-        const workflow = apiConfigService.getWorkflowByDagId('600729428670073214');
-        if (workflow && workflow.enabled) {
-            console.log('[AIAnalysisPanel] Using configured DAG ID:', workflow.dagId);
-            return workflow.dagId;
+        // Get all enabled workflows
+        const workflows = apiConfigService.getEnabledConfigsByType<WorkflowConfig>(ApiConfigType.WORKFLOW);
+
+        // Find workflow with 'ai-analysis' or 'analysis' tag
+        const aiAnalysisWorkflow = workflows.find(wf =>
+            wf.tags?.includes('ai-analysis') || wf.tags?.includes('analysis')
+        );
+
+        if (aiAnalysisWorkflow) {
+            console.log('[AIAnalysisPanel] Using configured AI analysis workflow:', aiAnalysisWorkflow.dagId, `(${aiAnalysisWorkflow.name})`);
+            return aiAnalysisWorkflow.dagId;
         }
     } catch (error) {
         console.warn('[AIAnalysisPanel] Failed to get DAG ID from config:', error);
     }
+
     // Fallback to hardcoded value
-    console.log('[AIAnalysisPanel] Using hardcoded DAG ID: 600729428670073214');
-    return '600729428670073214';
+    console.log('[AIAnalysisPanel] Using hardcoded DAG ID: 600565437910010238');
+    return '600565437910010238';
 }
 
 

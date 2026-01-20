@@ -189,7 +189,7 @@ const MaterialInventoryCharts = () => {
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
                 <h4 className="text-sm font-semibold text-slate-700 mb-3">库存状态分布</h4>
                 <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" debounce={100}>
                         <PieChart>
                             <Pie
                                 data={stockDistribution}
@@ -217,7 +217,7 @@ const MaterialInventoryCharts = () => {
             <div className="bg-slate-50 rounded-xl p-4 border border-slate-200">
                 <h4 className="text-sm font-semibold text-slate-700 mb-3">物料库存 TOP10</h4>
                 <div className="h-56">
-                    <ResponsiveContainer width="100%" height="100%">
+                    <ResponsiveContainer width="100%" height="100%" debounce={100}>
                         <BarChart data={top10StockData} layout="vertical">
                             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                             <XAxis type="number" tick={{ fontSize: 12 }} />
@@ -254,7 +254,7 @@ const MaterialInventoryCharts = () => {
                 {hasStagnantMaterials ? (
                     // 有呆滞物料：显示柱状图
                     <div className="h-48">
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" debounce={100}>
                             <BarChart data={stagnantMaterials}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                                 <XAxis

@@ -9,8 +9,6 @@
  * - 库存信息: /proxy-metric/v1/data-views/2004376134625091585
  */
 
-import { httpClient } from '../api/httpClient';
-import { getDataViewIdByEntityType } from '../api/dataViewApi';
 
 // ============================================================================
 // 类型定义
@@ -19,15 +17,319 @@ import { getDataViewIdByEntityType } from '../api/dataViewApi';
 /** 目标产品列表 */
 export const TARGET_PRODUCTS = ['T01-000055', 'T01-000167', 'T01-000173'];
 
-/** API View IDs - Now using configuration service with fallback */
-const VIEW_IDS = {
-    get products() { return getDataViewIdByEntityType('product') || '2004376134620897282'; },
-    get bom() { return getDataViewIdByEntityType('bom') || '2004376134629285892'; },
-    get inventory() { return getDataViewIdByEntityType('inventory') || '2004376134625091585'; },
-    get materials() { return getDataViewIdByEntityType('material') || '2004376134629285891'; },
+import { ontologyApi } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
+
+/**
+ * 获取对象类型ID配置
+ */
+/**
+ * 获取对象类型ID配置
+ */
+const getObjectTypeId = (entityType: string, defaultId: string) => {
+    // 优先尝试从配置服务获取
+    let configuredId = '';
+
+    switch (entityType) {
+        case 'product':
+            configuredId = apiConfigService.getOntologyObjectId('oo_product_huida') || '';
+            break;
+        case 'bom':
+            configuredId = apiConfigService.getOntologyObjectId('oo_bom_huida') || '';
+            break;
+        case 'inventory':
+            configuredId = apiConfigService.getOntologyObjectId('oo_inventory_huida') || '';
+            break;
+        case 'material':
+            configuredId = apiConfigService.getOntologyObjectId('oo_material_huida') || '';
+            break;
+    }
+
+    if (configuredId) {
+        console.log(`[BOM服务] 使用配置的对象ID: ${entityType} -> ${configuredId}`);
+        return configuredId;
+    }
+
+    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+    if (config?.objectTypeId) {
+        console.log(`[BOM服务] 使用配置的对象ID (by EntityType): ${entityType} -> ${config.objectTypeId}`);
+        return config.objectTypeId;
+    }
+
+    console.warn(`[BOM服务] 未找到配置的对象ID，使用默认值: ${entityType} -> ${defaultId}`);
+    return defaultId;
 };
 
-/** 原始产品数据 */
+// 默认ID作为后备 (仍保留作为最后的FallBack)
+const DEFAULT_IDS = {
+    products: 'd56v4ue9olk4bpa66v00',
+    bom: 'd56vqtm9olk4bpa66vfg',
+    inventory: 'd56vcuu9olk4bpa66v3g',
+    materials: 'd56voju9olk4bpa66vcg',
+};
+
+// ============================================================================
+// 数据加载
+// ============================================================================
+
+/**
+ * 加载产品信息
+ */
+export async function loadProductData(): Promise<ProductRaw[]> {
+    try {
+        console.log('[BOM服务] 加载产品信息...');
+        const objectTypeId = getObjectTypeId('product', DEFAULT_IDS.products);
+
+        // 使用 Ontology API
+        const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+            limit: 100,
+            include_type_info: true,
+            include_logic_params: false
+        });
+
+        const rawData = response.entries || [];
+
+        if (!Array.isArray(rawData)) {
+            console.warn('[BOM服务] 产品数据格式异常');
+            return [];
+        }
+
+        const products = rawData.map((item: any) => ({
+            product_code: String(item.product_code || '').trim(),
+            product_name: item.product_name || '',
+            product_model: item.product_model || '',
+            product_series: item.product_series || '',
+            product_type: item.product_type || '',
+            amount: parseFloat(item.amount) || 0,
+        }));
+
+        console.log('[BOM服务] 加载产品:', products.length, '个');
+        return products;
+    } catch (error) {
+        console.error('[BOM服务] 加载产品信息失败:', error);
+        return [];
+    }
+}
+
+/**
+ * 加载BOM数据
+ */
+export async function loadBOMData(): Promise<BOMRaw[]> {
+    try {
+        console.log('[BOM服务] 加载BOM数据...');
+        const objectTypeId = getObjectTypeId('bom', DEFAULT_IDS.bom);
+        // 使用 Ontology API
+        let response;
+        try {
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit: 5000,
+                include_type_info: true,
+                include_logic_params: false
+            });
+        } catch (firstError) {
+            console.warn('[BOM服务] BOM数据加载失败，尝试缩减规模回退...', firstError);
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit: 1000,
+                include_type_info: false,
+                include_logic_params: false
+            });
+        }
+
+        const rawData = response.entries || [];
+
+        if (!Array.isArray(rawData)) {
+            console.warn('[BOM服务] BOM数据格式异常');
+            return [];
+        }
+
+        const boms = rawData.map((item: any) => ({
+            bom_number: item.bom_number || '',
+            parent_code: String(item.parent_code || '').trim(),
+            parent_name: item.parent_name || '',
+            child_code: String(item.child_code || '').trim(),
+            child_name: item.child_name || '',
+            child_quantity: parseFloat(item.quantity || item.child_quantity) || 0,
+            unit: item.unit || '个',
+            loss_rate: parseFloat(item.loss_rate) || 0,
+            alternative_group: String(item.alternative_group ?? ''),
+            alternative_part: String(item.alternative_part ?? ''),
+        }));
+
+        console.log('[BOM服务] 加载BOM:', boms.length, '条');
+        return boms;
+    } catch (error) {
+        console.error('[BOM服务] 加载BOM数据失败:', error);
+        return [];
+    }
+}
+
+/**
+ * 加载物料信息（含单价）
+ */
+export async function loadMaterialData(): Promise<Map<string, { name: string; unitPrice: number }>> {
+    try {
+        console.log('[BOM服务] 加载物料信息...');
+        const materialMap = new Map<string, { name: string; unitPrice: number }>();
+        const objectTypeId = getObjectTypeId('material', DEFAULT_IDS.materials);
+
+        // 分页获取所有物料，使用 search_after
+        const limit = 1000;
+        let searchAfter: any[] | undefined = undefined;
+        let count = 0;
+
+        while (true) {
+            console.log(`[BOM服务] 加载物料分页: count=${count}, limit=${limit}`);
+            const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit,
+                search_after: searchAfter,
+                include_type_info: true,
+                include_logic_params: false
+            });
+
+            const rawData = response.entries || [];
+
+            if (!Array.isArray(rawData) || rawData.length === 0) {
+                break;
+            }
+
+            rawData.forEach((item: any) => {
+                const rawCode = item.material_code || item.item_code || item.code || item['物料编码'] || '';
+                const materialCode = String(rawCode).trim();
+
+                if (materialCode && !materialMap.has(materialCode)) {
+                    const unitPrice = parseFloat(item.unit_price) ||
+                        parseFloat(item.price) ||
+                        parseFloat(item['单价']) ||
+                        parseFloat(item.standard_price) || 0;
+
+                    materialMap.set(materialCode, {
+                        name: item.material_name || item.item_name || item['物料名称'] || '',
+                        unitPrice: unitPrice,
+                    });
+                }
+            });
+
+            count += rawData.length;
+
+            if (rawData.length < limit || !response.search_after) {
+                break;
+            }
+            searchAfter = response.search_after;
+        }
+
+        console.log('[BOM服务] 加载物料信息完成, 共:', materialMap.size, '条');
+        return materialMap;
+    } catch (error) {
+        console.error('[BOM服务] 加载物料信息失败:', error);
+        return new Map();
+    }
+}
+
+/**
+ * 加载库存数据
+ */
+export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
+    try {
+        console.log('[BOM服务] 加载库存数据...');
+        const objectTypeId = getObjectTypeId('inventory', DEFAULT_IDS.inventory);
+
+        const limit = 2000;
+        let searchAfter: any[] | undefined = undefined;
+        const rawDataAll: any[] = [];
+        let count = 0;
+
+        while (true) {
+            console.log(`[BOM服务] 加载库存分页: count=${count}, limit=${limit}`);
+            const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit,
+                search_after: searchAfter,
+                include_type_info: true,
+                include_logic_params: false
+            });
+
+            const pageData = response.entries || [];
+
+            if (!Array.isArray(pageData) || pageData.length === 0) {
+                break;
+            }
+
+            rawDataAll.push(...pageData);
+            count += pageData.length;
+
+            if (pageData.length < limit || !response.search_after) {
+                break;
+            }
+            searchAfter = response.search_after;
+        }
+
+        const rawData = rawDataAll;
+
+        if (!Array.isArray(rawData)) {
+            console.warn('[BOM服务] 库存数据格式异常');
+            return new Map();
+        }
+
+        // 打印第一条数据的所有字段名
+        if (rawData.length > 0) {
+            console.log('[BOM服务] 库存数据字段:', Object.keys(rawData[0]));
+            if (rawData.length > 5000) {
+                console.log(`[BOM服务] 已加载大量库存数据: ${rawData.length} 条`);
+            }
+        }
+
+        const inventoryMap = new Map<string, InventoryRaw>();
+
+        rawData.forEach((item: any) => {
+            // 根据实际API返回的字段名匹配物料编码
+            const rawCode = item.item_code || item.material_code || item.code ||
+                item['物料编码'] || item.material_id || '';
+            const materialCode = String(rawCode).trim();
+
+            if (materialCode) {
+                // 根据API返回的字段: inventory_data 是库存量, available_quantity 是可用量
+                const stockQuantity = parseFloat(item.inventory_data) ||
+                    parseFloat(item.available_quantity) ||
+                    parseFloat(item.quantity) ||
+                    parseFloat(item.current_stock) || 0;
+
+                // 如果同一物料有多条记录(多仓库)，累加库存
+                const existing = inventoryMap.get(materialCode);
+                const currentStock = existing ? existing.current_stock + stockQuantity : stockQuantity;
+
+                // 库龄字段: inventory_age 或 max_storage_age
+                const storageDays = parseInt(item.inventory_age) ||
+                    parseInt(item.max_storage_age) ||
+                    parseInt(item.storage_days) || 0;
+
+                inventoryMap.set(materialCode, {
+                    material_code: materialCode,
+                    material_name: item.item_name || item.material_name || item['物料名称'] || '',
+                    current_stock: currentStock,
+                    available_stock: parseFloat(item.available_quantity) || currentStock,
+                    storage_days: storageDays,
+                    unit_price: parseFloat(item.unit_price) || 0,
+                    warehouse_name: item.warehouse_name || '',
+                });
+            }
+        });
+
+        console.log('[BOM服务] 加载库存:', inventoryMap.size, '条');
+
+        // 打印几条样例数据验证
+        let sampleCount = 0;
+        for (const [code, inv] of inventoryMap) {
+            if (sampleCount < 5) {
+                console.log(`[BOM服务] 库存样例 ${code}: 库存=${inv.current_stock}, 库龄=${inv.storage_days}天`);
+                sampleCount++;
+            }
+        }
+
+        return inventoryMap;
+    } catch (error) {
+        console.error('[BOM服务] 加载库存数据失败:', error);
+        return new Map();
+    }
+}
 export interface ProductRaw {
     product_code: string;
     product_name: string;
@@ -117,236 +419,6 @@ interface SubstitutionRelation {
     }[];
 }
 
-// ============================================================================
-// 数据加载
-// ============================================================================
-
-/**
- * 加载产品信息
- */
-export async function loadProductData(): Promise<ProductRaw[]> {
-    try {
-        console.log('[BOM服务] 加载产品信息...');
-        const url = `/proxy-metric/v1/data-views/${VIEW_IDS.products}?include_view=true`;
-        const response = await httpClient.postAsGet<any>(url, { limit: 100, offset: 0 });
-
-        const rawData = response.data?.entries || response.data || [];
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] 产品数据格式异常');
-            return [];
-        }
-
-        const products = rawData.map((item: any) => ({
-            product_code: String(item.product_code || '').trim(),
-            product_name: item.product_name || '',
-            product_model: item.product_model || '',
-            product_series: item.product_series || '',
-            product_type: item.product_type || '',
-            amount: parseFloat(item.amount) || 0,
-        }));
-
-        console.log('[BOM服务] 加载产品:', products.length, '个');
-        return products;
-    } catch (error) {
-        console.error('[BOM服务] 加载产品信息失败:', error);
-        return [];
-    }
-}
-
-/**
- * 加载BOM数据
- */
-export async function loadBOMData(): Promise<BOMRaw[]> {
-    try {
-        console.log('[BOM服务] 加载BOM数据...');
-        const url = `/proxy-metric/v1/data-views/${VIEW_IDS.bom}?include_view=true`;
-        const response = await httpClient.postAsGet<any>(url, { limit: 5000, offset: 0 });
-
-        const rawData = response.data?.entries || response.data || [];
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] BOM数据格式异常');
-            return [];
-        }
-
-        const boms = rawData.map((item: any) => ({
-            bom_number: item.bom_number || '',
-            parent_code: String(item.parent_code || '').trim(),
-            parent_name: item.parent_name || '',
-            child_code: String(item.child_code || '').trim(),
-            child_name: item.child_name || '',
-            child_quantity: parseFloat(item.quantity || item.child_quantity) || 0,
-            unit: item.unit || '个',
-            loss_rate: parseFloat(item.loss_rate) || 0,
-            alternative_group: String(item.alternative_group ?? ''),
-            alternative_part: String(item.alternative_part ?? ''),
-        }));
-
-        console.log('[BOM服务] 加载BOM:', boms.length, '条');
-        return boms;
-    } catch (error) {
-        console.error('[BOM服务] 加载BOM数据失败:', error);
-        return [];
-    }
-}
-
-/**
- * 加载物料信息（含单价）
- */
-export async function loadMaterialData(): Promise<Map<string, { name: string; unitPrice: number }>> {
-    try {
-        console.log('[BOM服务] 加载物料信息...');
-        const materialMap = new Map<string, { name: string; unitPrice: number }>();
-        const url = `/proxy-metric/v1/data-views/${VIEW_IDS.materials}?include_view=true`;
-
-        // 分页获取所有物料，防止因limit限制导致部分物料无价格
-        let offset = 0;
-        const limit = 1000; // 保持较小limit防止500错误
-        let hasMore = true;
-
-        while (hasMore) {
-            console.log(`[BOM服务] 加载物料分页: offset=${offset}, limit=${limit}`);
-            const response = await httpClient.postAsGet<any>(url, { limit, offset });
-            const rawData = response.data?.entries || response.data || [];
-
-            if (!Array.isArray(rawData) || rawData.length === 0) {
-                hasMore = false;
-                break;
-            }
-
-            rawData.forEach((item: any) => {
-                const rawCode = item.material_code || item.item_code || item.code || item['物料编码'] || '';
-                const materialCode = String(rawCode).trim();
-
-                if (materialCode && !materialMap.has(materialCode)) {
-                    const unitPrice = parseFloat(item.unit_price) ||
-                        parseFloat(item.price) ||
-                        parseFloat(item['单价']) ||
-                        parseFloat(item.standard_price) || 0;
-
-                    materialMap.set(materialCode, {
-                        name: item.material_name || item.item_name || item['物料名称'] || '',
-                        unitPrice: unitPrice,
-                    });
-                }
-            });
-
-            if (rawData.length < limit) {
-                hasMore = false;
-            } else {
-                offset += limit;
-            }
-        }
-
-        console.log('[BOM服务] 加载物料信息完成, 共:', materialMap.size, '条');
-        return materialMap;
-    } catch (error) {
-        console.error('[BOM服务] 加载物料信息失败:', error);
-        return new Map();
-    }
-}
-
-/**
- * 加载库存数据
- */
-export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
-    try {
-        console.log('[BOM服务] 加载库存数据...');
-        const url = `/proxy-metric/v1/data-views/${VIEW_IDS.inventory}?include_view=true`;
-
-        let offset = 0;
-        const limit = 2000;
-        let hasMore = true;
-        const rawDataAll: any[] = [];
-
-        while (hasMore) {
-            console.log(`[BOM服务] 加载库存分页: offset=${offset}, limit=${limit}`);
-            const response = await httpClient.postAsGet<any>(url, { limit, offset });
-            const pageData = response.data?.entries || response.data || [];
-
-            if (!Array.isArray(pageData) || pageData.length === 0) {
-                hasMore = false;
-                break;
-            }
-
-            rawDataAll.push(...pageData);
-
-            if (pageData.length < limit) {
-                hasMore = false;
-            } else {
-                offset += limit;
-            }
-        }
-
-        const rawData = rawDataAll;
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] 库存数据格式异常');
-            return new Map();
-        }
-
-        // 打印第一条数据的所有字段名
-        if (rawData.length > 0) {
-            console.log('[BOM服务] 库存数据字段:', Object.keys(rawData[0]));
-            if (rawData.length > 5000) {
-                console.log(`[BOM服务] 已加载大量库存数据: ${rawData.length} 条`);
-            }
-        }
-
-        const inventoryMap = new Map<string, InventoryRaw>();
-
-        rawData.forEach((item: any) => {
-            // 根据实际API返回的字段名匹配物料编码
-            const rawCode = item.item_code || item.material_code || item.code ||
-                item['物料编码'] || item.material_id || '';
-            const materialCode = String(rawCode).trim();
-
-            if (materialCode) {
-                // 根据API返回的字段: inventory_data 是库存量, available_quantity 是可用量
-                const stockQuantity = parseFloat(item.inventory_data) ||
-                    parseFloat(item.available_quantity) ||
-                    parseFloat(item.quantity) ||
-                    parseFloat(item.current_stock) || 0;
-
-                // 如果同一物料有多条记录(多仓库)，累加库存
-                const existing = inventoryMap.get(materialCode);
-                const currentStock = existing ? existing.current_stock + stockQuantity : stockQuantity;
-
-                // 库龄字段: inventory_age 或 max_storage_age
-                const storageDays = parseInt(item.inventory_age) ||
-                    parseInt(item.max_storage_age) ||
-                    parseInt(item.storage_days) || 0;
-
-                inventoryMap.set(materialCode, {
-                    material_code: materialCode,
-                    material_name: item.item_name || item.material_name || item['物料名称'] || '',
-                    current_stock: currentStock,
-                    available_stock: parseFloat(item.available_quantity) || currentStock,
-                    storage_days: storageDays,
-                    unit_price: parseFloat(item.unit_price) || 0,
-                    warehouse_name: item.warehouse_name || '',
-                });
-            }
-        });
-
-        console.log('[BOM服务] 加载库存:', inventoryMap.size, '条');
-
-        // 打印几条样例数据验证
-        let count = 0;
-        for (const [code, inv] of inventoryMap) {
-            if (count < 5) {
-                console.log(`[BOM服务] 库存样例 ${code}: 库存=${inv.current_stock}, 库龄=${inv.storage_days}天`);
-                count++;
-            }
-        }
-
-        return inventoryMap;
-    } catch (error) {
-        console.error('[BOM服务] 加载库存数据失败:', error);
-        return new Map();
-    }
-}
 
 // ============================================================================
 // 替代料解析

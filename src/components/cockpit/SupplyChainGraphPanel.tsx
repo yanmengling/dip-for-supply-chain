@@ -14,20 +14,48 @@ import { loadDeliveryOrders } from '../../services/deliveryDataService';
 import type { DeliveryOrder } from '../../types/ontology';
 import { getSupplyChainGraphData, type SupplyChainStageData } from '../../utils/cockpitDataService';
 import { useMetricData, latestValueTransform } from '../../hooks/useMetricData';
+import { apiConfigService } from '../../services/apiConfigService';
+import { ApiConfigType, type MetricModelConfig } from '../../types/apiConfig';
 
 import { calculateAllProductInventory, type ProductInventoryResult } from '../../services/productInventoryCalculator';
 import { metricModelApi, createLastDaysRange } from '../../api';
 
-// 指标模型 ID 配置 - 惠达供应链大脑模式
-const METRIC_IDS = {
-  ORDER_DEMAND_COUNT: 'd58fu5lg5lk40hvh48kg',
-  PRODUCT_COUNT: 'd58fv0lg5lk40hvh48l0',
-  WAREHOUSE_COUNT: 'd51m9htg5lk40hvh48fg',  // TODO: 待提供新的仓库指标 ID
-  MATERIAL_COUNT: 'd58g085g5lk40hvh48lg',
-  SUPPLIER_COUNT: 'd58g53lg5lk40hvh48m0',
-  // 产品库存分析明细（带维度）
-  PRODUCT_INVENTORY_DETAIL: 'd58keb5g5lk40hvh48og',
-};
+/**
+ * 从配置中心获取指标模型 ID
+ * 使用标签查找对应的指标配置
+ */
+function getMetricIds() {
+  try {
+    const metrics = apiConfigService.getEnabledConfigsByType<MetricModelConfig>(ApiConfigType.METRIC_MODEL);
+
+    // 使用标签查找各个指标
+    const orderMetric = metrics.find(m => m.tags?.includes('order') && m.tags?.includes('graph'));
+    const productMetric = metrics.find(m => m.tags?.includes('product') && m.tags?.includes('graph'));
+    const materialMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('graph'));
+    const supplierMetric = metrics.find(m => m.tags?.includes('supplier') && m.tags?.includes('graph'));
+    const inventoryMetric = metrics.find(m => m.tags?.includes('inventory') && m.tags?.includes('product'));
+
+    return {
+      ORDER_DEMAND_COUNT: orderMetric?.modelId || 'd58fu5lg5lk40hvh48kg',
+      PRODUCT_COUNT: productMetric?.modelId || 'd58fv0lg5lk40hvh48l0',
+      WAREHOUSE_COUNT: 'd51m9htg5lk40hvh48fg',  // TODO: 待配置中心添加仓库指标
+      MATERIAL_COUNT: materialMetric?.modelId || 'd58g085g5lk40hvh48lg',
+      SUPPLIER_COUNT: supplierMetric?.modelId || 'd58g53lg5lk40hvh48m0',
+      PRODUCT_INVENTORY_DETAIL: inventoryMetric?.modelId || 'd58keb5g5lk40hvh48og',
+    };
+  } catch (error) {
+    console.warn('[SupplyChainGraphPanel] Failed to load metric IDs from config, using defaults:', error);
+    // Fallback to hardcoded values
+    return {
+      ORDER_DEMAND_COUNT: apiConfigService.getMetricModelId('mm_order_demand_huida') || 'd58fu5lg5lk40hvh48kg',
+      PRODUCT_COUNT: apiConfigService.getMetricModelId('mm_product_count_huida') || 'd58fv0lg5lk40hvh48l0',
+      WAREHOUSE_COUNT: 'd51m9htg5lk40hvh48fg',
+      MATERIAL_COUNT: apiConfigService.getMetricModelId('mm_material_count_huida') || 'd58g085g5lk40hvh48lg',
+      SUPPLIER_COUNT: apiConfigService.getMetricModelId('mm_supplier_count_huida') || 'd58g53lg5lk40hvh48m0',
+      PRODUCT_INVENTORY_DETAIL: apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og',
+    };
+  }
+}
 
 // 产品库存分析的分析维度
 const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
@@ -62,17 +90,23 @@ const SupplyChainGraphPanel = ({ onNavigate }: Props) => {
   // 物料库存弹窗状态
   const [showMaterialModal, setShowMaterialModal] = useState(false);
 
-  // 使用全局配置的指标 ID
-  const currentMetricIds = METRIC_IDS;
+  // 从配置中心获取指标 ID
+  const currentMetricIds = useMemo(() => getMetricIds(), []);
 
   // 从真实 API 获取各阶段数量
+  // Fix: Memoize date range to prevent infinite re-rendering loop
+  const last30DaysRange = useMemo(() => createLastDaysRange(30), []);
+
   const {
     value: orderDemandCountFromApi,
     loading: orderDemandCountLoading,
     error: orderDemandCountError,
   } = useMetricData(currentMetricIds.ORDER_DEMAND_COUNT, {
-    instant: true,  // 即时查询，获取最新值
+    instant: true,
+    step: '1d',
     transform: latestValueTransform,
+    includeModel: true,
+    ...last30DaysRange,
   });
 
   const {
@@ -81,6 +115,7 @@ const SupplyChainGraphPanel = ({ onNavigate }: Props) => {
     error: productCountError,
   } = useMetricData(currentMetricIds.PRODUCT_COUNT, {
     instant: true,
+    step: '1d',
     transform: latestValueTransform,
   });
 

@@ -4,7 +4,8 @@
  * 基于产品BOM和物料库存数据，智能计算可组装的产品数量
  */
 
-import { dataViewApi } from '../api/dataViewApi';
+import { ontologyApi } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
 
 // ============================================================================
 // 类型定义
@@ -101,8 +102,28 @@ function parseCSV<T>(csvText: string): T[] {
     return data;
 }
 
+/**
+ * 默认ID后备 (与智能计算和BOM服务保持一致)
+ */
+const DEFAULT_IDS: Record<string, string> = {
+    bom: 'd56vqtm9olk4bpa66vfg',
+    inventory: 'd56vcuu9olk4bpa66v3g',
+    product: 'd56v4ue9olk4bpa66v00'
+};
+
+/**
+ * 获取对象类型ID
+ */
+const getObjectTypeId = (entityType: string): string => {
+    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+    if (config?.objectTypeId) {
+        return config.objectTypeId;
+    }
+    return DEFAULT_IDS[entityType] || '';
+};
+
 // ============================================================================
-// 数据加载函数
+// CSV解析函数
 // ============================================================================
 
 /**
@@ -110,8 +131,8 @@ function parseCSV<T>(csvText: string): T[] {
  */
 export async function loadBOMData(): Promise<BOMItem[]> {
     try {
-        // Factory API = BOM Data in Brain Mode (and effectively Mock Mode now)
-        const response = await dataViewApi.getFactories({ limit: 1000 });
+        const objectTypeId = getObjectTypeId('bom');
+        const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 5000 });
         const rawData = response.entries || [];
 
         return rawData.map(item => {
@@ -131,7 +152,7 @@ export async function loadBOMData(): Promise<BOMItem[]> {
             };
         });
     } catch (error) {
-        console.error('[Product Inventory] Failed to load BOM data:', error);
+        console.error('[Product Inventory] Failed to load BOM data from Ontology:', error);
         throw new Error(`Failed to load BOM data: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
@@ -141,8 +162,8 @@ export async function loadBOMData(): Promise<BOMItem[]> {
  */
 export async function loadInventoryData(): Promise<MaterialInventory[]> {
     try {
-        // Warehouse API = Inventory Data
-        const response = await dataViewApi.getWarehouses({ limit: 1000 });
+        const objectTypeId = getObjectTypeId('inventory');
+        const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 2000 });
         const rawData = response.entries || [];
 
         return rawData.map(item => {
@@ -168,7 +189,7 @@ export async function loadInventoryData(): Promise<MaterialInventory[]> {
             };
         });
     } catch (error) {
-        console.error('[Product Inventory] Failed to load inventory data:', error);
+        console.error('[Product Inventory] Failed to load inventory data from Ontology:', error);
         throw new Error(`Failed to load inventory data: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
@@ -178,7 +199,8 @@ export async function loadInventoryData(): Promise<MaterialInventory[]> {
  */
 export async function loadProductData(): Promise<ProductInfo[]> {
     try {
-        const response = await dataViewApi.getProducts({ limit: 1000 });
+        const objectTypeId = getObjectTypeId('product');
+        const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 1000 });
         const rawData = response.entries || [];
 
         return rawData.map(item => {
@@ -194,7 +216,7 @@ export async function loadProductData(): Promise<ProductInfo[]> {
             };
         });
     } catch (error) {
-        console.error('[Product Inventory] Failed to load product data:', error);
+        console.error('[Product Inventory] Failed to load product data from Ontology:', error);
         throw new Error(`Failed to load product data: ${error instanceof Error ? error.message : String(error)}`);
     }
 }

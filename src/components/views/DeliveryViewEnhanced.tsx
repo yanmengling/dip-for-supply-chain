@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Truck, Clock, CheckCircle, AlertCircle, AlertTriangle, MessageSquare,
-  Search, Filter, X, Package, TrendingUp, Calendar, BarChart3
+  Search, X, Package, TrendingUp, Calendar, BarChart3
 } from 'lucide-react';
 import type { DeliveryOrder } from '../../types/ontology';
 import { loadDeliveryOrders, calculateDeliveryStats, filterDeliveryOrders } from '../../services/deliveryDataService';
@@ -15,7 +15,7 @@ interface EnrichedDeliveryOrder extends DeliveryOrder {
   statusIcon: LucideIcon;
 }
 import OrderDetailModal from './OrderDetailModal';
-import DeliveryCharts from './DeliveryCharts';
+
 
 
 interface Props {
@@ -31,7 +31,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
   // 筛选和搜索状态
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('');
-  const [showFilters, setShowFilters] = useState(false);
+
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [urgentOnly, setUrgentOnly] = useState(false);
@@ -47,7 +47,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
   const [selectedOrder, setSelectedOrder] = useState<DeliveryOrder | null>(null);
 
   // 图表显示状态
-  const [showCharts, setShowCharts] = useState(false);
+
 
   // 加载数据 - 根据模式切换数据源
   useEffect(() => {
@@ -73,31 +73,21 @@ const DeliveryViewEnhanced = (_props: Props) => {
     fetchData();
   }, []);
 
-  // 应用筛选
-  const filteredOrders = useMemo(() => {
-    return filterDeliveryOrders(allOrders, {
-      status: statusFilter || undefined,
-      dateFrom: dateFrom ? new Date(dateFrom) : undefined,
-      dateTo: dateTo ? new Date(dateTo) : undefined,
-      isUrgent: urgentOnly || undefined,
-      searchText: searchText || undefined,
-    });
-  }, [allOrders, statusFilter, dateFrom, dateTo, urgentOnly, searchText]);
-
-  // 处理订单数据
-  const orders = useMemo(() => {
-    return filteredOrders.map(order => {
+  // 1. 先处理所有订单数据 (Enrichment)
+  const enrichedOrders = useMemo(() => {
+    return allOrders.map(order => {
       const dueDate = new Date(order.plannedDeliveryDate);
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const daysUntilDue = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
       // 逾期订单：当前日期 > 交付日期且订单状态不是"已完成"或"已取消"
-      // 但只关注逾期30天以内的订单（超过30天的历史订单不再显示为逾期）
-      const isOverdue = daysUntilDue < 0 &&
-        daysUntilDue >= -30 &&  // 只显示30天内的逾期订单
-        order.orderStatus !== '已完成' &&
-        order.orderStatus !== '已取消';
+      let isOverdue = false;
+      if (order.orderStatus !== '已完成' && order.orderStatus !== '已取消') {
+        if (order.plannedDeliveryDate) {
+          isOverdue = daysUntilDue < 0;
+        }
+      }
 
       // 紧急订单：5天内到期，或者标记为紧急的订单
       const isUrgent = (
@@ -115,22 +105,67 @@ const DeliveryViewEnhanced = (_props: Props) => {
         statusIcon: order.orderStatus === '运输中' ? Truck :
           order.orderStatus === '生产中' ? Clock :
             order.orderStatus === '已完成' ? CheckCircle : AlertCircle,
-      };
+      } as EnrichedDeliveryOrder;
     });
-  }, [filteredOrders]);
+  }, [allOrders]);
 
-  // 统计信息
-  const stats = useMemo(() => calculateDeliveryStats(orders), [orders]);
+  // 2. 应用筛选 (Filtering)
+  const filteredOrders = useMemo(() => {
+    // 使用本地筛选逻辑替代 service 中的 filterDeliveryOrders，因为我们需要基于 enriched 字段筛选
+    return enrichedOrders.filter(order => {
+      // Status Filter
+      if (statusFilter && order.orderStatus !== statusFilter) return false;
+
+      // Overdue Filter
+      if (showOverdueOnly && !order.isOverdue) return false;
+
+      // Urgent Filter
+      if (urgentOnly && !order.isUrgent) return false;
+
+      // Date Range
+      if (dateFrom || dateTo) {
+        if (!order.plannedDeliveryDate) return false;
+        const orderDate = new Date(order.plannedDeliveryDate);
+        if (dateFrom && orderDate < new Date(dateFrom)) return false;
+        if (dateTo) {
+          const toDate = new Date(dateTo);
+          toDate.setHours(23, 59, 59, 999);
+          if (orderDate > toDate) return false;
+        }
+      }
+
+      // Search Text
+      if (searchText) {
+        const searchLower = searchText.toLowerCase();
+        const orderNo = order.orderNumber || '';
+        const prodName = order.productName || '';
+        const custName = order.customerName || '';
+        return (
+          orderNo.toLowerCase().includes(searchLower) ||
+          prodName.toLowerCase().includes(searchLower) ||
+          custName.toLowerCase().includes(searchLower)
+        );
+      }
+
+      return true;
+    });
+  }, [enrichedOrders, statusFilter, showOverdueOnly, urgentOnly, dateFrom, dateTo, searchText]);
+
+  // 为了保持兼容性，将 processedOrders 命名为 orders
+  const orders = filteredOrders;
+
+  // 统计信息基于全部 enriched 数据，不受当前筛选影响
+  const stats = useMemo(() => calculateDeliveryStats(enrichedOrders), [enrichedOrders]);
 
   const statusGroups = useMemo(() => {
     return {
-      inTransit: orders.filter(o => o.orderStatus === '运输中'),
-      inProduction: orders.filter(o => o.orderStatus === '生产中'),
-      completed: orders.filter(o => o.orderStatus === '已完成'),
-      overdue: orders.filter(o => o.isOverdue),
-      urgent: orders.filter(o => o.isUrgent && !o.isOverdue),
+      inTransit: enrichedOrders.filter(o => o.orderStatus === '运输中'),
+      inProduction: enrichedOrders.filter(o => o.orderStatus === '生产中'),
+      completed: enrichedOrders.filter(o => o.orderStatus === '已完成'),
+      overdue: enrichedOrders.filter(o => o.isOverdue),
+      urgent: enrichedOrders.filter(o => o.isUrgent && !o.isOverdue),
     };
-  }, [orders]);
+  }, [enrichedOrders]);
 
   // 紧急订单列表（逾期优先，然后按剩余天数升序）
   const urgentOrdersList = useMemo(() => {
@@ -177,7 +212,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
     setShowOverdueOnly(false);
   };
 
-  const hasActiveFilters = searchText || statusFilter || dateFrom || dateTo || urgentOnly;
+  const hasActiveFilters = searchText || statusFilter || dateFrom || dateTo || urgentOnly || showOverdueOnly;
 
   if (loading) {
     return (
@@ -221,199 +256,120 @@ const DeliveryViewEnhanced = (_props: Props) => {
               className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-64"
             />
           </div>
-          <button
-            onClick={() => setShowCharts(!showCharts)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${showCharts
-              ? 'bg-purple-600 text-white'
-              : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
-              }`}
-          >
-            <BarChart3 size={20} />
-            数据分析
-          </button>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${showFilters || hasActiveFilters
-              ? 'bg-indigo-600 text-white'
-              : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
-              }`}
-          >
-            <Filter size={20} />
-            筛选
-            {hasActiveFilters && (
-              <span className="bg-white text-indigo-600 rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold">
-                !
-              </span>
-            )}
-          </button>
+
         </div>
       </div>
 
-      {/* 筛选面板 */}
-      {showFilters && (
-        <div className="bg-white rounded-lg shadow p-4 border border-slate-200">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-800">筛选条件</h3>
-            {hasActiveFilters && (
-              <button
-                onClick={clearFilters}
-                className="text-sm text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
-              >
-                <X size={16} />
-                清除筛选
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">订单状态</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="">全部状态</option>
-                <option value="运输中">运输中</option>
-                <option value="生产中">生产中</option>
-                <option value="已完成">已完成</option>
-                <option value="已取消">已取消</option>
-                <option value="待发货">待发货</option>
-                <option value="待生产">待生产</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">开始日期</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">结束日期</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-            <div className="flex items-end">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={urgentOnly}
-                  onChange={(e) => setUrgentOnly(e.target.checked)}
-                  className="w-4 h-4 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
-                />
-                <span className="text-sm font-medium text-slate-700">仅显示加急订单</span>
-              </label>
-            </div>
-          </div>
-        </div>
-      )}
+
 
       {/* Status Summary */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => setStatusFilter(statusFilter === '运输中' ? '' : '运输中')}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">运输中</p>
-              <p className="text-2xl font-bold text-slate-800">{stats.inTransit}</p>
-            </div>
-            <Truck className="text-blue-500" size={32} />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => setStatusFilter(statusFilter === '生产中' ? '' : '生产中')}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">生产中</p>
-              <p className="text-2xl font-bold text-slate-800">{stats.inProduction}</p>
-            </div>
-            <Clock className="text-yellow-500" size={32} />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer"
-          onClick={() => setStatusFilter(statusFilter === '已完成' ? '' : '已完成')}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">已完成</p>
-              <p className="text-2xl font-bold text-slate-800">{stats.completed}</p>
-            </div>
-            <CheckCircle className="text-green-500" size={32} />
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer border-2 border-red-200"
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+        {/* In Transit Card */}
+        <div
+          className={`bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border-2 ${statusFilter === '运输中'
+            ? 'border-blue-500 ring-4 ring-blue-100 scale-[1.02]'
+            : 'border-slate-100 hover:border-blue-200'
+            }`}
           onClick={() => {
-            // 点击逾期订单卡片时，只显示逾期订单
-            setStatusFilter('');
-            setUrgentOnly(false);
-            setShowOverdueOnly(true); // 只显示逾期订单
-            setUrgentOrdersPage(1); // 重置分页
-            // 滚动到紧急订单面板
-            setTimeout(() => {
-              const urgentPanel = document.querySelector('[data-urgent-panel]');
-              if (urgentPanel) {
-                urgentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }
-            }, 100);
-          }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">逾期订单</p>
-              <p className="text-2xl font-bold text-red-600">{stats.overdue}</p>
+            if (statusFilter === '运输中') {
+              setStatusFilter('');
+            } else {
+              clearFilters();
+              setStatusFilter('运输中');
+            }
+          }}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-500 mb-2">运输中</p>
+              <p className="text-2xl font-bold text-slate-800 tracking-tight">{stats.inTransit}</p>
             </div>
-            <AlertTriangle className="text-red-500" size={32} />
+            <div className="bg-blue-50 p-3 rounded-lg">
+              <Truck className="text-blue-600" size={28} />
+            </div>
           </div>
         </div>
-        <div className="bg-white rounded-lg shadow p-6 hover:shadow-lg transition-shadow cursor-pointer border-2 border-orange-200"
+
+        {/* In Production Card */}
+        <div
+          className={`bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border-2 ${statusFilter === '生产中'
+            ? 'border-yellow-500 ring-4 ring-yellow-100 scale-[1.02]'
+            : 'border-slate-100 hover:border-yellow-200'
+            }`}
           onClick={() => {
-            // 点击紧急订单卡片时，显示所有紧急订单（包括逾期和非逾期的紧急订单）
-            setStatusFilter('');
-            setUrgentOnly(false);
-            setShowOverdueOnly(false); // 显示所有紧急订单
-            setUrgentOrdersPage(1); // 重置分页
-            // 滚动到紧急订单面板
-            setTimeout(() => {
-              const urgentPanel = document.querySelector('[data-urgent-panel]');
-              if (urgentPanel) {
-                urgentPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }
-            }, 100);
-          }}>
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm text-slate-600 mb-1">紧急订单</p>
-              <p className="text-2xl font-bold text-orange-600">{stats.urgent}</p>
+            if (statusFilter === '生产中') {
+              setStatusFilter('');
+            } else {
+              clearFilters();
+              setStatusFilter('生产中');
+            }
+          }}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-500 mb-2">生产中</p>
+              <p className="text-2xl font-bold text-slate-800 tracking-tight">{stats.inProduction}</p>
             </div>
-            <AlertCircle className="text-orange-500" size={32} />
+            <div className="bg-yellow-50 p-3 rounded-lg">
+              <Clock className="text-yellow-600" size={28} />
+            </div>
+          </div>
+        </div>
+
+        {/* Completed Card */}
+        <div
+          className={`bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border-2 ${statusFilter === '已完成'
+            ? 'border-green-500 ring-4 ring-green-100 scale-[1.02]'
+            : 'border-slate-100 hover:border-green-200'
+            }`}
+          onClick={() => {
+            if (statusFilter === '已完成') {
+              setStatusFilter('');
+            } else {
+              clearFilters();
+              setStatusFilter('已完成');
+            }
+          }}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-500 mb-2">已完成</p>
+              <p className="text-2xl font-bold text-slate-800 tracking-tight">{stats.completed}</p>
+            </div>
+            <div className="bg-green-50 p-3 rounded-lg">
+              <CheckCircle className="text-green-600" size={28} />
+            </div>
+          </div>
+        </div>
+
+        {/* Overdue Card */}
+        <div
+          className={`bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-200 cursor-pointer p-6 border-2 ${showOverdueOnly
+            ? 'border-red-500 ring-4 ring-red-100 scale-[1.02]'
+            : 'border-red-100 hover:border-red-300'
+            }`}
+          onClick={() => {
+            if (showOverdueOnly) {
+              setShowOverdueOnly(false);
+            } else {
+              clearFilters();
+              setShowOverdueOnly(true);
+            }
+          }}
+        >
+          <div className="flex items-start justify-between">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-slate-500 mb-2">逾期订单</p>
+              <p className="text-2xl font-bold text-red-600 tracking-tight">{stats.overdue}</p>
+            </div>
+            <div className="bg-red-50 p-3 rounded-lg">
+              <AlertTriangle className="text-red-600" size={28} />
+            </div>
           </div>
         </div>
       </div>
 
-      {/* 数据分析图表 */}
-      {showCharts && (
-        <div className="bg-gradient-to-br from-purple-50 to-indigo-50 rounded-lg p-6 border border-purple-200">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-              <BarChart3 className="text-purple-600" size={20} />
-              数据分析与洞察
-            </h2>
-            <button
-              onClick={() => setShowCharts(false)}
-              className="text-slate-600 hover:text-slate-800"
-            >
-              <X size={20} />
-            </button>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <DeliveryCharts orders={orders} />
-          </div>
-        </div>
-      )}
+
 
       {/* Urgent Orders and All Orders - Side by Side */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -423,7 +379,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
             <div className="p-6 border-b border-slate-200">
               <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
                 <AlertCircle className="text-red-500" size={20} />
-                {showOverdueOnly ? '逾期订单' : '紧急订单'}
+                {showOverdueOnly ? '逾期订单' : '需关注订单'}
                 {urgentOrdersList.length > urgentOrdersPerPage && (
                   <span className="text-sm text-slate-500 font-normal ml-auto">
                     ({urgentOrdersList.length} 条)
@@ -458,7 +414,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
                       </div>
                       <span className={`px-3 py-1 rounded-full text-xs font-medium ${order.isOverdue ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'
                         }`}>
-                        {order.isOverdue ? '已逾期' : '紧急'}
+                        {order.isOverdue ? '已逾期' : '加急'}
                       </span>
                     </div>
                   );

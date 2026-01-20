@@ -45,7 +45,7 @@ interface ConfigCardProps {
 function getConfigTypeIcon(type: ApiConfigType) {
     const icons = {
         knowledge_network: GitBranch,
-        data_view: Database,
+        ontology_object: Database,
         metric_model: TrendingUp,
         agent: Bot,
         workflow: Workflow
@@ -59,7 +59,7 @@ function getConfigTypeIcon(type: ApiConfigType) {
 function getConfigTypeColor(type: ApiConfigType): string {
     const colors = {
         knowledge_network: 'text-purple-600 bg-purple-50 border-purple-200',
-        data_view: 'text-blue-600 bg-blue-50 border-blue-200',
+        ontology_object: 'text-blue-600 bg-blue-50 border-blue-200',
         metric_model: 'text-green-600 bg-green-50 border-green-200',
         agent: 'text-orange-600 bg-orange-50 border-orange-200',
         workflow: 'text-pink-600 bg-pink-50 border-pink-200'
@@ -130,12 +130,12 @@ export function ConfigCard({
                     </div>
                 );
 
-            case 'data_view':
+            case 'ontology_object':
                 return (
                     <div className="space-y-2">
                         <div className="flex items-center gap-2 text-sm">
-                            <span className="font-medium text-slate-600">视图 ID:</span>
-                            <code className="px-2 py-1 bg-slate-100 rounded text-xs">{config.viewId}</code>
+                            <span className="font-medium text-slate-600">对象类型 ID:</span>
+                            <code className="px-2 py-1 bg-slate-100 rounded text-xs">{config.objectTypeId}</code>
                         </div>
                         <div className="flex items-center gap-2 text-sm">
                             <span className="font-medium text-slate-600">实体类型:</span>
@@ -270,8 +270,8 @@ export function ConfigCard({
                         <button
                             onClick={onToggleEnabled}
                             className={`p-2 rounded-lg transition-colors ${config.enabled
-                                    ? 'text-green-600 hover:bg-green-50'
-                                    : 'text-slate-400 hover:bg-slate-100'
+                                ? 'text-green-600 hover:bg-green-50'
+                                : 'text-slate-400 hover:bg-slate-100'
                                 }`}
                             title={config.enabled ? '禁用' : '启用'}
                         >

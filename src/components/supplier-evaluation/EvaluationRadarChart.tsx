@@ -8,27 +8,27 @@
  */
 
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
-import type { EvaluationDimension } from '../../types/ontology';
+import type { Supplier360Scorecard } from '../../types/ontology';
 
 interface EvaluationRadarChartProps {
-  dimensions: EvaluationDimension[];
+  dimensions: Supplier360Scorecard['dimensions'];
   size?: 'sm' | 'md' | 'lg';
 }
 
 const EvaluationRadarChart = ({ dimensions, size = 'md' }: EvaluationRadarChartProps) => {
   const dimensionLabels: Record<string, string> = {
-    quality: '质量',
-    delivery: '交付',
-    price: '价格',
-    service: '服务',
-    compliance: '合规性',
-    technical: '技术能力',
-    financial: '财务健康',
+    qualityRating: '质量',
+    onTimeDeliveryRate: '交付',
+    riskRating: '风险控制',
+    responseSpeed: '响应速度',
   };
 
-  const chartData = dimensions.map(dim => ({
-    dimension: dimensionLabels[dim.dimensionName] || dim.dimensionName,
-    score: dim.score,
+  // Only chart the scored dimensions
+  const chartKeys = ['qualityRating', 'onTimeDeliveryRate', 'riskRating', 'responseSpeed'];
+
+  const chartData = chartKeys.map(key => ({
+    dimension: dimensionLabels[key] || key,
+    score: dimensions[key as keyof typeof dimensions] as number,
     fullMark: 100,
   }));
 
@@ -44,13 +44,13 @@ const EvaluationRadarChart = ({ dimensions, size = 'md' }: EvaluationRadarChartP
     <ResponsiveContainer width="100%" height={height}>
       <RadarChart data={chartData}>
         <PolarGrid />
-        <PolarAngleAxis 
-          dataKey="dimension" 
+        <PolarAngleAxis
+          dataKey="dimension"
           tick={{ fontSize: 12, fill: '#94a3b8' }}
         />
-        <PolarRadiusAxis 
-          angle={90} 
-          domain={[0, 100]} 
+        <PolarRadiusAxis
+          angle={90}
+          domain={[0, 100]}
           tick={{ fontSize: 10, fill: '#64748b' }}
         />
         <Radar

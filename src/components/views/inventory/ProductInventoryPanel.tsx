@@ -2,8 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Package, Search, Filter, Loader2, MoreHorizontal, AlertTriangle } from 'lucide-react';
 import { metricModelApi, createLastDaysRange } from '../../../api';
 
+import { apiConfigService } from '../../../services/apiConfigService';
+
 // 指标模型 ID 和分析维度配置
-const PRODUCT_INVENTORY_MODEL_ID = 'd58keb5g5lk40hvh48og';
+const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
 const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
 
 // 组件内部使用的产品数据类型
@@ -33,11 +35,12 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
             try {
                 setLoading(true);
                 setError(null);
-                
+
                 const timeRange = createLastDaysRange(1);
-                
+
+
                 const result = await metricModelApi.queryByModelId(
-                    PRODUCT_INVENTORY_MODEL_ID,
+                    getProductInventoryModelId(),
                     {
                         instant: true,
                         start: timeRange.start,
@@ -49,13 +52,13 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
 
                 // 转换 API 数据为组件期望的格式
                 const transformedData: ProductData[] = [];
-                
+
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
                         const materialCode = series.labels?.material_code || '';
                         const materialName = series.labels?.material_name || '';
                         let availableQuantity = 0;
-                        
+
                         if (series.labels?.available_quantity) {
                             availableQuantity = parseFloat(series.labels.available_quantity) || 0;
                         } else if (series.values && series.values.length > 0) {
@@ -79,7 +82,7 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
 
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.stockQuantity - a.stockQuantity);
-                
+
                 setProducts(transformedData);
             } catch (err) {
                 console.error('[ProductInventoryPanel] API call failed:', err);
@@ -149,9 +152,9 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                             {/* Status Badge */}
                             <div className="absolute top-4 right-4 flex gap-2">
                                 <span className={`px-2.5 py-1 text-xs font-semibold rounded-full shadow-sm ${product.inventoryStatus === '呆滞' ? 'bg-red-50 text-red-600 ring-1 ring-red-100' :
-                                        product.inventoryStatus === '缺货' ? 'bg-orange-50 text-orange-600 ring-1 ring-orange-100' :
-                                            product.inventoryStatus === '慢动' ? 'bg-yellow-50 text-yellow-600 ring-1 ring-yellow-100' :
-                                                'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100'
+                                    product.inventoryStatus === '缺货' ? 'bg-orange-50 text-orange-600 ring-1 ring-orange-100' :
+                                        product.inventoryStatus === '慢动' ? 'bg-yellow-50 text-yellow-600 ring-1 ring-yellow-100' :
+                                            'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100'
                                     }`}>
                                     {product.inventoryStatus || '正常'}
                                 </span>
@@ -170,9 +173,9 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                                 </div>
                                 {/* Visual Bar */}
                                 <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden ring-1 ring-slate-100">
-                                    <div 
-                                        className={`h-full ${product.stockQuantity === 0 ? 'bg-red-500' : product.stockQuantity < 10 ? 'bg-yellow-500' : 'bg-emerald-500'}`} 
-                                        style={{ width: `${Math.min(100, (product.stockQuantity / 100) * 100)}%` }} 
+                                    <div
+                                        className={`h-full ${product.stockQuantity === 0 ? 'bg-red-500' : product.stockQuantity < 10 ? 'bg-yellow-500' : 'bg-emerald-500'}`}
+                                        style={{ width: `${Math.min(100, (product.stockQuantity / 100) * 100)}%` }}
                                     />
                                 </div>
                             </div>

@@ -86,10 +86,10 @@ const ENTITY_TYPE_MAPPING: Record<string, keyof typeof DATA_VIEW_MAPPING> = {
 export function getDataViewIdByEntityType(entityType: string): string | null {
   // Try to get from configuration service first
   try {
-    const config = apiConfigService.getDataViewByEntityType(entityType);
+    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
     if (config && config.enabled) {
-      console.log(`[DataViewApi] Using configured view ID for ${entityType}: ${config.viewId}`);
-      return config.viewId;
+      console.log(`[DataViewApi] Using configured view ID for ${entityType}: ${config.objectTypeId}`);
+      return config.objectTypeId;
     }
   } catch (error) {
     console.warn(`[DataViewApi] Failed to get view ID from config for ${entityType}:`, error);
@@ -164,9 +164,26 @@ class DataViewApiClient {
 
     const url = `${this.getBaseUrl()}/data-views/${dataViewId}`;
 
-    // Use POST + X-HTTP-Method-Override: GET (same as metricModelApi)
-    const response = await httpClient.postAsGet<DataViewResponse<T>>(url, requestBody);
-    return response.data;
+    try {
+      // Use POST + X-HTTP-Method-Override: GET (same as metricModelApi)
+      const response = await httpClient.postAsGet<DataViewResponse<T>>(url, requestBody);
+      return response.data;
+    } catch (error) {
+      // If initial request fails and limit was high, try one fallback with a smaller limit
+      if (limit > 1000) {
+        console.warn(`[DataViewApi] Query failed for view ${dataViewId}, retrying with reduced limit 1000...`, error);
+        const fallbackBody = { ...requestBody, limit: 1000 };
+        try {
+          const response = await httpClient.postAsGet<DataViewResponse<T>>(url, fallbackBody);
+          console.log(`[DataViewApi] Fallback query successful for view ${dataViewId}`);
+          return response.data;
+        } catch (fallbackError) {
+          console.error(`[DataViewApi] Fallback query also failed for view ${dataViewId}:`, fallbackError);
+          throw fallbackError;
+        }
+      }
+      throw error;
+    }
   }
 
   /**

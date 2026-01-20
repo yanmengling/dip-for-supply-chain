@@ -5,7 +5,7 @@
  * 支持环境变量配置和运行时动态更新
  */
 
-import type { KnowledgeNetworkConfig, KnowledgeNetworkPreset } from '../types/ontology';
+import { type KnowledgeNetworkConfig, type KnowledgeNetworkPreset, ApiConfigType } from '../types/apiConfig';
 
 // ============================================================================
 // 类型定义
@@ -62,7 +62,7 @@ export interface GlobalApiConfig {
 // ============================================================================
 
 // 默认 Token（作为 fallback）
-const DEFAULT_API_TOKEN = 'ory_at_eUV5LdKEBbhNINlTSLTlnVlApKMQo3zpYF4zzoK5vWk.hU03-W389ctdeEPcUC-DcbnwoTp6fZkni-vE7V88-Es';
+const DEFAULT_API_TOKEN = 'ory_at_7m2C7HYOIJtdConlo7Ntfcoy9-wyQ7wzdblSm_gER0k.h8DMS8RWII1Agln8oX_w7N1y6dor77fz_ZKf6FEc8RY';
 
 // 动态获取 Token：优先从 globalSettingsService 读取，否则使用默认值
 function getGlobalApiToken(): string {
@@ -597,18 +597,37 @@ export function setKnowledgeNetworkId(id: string): void {
   }
 }
 
+
+
 /**
  * 获取当前知识网络配置
  */
 export function getKnowledgeNetworkConfig(): KnowledgeNetworkConfig | null {
   const preset = knowledgeNetworkPresets.find(p => p.id === currentKnowledgeNetworkId);
+
+  const baseConfig = {
+    id: currentKnowledgeNetworkId,
+    knowledgeNetworkId: currentKnowledgeNetworkId,
+    type: ApiConfigType.KNOWLEDGE_NETWORK,
+    enabled: true,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    objectTypes: {}, // Defaults to empty
+    tags: ['system-generated']
+  };
+
   if (preset) {
-    return preset;
+    return {
+      ...baseConfig,
+      name: preset.name,
+      description: preset.description,
+      tags: preset.tags || baseConfig.tags
+    };
   }
 
   // 如果不在预设中，返回基本配置
   return {
-    id: currentKnowledgeNetworkId,
+    ...baseConfig,
     name: '自定义知识网络',
   };
 }

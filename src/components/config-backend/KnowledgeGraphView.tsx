@@ -137,19 +137,38 @@ const KnowledgeGraphView = () => {
     try {
       setLoading(true);
       setError(null);
-      // Fetch object types (nodes) and relation definitions (edges metadata)
-      const objectTypes = await ontologyApi.getObjectTypes();
-      const relationTypes = await ontologyApi.getEdgeTypes(); // Assuming getEdgeTypes/getRelationTypes
 
-      if (!objectTypes) {
-        throw new Error('Failed to load object types');
+      // Use httpClient to avoid CORS and handle authentication
+      const { httpClient } = await import('../../api/httpClient');
+      const { globalSettingsService } = await import('../../services/globalSettingsService');
+      const knowledgeNetworkId = globalSettingsService.getKnowledgeNetworkId();
+
+      const [objectTypesData, relationTypesData] = await Promise.all([
+        httpClient.get(`/proxy-ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/object-types?limit=-1`),
+        httpClient.get(`/proxy-ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/relation-types?limit=-1`)
+      ]);
+
+      // Extract arrays from response
+      // API returns response object { data: { entries: [...] }, status: ... }
+      // Use type assertion to avoid "Property does not exist on type unknown" errors
+      const objParams: any = objectTypesData;
+      const relParams: any = relationTypesData;
+
+      const objectTypes = (objParams?.data?.entries ||
+        (Array.isArray(objParams?.data) ? objParams.data : [])) as ObjectType[];
+
+      const relationTypes = (relParams?.data?.entries ||
+        (Array.isArray(relParams?.data) ? relParams.data : [])) as EdgeType[];
+
+      if (!Array.isArray(objectTypes)) {
+        console.error('Object types response:', objectTypesData);
+        // Fallback to empty
+        // throw new Error('Object types is not an array');
       }
 
-      const newNodes = objectTypes.map((t, i) => objectTypeToNode(t, i, objectTypes.length));
+      console.log(`[KnowledgeGraphView] Loaded ${objectTypes.length} object types and ${relationTypes.length} relation types`);
 
-      // Note: Relation definitions are not instances, so we might not have edges yet 
-      // unless we fetch relation *instances* or if this graph is just showing the ontology schema
-      // Based on previous code "EdgeType", it seems to be schema.
+      const newNodes = objectTypes.map((t, i) => objectTypeToNode(t, i, objectTypes.length));
       const newEdges = (relationTypes || []).map(edgeTypeToEdge);
 
       setNodes(newNodes);

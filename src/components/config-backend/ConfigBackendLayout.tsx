@@ -28,7 +28,7 @@ type ConfigViewType =
 const MENU_ITEMS = [
   {
     id: 'visual_graph',
-    label: '知识网络可视化',
+    label: '业务知识网络可视化',
     icon: GitBranch,
     group: '可视化'
   },
@@ -40,31 +40,31 @@ const MENU_ITEMS = [
   },
   {
     id: ApiConfigType.KNOWLEDGE_NETWORK,
-    label: '知识网络配置',
+    label: '业务知识网络配置',
     icon: Settings,
     group: '系统配置'
   },
   {
-    id: ApiConfigType.DATA_VIEW,
-    label: '数据视图',
+    id: ApiConfigType.ONTOLOGY_OBJECT,
+    label: '业务知识网络对象类',
     icon: Database,
     group: '系统配置'
   },
   {
     id: ApiConfigType.METRIC_MODEL,
-    label: '指标模型',
+    label: '业务知识网络指标模型',
     icon: BarChart2,
     group: '系统配置'
   },
   {
     id: ApiConfigType.AGENT,
-    label: 'Agent 配置',
+    label: 'Decision Agent 配置',
     icon: Bot,
     group: '系统配置'
   },
   {
     id: ApiConfigType.WORKFLOW,
-    label: '工作流配置',
+    label: 'Workflow 配置',
     icon: Workflow,
     group: '系统配置'
   }

@@ -177,22 +177,62 @@ export interface ProductSupplyAnalysis {
 // API 数据加载
 // ============================================================================
 
-import { httpClient } from '../api/httpClient';
+import { ontologyApi } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
 
 /**
- * 通用API加载辅助函数
+ * 获取对象类型ID配置 (与BOM服务保持一致)
  */
-async function loadDataFromView<T>(viewId: string, mapper: (item: any) => T, name: string): Promise<T[]> {
-    try {
-        console.log(`[API] Loading ${name}...`);
-        const url = `/proxy-metric/v1/data-views/${viewId}?include_view=true`;
-        const response = await httpClient.postAsGet<any>(url, { limit: 2000, offset: 0 });
+const getObjectTypeId = (entityType: string, defaultId: string) => {
+    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+    if (config?.objectTypeId) {
+        console.log(`[智能计算] 使用配置的对象ID: ${entityType} -> ${config.objectTypeId}`);
+        return config.objectTypeId;
+    }
+    console.warn(`[智能计算] 未找到配置的对象ID，使用默认值: ${entityType} -> ${defaultId}`);
+    return defaultId;
+};
 
-        const rawData = response.data?.entries || response.data || [];
+// 默认ID作为后备
+const DEFAULT_IDS = {
+    product: 'd56v4ue9olk4bpa66v00',
+    sales_order: 'd56vh169olk4bpa66v80',
+    supplier: '2004376134633480193',
+    bom: 'd56vqtm9olk4bpa66vfg',
+    inventory: 'd56vcuu9olk4bpa66v3g',
+};
+
+/**
+ * 通用Ontology API加载辅助函数
+ */
+async function loadDataFromOntology<T>(entityType: string, defaultId: string, mapper: (item: any) => T, name: string): Promise<T[]> {
+    try {
+        console.log(`[API] Loading ${name} from Ontology...`);
+        const objectTypeId = getObjectTypeId(entityType, defaultId);
+
+        // 使用防御性加载逻辑 (Safe Mode fallback)
+        let response;
+        try {
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit: 2000,
+                include_type_info: true,
+                include_logic_params: false
+            });
+        } catch (firstError) {
+            console.warn(`[API] ${name} 加载失败，尝试简化请求回退...`, firstError);
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit: 500,
+                include_type_info: false,
+                include_logic_params: false
+            });
+            console.log(`[API] ${name} 回退加载成功`);
+        }
+
+        const rawData = response.entries || [];
 
         if (Array.isArray(rawData)) {
             console.log(`[API] Loaded ${name}: ${rawData.length} records`);
-            if (rawData.length > 0) {
+            if (rawData.length > 0 && name.includes('Sample')) {
                 console.log(`[API] Sample data:`, rawData[0]);
             }
             return rawData.map(mapper);
@@ -202,7 +242,6 @@ async function loadDataFromView<T>(viewId: string, mapper: (item: any) => T, nam
         }
     } catch (error) {
         console.error(`[智能计算] ${name} 加载失败:`, error);
-        // Strict Mode: Re-throw error to let UI handle it
         throw new Error(`Failed to load ${name}: ${error instanceof Error ? error.message : String(error)}`);
     }
 }
@@ -215,7 +254,7 @@ async function loadDataFromView<T>(viewId: string, mapper: (item: any) => T, nam
  * ID: 2004376134620897282
  */
 export async function loadProductInfo(): Promise<ProductInfo[]> {
-    return loadDataFromView('2004376134620897282', (item) => ({
+    return loadDataFromOntology('product', DEFAULT_IDS.product, (item) => ({
         product_code: item.product_code || item.code || '',
         product_name: item.product_name || item.name || '',
         product_model: item.product_model || item.model || '',
@@ -233,7 +272,7 @@ export async function loadProductInfo(): Promise<ProductInfo[]> {
  * ID: 2004376134629285890
  */
 export async function loadOrderInfo(): Promise<OrderInfo[]> {
-    return loadDataFromView('2004376134629285890', (item) => ({
+    return loadDataFromOntology('sales_order', DEFAULT_IDS.sales_order, (item) => ({
         id: parseInt(item.id) || 0,
         signing_date: item.signing_date || '',
         contract_number: item.contract_number || '',
@@ -255,7 +294,7 @@ export async function loadOrderInfo(): Promise<OrderInfo[]> {
  * ID: 2004376134633480193
  */
 export async function loadSupplierInfo(): Promise<SupplierInfo[]> {
-    return loadDataFromView('2004376134633480193', (item) => ({
+    return loadDataFromOntology('supplier', DEFAULT_IDS.supplier, (item) => ({
         supplier: item.supplier || item.supplier_name || '',
         supplier_code: item.supplier_code || '',
         unit_price_with_tax: parseFloat(item.unit_price_with_tax) || 0,
@@ -275,7 +314,7 @@ export async function loadSupplierInfo(): Promise<SupplierInfo[]> {
  * ID: 2004376134629285892
  */
 export async function loadBOMInfo(): Promise<BOMInfo[]> {
-    return loadDataFromView('2004376134629285892', (item) => ({
+    return loadDataFromOntology('bom', DEFAULT_IDS.bom, (item) => ({
         parent_id: item.parent_id || '',
         parent_code: item.parent_code || '',
         parent_name: item.parent_name || '',
@@ -298,7 +337,7 @@ export async function loadBOMInfo(): Promise<BOMInfo[]> {
  * ID: 2004376134625091585
  */
 export async function loadInventoryInfo(): Promise<InventoryInfo[]> {
-    return loadDataFromView('2004376134625091585', (item) => ({
+    return loadDataFromOntology('inventory', DEFAULT_IDS.inventory, (item) => ({
         item_id: item.item_id || '',
         item_code: item.item_code || '',
         item_name: item.item_name || '',

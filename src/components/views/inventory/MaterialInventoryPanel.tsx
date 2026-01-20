@@ -2,8 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Search, Loader2, AlertTriangle } from 'lucide-react';
 import { metricModelApi, createLastDaysRange } from '../../../api';
 
+import { apiConfigService } from '../../../services/apiConfigService';
+
 // 指标模型 ID 和分析维度配置（物料库存专用接口）
-const MATERIAL_INVENTORY_MODEL_ID = 'd58ihclg5lk40hvh48mg';
+const getMaterialInventoryModelId = () => apiConfigService.getMetricModelId('mm_material_inventory_optimization_huida') || 'd58ihclg5lk40hvh48mg';
 const MATERIAL_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
 
 // 组件内部使用的物料数据类型
@@ -33,11 +35,11 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
             try {
                 setLoading(true);
                 setError(null);
-                
+
                 const timeRange = createLastDaysRange(1);
-                
+
                 const result = await metricModelApi.queryByModelId(
-                    MATERIAL_INVENTORY_MODEL_ID,
+                    getMaterialInventoryModelId(),
                     {
                         instant: true,
                         start: timeRange.start,
@@ -49,13 +51,13 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
 
                 // 转换 API 数据为组件期望的格式
                 const transformedData: MaterialData[] = [];
-                
+
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
                         const materialCode = series.labels?.material_code || '';
                         const materialName = series.labels?.material_name || '';
                         let availableQuantity = 0;
-                        
+
                         if (series.labels?.available_quantity) {
                             availableQuantity = parseFloat(series.labels.available_quantity) || 0;
                         } else if (series.values && series.values.length > 0) {
@@ -79,7 +81,7 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
 
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.currentStock - a.currentStock);
-                
+
                 setMaterials(transformedData);
             } catch (err) {
                 console.error('[MaterialInventoryPanel] API call failed:', err);
@@ -169,9 +171,9 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                                 </div>
                                 {/* Visual Bar */}
                                 <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden ring-1 ring-slate-100">
-                                    <div 
-                                        className={`h-full ${material.currentStock === 0 ? 'bg-red-500' : material.currentStock < 10 ? 'bg-orange-500' : 'bg-purple-500'}`} 
-                                        style={{ width: `${Math.min(100, (material.currentStock / 100) * 100)}%` }} 
+                                    <div
+                                        className={`h-full ${material.currentStock === 0 ? 'bg-red-500' : material.currentStock < 10 ? 'bg-orange-500' : 'bg-purple-500'}`}
+                                        style={{ width: `${Math.min(100, (material.currentStock / 100) * 100)}%` }}
                                     />
                                 </div>
                             </div>

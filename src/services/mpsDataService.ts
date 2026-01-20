@@ -20,13 +20,19 @@ import type { QueryCondition } from '../api/ontologyApi';
 // 对象类型ID常量
 // ============================================================================
 
-const OBJECT_TYPE_IDS = {
-  PRODUCT: 'd56v4ue9olk4bpa66v00',           // 产品对象类型
-  PRODUCTION_PLAN: 'd5704qm9olk4bpa66vp0',   // 工厂生产计划对象类型
-  INVENTORY: 'd56vcuu9olk4bpa66v3g',         // 库存对象类型
-  SALES_ORDER: 'd56vh169olk4bpa66v80',       // 销售订单对象类型
-  BOM: 'd56vqtm9olk4bpa66vfg',              // 产品BOM对象类型
-} as const;
+import { apiConfigService } from './apiConfigService';
+
+// ============================================================================
+// 对象类型ID常量 (已修正：使用配置服务获取)
+// ============================================================================
+
+const getObjectTypeIds = () => ({
+  PRODUCT: apiConfigService.getOntologyObjectId('oo_product_huida') || '',           // 产品对象类型
+  PRODUCTION_PLAN: apiConfigService.getOntologyObjectId('oo_production_plan_huida') || 'd5704qm9olk4bpa66vp0',   // 工厂生产计划对象类型
+  INVENTORY: apiConfigService.getOntologyObjectId('oo_inventory_huida') || '',         // 库存对象类型
+  SALES_ORDER: apiConfigService.getOntologyObjectId('oo_sales_order_huida') || '',       // 销售订单对象类型
+  BOM: apiConfigService.getOntologyObjectId('oo_bom_huida') || '',              // 产品BOM对象类型
+});
 
 // Note: DataSourceResponse type removed - all functions now return direct data from API
 // CSV fallback logic completely removed per Constitution Principle 1 & 7
@@ -40,7 +46,8 @@ const OBJECT_TYPE_IDS = {
  * 符合Constitution Principle 1: 仅从API获取数据，字段名遵循HD供应链业务知识网络.json
  */
 export async function fetchProductList(): Promise<APIProduct[]> {
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.PRODUCT, {
     limit: 100,
     need_total: true,
   });
@@ -67,7 +74,8 @@ export async function fetchProductionPlan(productCode: string): Promise<Producti
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCTION_PLAN, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.PRODUCTION_PLAN, {
     condition,
     limit: 1000,
   });
@@ -96,7 +104,8 @@ export async function fetchInventory(productCode: string): Promise<Inventory | n
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.INVENTORY, {
     condition,
     limit: 100,
   });
@@ -136,7 +145,8 @@ export async function fetchPendingOrders(productCode: string): Promise<number> {
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.SALES_ORDER, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.SALES_ORDER, {
     condition,
     limit: 1000,
   });
@@ -168,12 +178,14 @@ export async function fetchPendingOrders(productCode: string): Promise<number> {
 export async function fetchBOMData(productCode: string): Promise<BOMItem[]> {
   console.log(`[mpsDataService] ========== fetchBOMData 开始 ==========`);
   console.log(`[mpsDataService] 产品编码: ${productCode}`);
-  console.log(`[mpsDataService] BOM对象类型ID: ${OBJECT_TYPE_IDS.BOM}`);
+
+  const objectTypeIds = getObjectTypeIds();
+  console.log(`[mpsDataService] BOM对象类型ID: ${objectTypeIds.BOM}`);
 
   // 🔍 DEBUG: 首先查询所有BOM数据（无条件）以验证数据是否存在
   console.log(`[mpsDataService] 🔍 DEBUG: 查询所有BOM数据（无条件）...`);
   try {
-    const debugResponse = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+    const debugResponse = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
       limit: 10,
       need_total: true,
     });
@@ -198,7 +210,7 @@ export async function fetchBOMData(productCode: string): Promise<BOMItem[]> {
 
   // Step 1: 获取所有BOM数据（一次性查询，避免多次网络往返）
   console.log(`[mpsDataService] Step 1: 获取所有BOM数据...`);
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
     limit: 10000, // 假设BOM总数不超过10000条
     need_total: true,
   });
@@ -284,7 +296,7 @@ export function buildBOMTree(
   // 创建节点映射表
   const nodeMap = new Map<string, BOMNode>();
   const alternativeGroups = new Map<number, BOMItem[]>();
-  
+
   // 第一遍：创建所有节点（不包括替代件，如果hideAlternatives=true）
   for (const item of bomItems) {
     if (hideAlternatives && item.alternative_part === '替代') {
@@ -297,7 +309,7 @@ export function buildBOMTree(
       }
       continue;
     }
-    
+
     // 创建或更新子节点
     if (!nodeMap.has(item.child_code)) {
       nodeMap.set(item.child_code, {
@@ -315,23 +327,23 @@ export function buildBOMTree(
       });
     }
   }
-  
+
   // 第二遍：构建父子关系
   const rootNodes: BOMNode[] = [];
-  
+
   function buildNode(parentCode: string, level: number): BOMNode[] {
     const children: BOMNode[] = [];
-    
+
     for (const item of bomItems) {
       if (item.parent_code !== parentCode) continue;
       if (hideAlternatives && item.alternative_part === '替代') continue;
-      
+
       const node = nodeMap.get(item.child_code);
       if (!node) continue;
-      
+
       node.level = level;
       node.children = buildNode(item.child_code, level + 1);
-      
+
       // 处理替代组
       if (item.alternative_group && alternativeGroups.has(item.alternative_group)) {
         const alternatives = alternativeGroups.get(item.alternative_group)!;
@@ -349,13 +361,13 @@ export function buildBOMTree(
           isAlternative: true,
         }));
       }
-      
+
       children.push(node);
     }
-    
+
     return children;
   }
-  
+
   const rootNode = nodeMap.get(rootCode);
   if (rootNode) {
     rootNode.level = 0;
@@ -373,7 +385,7 @@ export function buildBOMTree(
       isAlternative: false,
     });
   }
-  
+
   return rootNodes;
 }
 
@@ -424,7 +436,7 @@ export async function buildPlanInfo(productCode: string, productName?: string): 
 // ============================================================================
 
 // 物料对象类型ID
-const MATERIAL_OBJECT_TYPE_ID = 'd56voju9olk4bpa66vcg';
+// const MATERIAL_OBJECT_TYPE_ID = 'd56voju9olk4bpa66vcg'; // Removed, using dynamic getter
 
 /**
  * 物料信息接口（从API获取）
@@ -577,7 +589,11 @@ export async function fetchMaterialDetails(
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(MATERIAL_OBJECT_TYPE_ID, {
+  const objectTypeIds = getObjectTypeIds();
+  // Using material ID from config if possible, but fetching dynamically
+  const materialObjectId = apiConfigService.getOntologyObjectId('oo_material_huida') || '';
+
+  const response = await ontologyApi.queryObjectInstances(materialObjectId, {
     condition,
     limit: 10000,
   });
@@ -618,7 +634,8 @@ export async function fetchProductExtendedInfo(
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.PRODUCT, {
     condition,
     limit: 1,
   });
@@ -661,7 +678,8 @@ export async function fetchInventoryBatch(
     value_from: 'const',
   };
 
-  const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
+  const objectTypeIds = getObjectTypeIds();
+  const response = await ontologyApi.queryObjectInstances(objectTypeIds.INVENTORY, {
     condition,
     limit: 10000,
   });

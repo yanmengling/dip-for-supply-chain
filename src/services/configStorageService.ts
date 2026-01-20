@@ -22,7 +22,7 @@ import {
 // ============================================================================
 
 const STORAGE_KEY = 'supply_chain_api_config_collection';
-const CONFIG_VERSION = '1.0.1';
+const CONFIG_VERSION = '1.0.8';
 
 // ============================================================================
 // Configuration Storage Service
@@ -64,14 +64,119 @@ class ConfigStorageService {
                     }
                 }
 
+                // MIGRATION 1.0.2: Add missing workflow configurations
+                if (parsed.version === '1.0.1' || !parsed.version) {
+                    const defaults = this.getDefaultConfig();
+                    const existingWorkflowIds = new Set(parsed.workflows?.map(wf => wf.id) || []);
+
+                    // Add missing workflows from defaults
+                    const missingWorkflows = defaults.workflows.filter(wf => !existingWorkflowIds.has(wf.id));
+                    if (missingWorkflows.length > 0) {
+                        parsed.workflows = [...(parsed.workflows || []), ...missingWorkflows];
+                        console.log(`[ConfigStorage] Migration: Added ${missingWorkflows.length} missing workflow(s):`, missingWorkflows.map(wf => wf.name));
+                    }
+                }
+
+                if (parsed.metricModels) {
+                    const beforeCount = parsed.metricModels.length;
+                    parsed.metricModels = parsed.metricModels.filter(mm =>
+                        !mm.name.includes('(Mock)') && !mm.name.includes('（Mock）')
+                    );
+                    const afterCount = parsed.metricModels.length;
+
+                    if (beforeCount > afterCount) {
+                        console.log(`[ConfigStorage] Migration: Removed ${beforeCount - afterCount} mock metric model(s)`);
+                    }
+                }
+
+                // MIGRATION 1.0.4: Add Production Plan Object
+                if (!parsed.ontologyObjects) parsed.ontologyObjects = [];
+                const ppExists = parsed.ontologyObjects.some(o => o.id === 'oo_production_plan_huida');
+                if (!ppExists) {
+                    const defaults = this.getDefaultConfig();
+                    const ppConfig = defaults.ontologyObjects?.find(o => o.id === 'oo_production_plan_huida');
+                    if (ppConfig) {
+                        parsed.ontologyObjects.push(ppConfig);
+                        console.log('[ConfigStorage] Migration: Added Production Plan object configuration');
+                    }
+                }
+
+                // MIGRATION 1.0.5: Update Ontology Object IDs for BOM Service
+                // Automatically update the objectTypeIds to the new Ontology API values
+                if (parsed.ontologyObjects) {
+                    const updates = {
+                        'oo_product_huida': 'd56v4ue9olk4bpa66v00',
+                        'oo_bom_huida': 'd56vqtm9olk4bpa66vfg',
+                        'oo_inventory_huida': 'd56vcuu9olk4bpa66v3g',
+                        'oo_material_huida': 'd56voju9olk4bpa66vcg'
+                    };
+
+                    let updatedCount = 0;
+                    parsed.ontologyObjects.forEach(obj => {
+                        if (updates[obj.id as keyof typeof updates]) {
+                            const newId = updates[obj.id as keyof typeof updates];
+                            if (obj.objectTypeId !== newId) {
+                                obj.objectTypeId = newId;
+                                updatedCount++;
+                            }
+                        }
+                    });
+
+                    if (updatedCount > 0) {
+                        console.log(`[ConfigStorage] Migration: Updated ${updatedCount} ontology object IDs to new values`);
+                    }
+                }
+
+                // MIGRATION 1.0.6: Add new metric models for inventory and graph
+                if (!parsed.metricModels) parsed.metricModels = [];
+                const defaults = this.getDefaultConfig();
+                const newMetricIds = [
+                    'mm_product_inventory_optimization_huida',
+                    'mm_material_inventory_optimization_huida',
+                    'mm_order_demand_huida',
+                    'mm_product_count_huida',
+                    'mm_material_count_huida',
+                    'mm_supplier_count_huida'
+                ];
+
+                let addedMetrics = 0;
+                newMetricIds.forEach(id => {
+                    const exists = parsed.metricModels?.some(m => m.id === id);
+                    if (!exists) {
+                        const config = defaults.metricModels?.find(m => m.id === id);
+                        if (config) {
+                            parsed.metricModels!.push(config);
+                            addedMetrics++;
+                        }
+                    }
+                });
+
+                if (addedMetrics > 0) {
+                    console.log(`[ConfigStorage] Migration: Added ${addedMetrics} new metric models`);
+                }
+
+                // MIGRATION 1.0.8: Aggressive ensure Supplier Evaluation Object
+                if (!parsed.ontologyObjects) parsed.ontologyObjects = [];
+                const seExistsFinal = parsed.ontologyObjects.some(o => o.id === 'oo_supplier_evaluation_huida');
+                if (!seExistsFinal) {
+                    const defaults = this.getDefaultConfig();
+                    const seConfig = defaults.ontologyObjects?.find(o => o.id === 'oo_supplier_evaluation_huida');
+                    if (seConfig) {
+                        parsed.ontologyObjects.push(seConfig);
+                        console.log('[ConfigStorage] Migration 1.0.8: Force added Supplier Evaluation object configuration');
+                    }
+                }
+
                 // Update version and save immediately
                 parsed.version = this.version;
                 this.saveConfig(parsed);
             }
 
             console.log('[ConfigStorage] Loaded configuration:', {
+                version: parsed.version,
                 knowledgeNetworks: parsed.knowledgeNetworks.length,
-                dataViews: parsed.dataViews.length,
+                ontologyObjects: parsed.ontologyObjects?.length || 0,
+                dataViews: parsed.dataViews?.length || 0,
                 metricModels: parsed.metricModels.length,
                 agents: parsed.agents.length,
                 workflows: parsed.workflows.length
@@ -116,7 +221,7 @@ class ConfigStorageService {
             if (!types.has(ApiConfigType.KNOWLEDGE_NETWORK)) {
                 exportData.knowledgeNetworks = [];
             }
-            if (!types.has(ApiConfigType.DATA_VIEW)) {
+            if (!types.has(ApiConfigType.ONTOLOGY_OBJECT)) {
                 exportData.dataViews = [];
             }
             if (!types.has(ApiConfigType.METRIC_MODEL)) {
@@ -174,7 +279,7 @@ class ConfigStorageService {
                 const existing = this.loadConfig();
                 const merged: ApiConfigCollection = {
                     knowledgeNetworks: this.mergeConfigs(existing.knowledgeNetworks, imported.knowledgeNetworks || []),
-                    dataViews: this.mergeConfigs(existing.dataViews, imported.dataViews || []),
+                    dataViews: this.mergeConfigs(existing.dataViews || [], imported.dataViews || []),
                     metricModels: this.mergeConfigs(existing.metricModels, imported.metricModels || []),
                     agents: this.mergeConfigs(existing.agents, imported.agents || []),
                     workflows: this.mergeConfigs(existing.workflows, imported.workflows || []),
@@ -250,10 +355,10 @@ class ConfigStorageService {
 
         if (config.dataViews) {
             config.dataViews.forEach((dv, index) => {
-                if (!dv.id || !dv.name || !dv.viewId || !dv.entityType) {
+                if (!dv.id || !dv.name || !dv.objectTypeId || !dv.entityType) {
                     errors.push({
                         field: `dataViews[${index}]`,
-                        message: 'Missing required fields: id, name, viewId, or entityType',
+                        message: 'Missing required fields: id, name, objectTypeId, or entityType',
                         code: 'MISSING_REQUIRED_FIELD'
                     });
                 }
@@ -329,13 +434,13 @@ class ConfigStorageService {
                     updatedAt: now
                 }
             ],
-            dataViews: [
+            ontologyObjects: [
                 {
-                    id: 'dv_supplier_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达供应商数据视图',
-                    description: '惠达供应链大脑 - 供应商数据',
-                    viewId: '2004376134633480193',
+                    id: 'oo_supplier_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达供应商对象',
+                    description: '惠达供应链大脑 - 供应商对象类型',
+                    objectTypeId: '2004376134633480193',
                     entityType: 'supplier',
                     enabled: true,
                     tags: ['huida', 'supplier'],
@@ -343,11 +448,23 @@ class ConfigStorageService {
                     updatedAt: now
                 },
                 {
-                    id: 'dv_material_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达物料数据视图',
-                    description: '惠达供应链大脑 - 物料数据',
-                    viewId: '2004376134629285891',
+                    id: 'oo_supplier_evaluation_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达供应商评估对象',
+                    description: '惠达供应链大脑 - 供应商评估对象类型',
+                    objectTypeId: 'd5700je9olk4bpa66vkg',
+                    entityType: 'supplier_evaluation',
+                    enabled: true,
+                    tags: ['huida', 'supplier', 'evaluation'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'oo_material_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达物料对象',
+                    description: '惠达供应链大脑 - 物料对象类型',
+                    objectTypeId: 'd56voju9olk4bpa66vcg', // Updated to new ID
                     entityType: 'material',
                     enabled: true,
                     tags: ['huida', 'material'],
@@ -355,11 +472,11 @@ class ConfigStorageService {
                     updatedAt: now
                 },
                 {
-                    id: 'dv_product_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达产品数据视图',
-                    description: '惠达供应链大脑 - 产品数据',
-                    viewId: '2004376134620897282',
+                    id: 'oo_product_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达产品对象',
+                    description: '惠达供应链大脑 - 产品对象类型',
+                    objectTypeId: 'd56v4ue9olk4bpa66v00', // Updated to new ID
                     entityType: 'product',
                     enabled: true,
                     tags: ['huida', 'product'],
@@ -367,11 +484,11 @@ class ConfigStorageService {
                     updatedAt: now
                 },
                 {
-                    id: 'dv_bom_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达BOM数据视图',
-                    description: '惠达供应链大脑 - BOM数据',
-                    viewId: '2004376134629285892',
+                    id: 'oo_bom_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达BOM对象',
+                    description: '惠达供应链大脑 - BOM对象类型',
+                    objectTypeId: 'd56vqtm9olk4bpa66vfg', // Updated to new ID
                     entityType: 'bom',
                     enabled: true,
                     tags: ['huida', 'bom'],
@@ -379,11 +496,11 @@ class ConfigStorageService {
                     updatedAt: now
                 },
                 {
-                    id: 'dv_inventory_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达库存数据视图',
-                    description: '惠达供应链大脑 - 库存数据',
-                    viewId: '2004376134625091585',
+                    id: 'oo_inventory_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达库存对象',
+                    description: '惠达供应链大脑 - 库存对象类型',
+                    objectTypeId: 'd56vcuu9olk4bpa66v3g', // Updated to new ID
                     entityType: 'inventory',
                     enabled: true,
                     tags: ['huida', 'inventory'],
@@ -391,26 +508,38 @@ class ConfigStorageService {
                     updatedAt: now
                 },
                 {
-                    id: 'dv_order_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达订单数据视图',
-                    description: '惠达供应链大脑 - 订单数据',
-                    viewId: '2004376134629285890',
-                    entityType: 'order',
+                    id: 'oo_sales_order_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达销售订单对象',
+                    description: '惠达供应链大脑 - 销售订单对象类型',
+                    objectTypeId: 'd56vh169olk4bpa66v80',
+                    entityType: 'sales_order',
                     enabled: true,
-                    tags: ['huida', 'order'],
+                    tags: ['huida', 'order', 'sales', 'cockpit'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'dv_customer_huida',
-                    type: ApiConfigType.DATA_VIEW,
-                    name: '惠达客户数据视图',
-                    description: '惠达供应链大脑 - 客户数据',
-                    viewId: '2004376134633480194',
+                    id: 'oo_customer_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '惠达客户对象',
+                    description: '惠达供应链大脑 - 客户对象类型',
+                    objectTypeId: '2004376134633480194',
                     entityType: 'customer',
                     enabled: true,
                     tags: ['huida', 'customer'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'oo_production_plan_huida',
+                    type: ApiConfigType.ONTOLOGY_OBJECT,
+                    name: '工厂生产计划',
+                    description: '惠达供应链大脑 - 生产计划对象类型',
+                    objectTypeId: 'd5704qm9olk4bpa66vp0',
+                    entityType: 'production_plan',
+                    enabled: true,
+                    tags: ['huida', 'production', 'plan'],
                     createdAt: now,
                     updatedAt: now
                 }
@@ -487,6 +616,94 @@ class ConfigStorageService {
                     tags: ['graph', 'inventory', 'product'],
                     createdAt: now,
                     updatedAt: now
+                },
+
+                // 库存优化指标
+                {
+                    id: 'mm_product_inventory_optimization_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '产品库存优化模型 (惠达)',
+                    description: '库存优化 - 产品库存分析核心模型',
+                    modelId: 'd58keb5g5lk40hvh48og',
+                    groupName: '库存优化',
+                    modelName: '产品库存优化',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['inventory', 'product', 'optimization', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_material_inventory_optimization_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '物料库存优化模型 (惠达)',
+                    description: '库存优化 - 物料库存分析核心模型',
+                    modelId: 'd58ihclg5lk40hvh48mg',
+                    groupName: '库存优化',
+                    modelName: '物料库存优化',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['inventory', 'material', 'optimization', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+
+                // 供应链图谱指标 (新命名规范)
+                {
+                    id: 'mm_order_demand_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '订单需求指标 (惠达)',
+                    description: '供应链图谱 - 订单需求统计',
+                    modelId: 'd58fu5lg5lk40hvh48kg',
+                    groupName: '供应链图谱',
+                    modelName: '订单需求',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'order', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_product_count_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '产品数量指标 (惠达)',
+                    description: '供应链图谱 - 产品数量统计',
+                    modelId: 'd58fv0lg5lk40hvh48l0',
+                    groupName: '供应链图谱',
+                    modelName: '产品数量',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'product', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_material_count_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '物料数量指标 (惠达)',
+                    description: '供应链图谱 - 物料数量统计',
+                    modelId: 'd58g085g5lk40hvh48lg',
+                    groupName: '供应链图谱',
+                    modelName: '物料数量',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'material', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'mm_supplier_count_huida',
+                    type: ApiConfigType.METRIC_MODEL,
+                    name: '供应商数量指标 (惠达)',
+                    description: '供应链图谱 - 供应商数量统计',
+                    modelId: 'd58g53lg5lk40hvh48m0',
+                    groupName: '供应链图谱',
+                    modelName: '供应商数量',
+                    unit: '个',
+                    enabled: true,
+                    tags: ['graph', 'supplier', 'huida'],
+                    createdAt: now,
+                    updatedAt: now
                 }
             ],
             agents: [
@@ -515,7 +732,19 @@ class ConfigStorageService {
                     dagId: '600565437910010238',
                     triggerType: 'manual' as const,
                     enabled: true,
-                    tags: ['ai', 'analysis'],
+                    tags: ['ai', 'analysis', 'cockpit'],
+                    createdAt: now,
+                    updatedAt: now
+                },
+                {
+                    id: 'wf_inventory_ai_analysis',
+                    type: ApiConfigType.WORKFLOW,
+                    name: '库存优化 AI 分析工作流',
+                    description: '库存优化专用 AI 智能分析工作流',
+                    dagId: '602192728104683735',
+                    triggerType: 'manual' as const,
+                    enabled: true,
+                    tags: ['ai', 'analysis', 'inventory'],
                     createdAt: now,
                     updatedAt: now
                 }

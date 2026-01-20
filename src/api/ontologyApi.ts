@@ -30,7 +30,7 @@ export const HD_SUPPLY_CHAIN_KN_NAME = 'HD供应链业务知识网络';
  * Logic Property Data Source
  */
 export interface LogicPropertyDataSource {
-  type: 'metric-model' | 'data-view' | 'operator';
+  type: 'metric-model' | 'data-view' | 'operator' | 'metric';
   id: string;
   name?: string;
 }
@@ -496,15 +496,15 @@ class OntologyApiClient {
 
     console.log(`[OntologyAPI] getObjectType requesting: ${url}`);
     const response = await httpClient.get<any>(url);
-    
+
     // Validate response
     if (!response || !response.data) {
       console.error(`[OntologyAPI] Invalid response from getObjectType:`, response);
       throw new Error(`Invalid response from getObjectType API: ${JSON.stringify(response)}`);
     }
-    
+
     let objectType = response.data;
-    
+
     // Handle case where API returns array format with entries
     if (objectType.entries && Array.isArray(objectType.entries)) {
       console.log(`[OntologyAPI] Response contains entries array with ${objectType.entries.length} items`);
@@ -515,7 +515,7 @@ class OntologyApiClient {
       objectType = objectType.entries[0];
       console.log(`[OntologyAPI] Extracted object type from entries array: ${objectType.id} (${objectType.name || 'unnamed'})`);
     }
-    
+
     // Log response details for debugging
     console.log(`[OntologyAPI] getObjectType response:`, {
       id: objectType.id,
@@ -523,14 +523,14 @@ class OntologyApiClient {
       hasLogicProperties: !!objectType.logic_properties,
       logicPropertiesCount: objectType.logic_properties?.length || 0,
     });
-    
+
     if (!objectType.id) {
       console.error(`[OntologyAPI] Response missing id field:`, objectType);
       console.error(`[OntologyAPI] Response keys:`, Object.keys(objectType));
       console.error(`[OntologyAPI] Full response:`, JSON.stringify(response.data).substring(0, 1000));
       throw new Error(`Invalid object type response: missing id field. Response: ${JSON.stringify(objectType).substring(0, 500)}`);
     }
-    
+
     return objectType as ObjectType;
   }
 
@@ -564,27 +564,27 @@ class OntologyApiClient {
     console.log(`[OntologyAPI] 知识网络ID: ${knId}`);
     console.log(`[OntologyAPI] 基础URL: ${baseUrl}`);
     console.log(`[OntologyAPI] 完整查询URL: ${url}`);
-    
+
     // Build query parameters
     const queryParams: string[] = [];
-    
+
     // include_logic_params is a query parameter (boolean)
     if (options?.include_logic_params !== undefined) {
       queryParams.push(`include_logic_params=${options.include_logic_params}`);
     }
-    
+
     // include_type_info is a query parameter (boolean)
     if (options?.include_type_info !== undefined) {
       queryParams.push(`include_type_info=${options.include_type_info}`);
     }
-    
+
     const queryString = queryParams.length > 0 ? `?${queryParams.join('&')}` : '';
     url = `${url}${queryString}`;
     console.log(`[OntologyAPI] 完整URL: ${url}`);
-    
+
     // Build request body according to ADP Ontology Query API spec
     const requestBody: any = {};
-    
+
     // Condition (filter)
     // Only include condition if explicitly provided
     // Backend API does not accept empty sub_conditions array
@@ -594,7 +594,7 @@ class OntologyApiClient {
     } else {
       console.log(`[OntologyAPI] 无查询条件，将查询所有实例`);
     }
-    
+
     // Limit
     if (options?.limit !== undefined) {
       requestBody.limit = options.limit;
@@ -602,37 +602,37 @@ class OntologyApiClient {
     } else {
       console.log(`[OntologyAPI] 未设置limit，将使用API默认限制`);
     }
-    
+
     // Need total count
     if (options?.need_total !== undefined) {
       requestBody.need_total = options.need_total;
     }
-    
+
     // Search after
     if (options?.search_after) {
       requestBody.search_after = options.search_after;
     }
-    
+
     // Logic property parameters
     if (options?.logic_params && options.logic_params.length > 0) {
       requestBody.logic_params = options.logic_params;
     }
-    
+
     console.log(`[OntologyAPI] 请求体 (POST body):`, JSON.stringify(requestBody, null, 2));
     console.log(`[OntologyAPI] 发送请求...`);
-    
+
     // According to ADP Ontology Query spec, use POST with X-HTTP-Method-Override: GET header
     // The httpClient.postAsGet method handles this automatically
     let response: any;
     try {
       response = await httpClient.postAsGet<ObjectInstancesResponse>(url, requestBody);
-      
+
       // Log full response for debugging
       console.log(`[OntologyAPI] ========== queryObjectInstances 响应 ==========`);
       console.log(`[OntologyAPI] HTTP状态码: ${response.status}`);
       console.log(`[OntologyAPI] 响应包含data: ${!!response.data}`);
       console.log(`[OntologyAPI] 响应data的keys:`, response.data ? Object.keys(response.data) : []);
-      
+
       if (response.data) {
         const responseStr = JSON.stringify(response.data, null, 2);
         console.log(`[OntologyAPI] 响应data结构 (前2000字符):`, responseStr.substring(0, 2000));
@@ -640,7 +640,7 @@ class OntologyApiClient {
           console.log(`[OntologyAPI] ... (还有${responseStr.length - 2000}字符未显示)`);
         }
       }
-      
+
       // Validate response structure
       if (!response.data) {
         console.error(`[OntologyAPI] ❌ API返回空data`);
@@ -648,7 +648,7 @@ class OntologyApiClient {
         console.error(`[OntologyAPI] 完整响应对象:`, JSON.stringify(response, null, 2).substring(0, 1000));
         throw new Error(`API返回空数据。状态码: ${response.status || 'unknown'}`);
       }
-      
+
       // Check if response has error structure
       if ((response.data as any).error || (response.data as any).message) {
         const errorMsg = (response.data as any).error || (response.data as any).message || '未知错误';
@@ -666,12 +666,12 @@ class OntologyApiClient {
       console.error(`[OntologyAPI] 请求体:`, JSON.stringify(requestBody, null, 2));
       throw error;
     }
-    
+
     // Handle different response formats
     // Some APIs return "datas" instead of "entries"
     const rawData = response.data as any;
     let entries: any[] = [];
-    
+
     if (rawData.entries && Array.isArray(rawData.entries)) {
       // Standard format with "entries"
       entries = rawData.entries;
@@ -687,7 +687,7 @@ class OntologyApiClient {
       console.error(`[OntologyAPI] 响应data结构:`, JSON.stringify(rawData, null, 2).substring(0, 2000));
       throw new Error(`API响应缺少entries或datas字段。响应结构: ${JSON.stringify(rawData, null, 2).substring(0, 500)}`);
     }
-    
+
     // Log entries sample for debugging
     if (entries.length > 0) {
       console.log(`[OntologyAPI] 响应条目示例（前3条）:`, entries.slice(0, 3).map((entry: any) => {
@@ -702,7 +702,7 @@ class OntologyApiClient {
     } else {
       console.warn(`[OntologyAPI] ⚠️ 响应条目数为0，可能没有匹配的数据`);
     }
-    
+
     // Normalize response to standard ObjectInstancesResponse format
     const normalizedResponse: ObjectInstancesResponse = {
       entries: entries,
@@ -710,12 +710,12 @@ class OntologyApiClient {
       search_after: rawData.search_after,
       object_type: rawData.object_type,
     };
-    
+
     console.log(`[OntologyAPI] Normalized response: ${normalizedResponse.entries.length} entries`);
     console.log(`[OntologyAPI] Total count: ${normalizedResponse.total_count || 'N/A'}`);
     console.log(`[OntologyAPI] ========== queryObjectInstances 完成 ==========`);
     console.log(`[OntologyAPI] 返回${normalizedResponse.entries.length}条记录`);
-    
+
     return normalizedResponse;
   }
 
@@ -731,19 +731,19 @@ class OntologyApiClient {
     options: QueryObjectPropertyValuesOptions
   ): Promise<ObjectPropertyValuesResponse> {
     const knId = this.getKnowledgeNetworkId();
-    
+
     // Path: /api/ontology-query/v1/knowledge-networks/{kn_id}/object-types/{ot_id}/properties
     const urlPrefix = '/api/ontology-query/v1';
     const url = `${urlPrefix}/knowledge-networks/${knId}/object-types/${objectTypeId}/properties`;
-    
+
     console.log(`[OntologyAPI] queryObjectPropertyValues - Requesting URL: ${url}`);
     console.log(`[OntologyAPI] queryObjectPropertyValues - Request Payload:`, JSON.stringify(options, null, 2));
-    
-    // Use postAsGet to include X-HTTP-Method-Override: GET if required by ADP
-    const response = await httpClient.postAsGet<ObjectPropertyValuesResponse>(url, options);
-    
+
+    // Use standard post method
+    const response = await httpClient.post<ObjectPropertyValuesResponse>(url, options);
+
     console.log(`[OntologyAPI] queryObjectPropertyValues - Response Data:`, JSON.stringify(response.data, null, 2));
-    
+
     return response.data;
   }
 }

@@ -4,7 +4,109 @@
  * Provides material-related business logic using API data.
  */
 
-import { loadMaterialEntities, loadMaterialProcurementEvents, loadInventoryEvents } from './ontologyDataService';
+import { loadMaterialEntities, loadMaterialProcurementEvents, loadInventoryEvents, loadSupplierEntities } from './ontologyDataService';
+import { ontologyApi } from '../api';
+
+/**
+ * Get main materials by purchase amount from supplier API
+ * Uses supplier-material relationship data from configured object type
+ * This avoids calling separate material and procurement APIs
+ */
+export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
+    console.log('[MaterialService] Getting main materials from supplier API...');
+
+    try {
+        const { ontologyApi } = await import('../api');
+        const { apiConfigService } = await import('./apiConfigService');
+
+        // Load supplier-material relationship data using config
+        const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier_evaluation_huida') || '';
+
+        if (!objectTypeId) {
+            console.warn('[MaterialService] Missing configuration for "oo_supplier_evaluation_huida". Data fetching skipped. Please try resetting to default configuration in the Configuration Center if this persists.');
+            return [];
+        }
+
+        const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+            limit: 10000,
+            need_total: false,
+        });
+
+        // Group by material and calculate total purchase amount
+        const materialMap = new Map<string, {
+            materialCode: string;
+            materialName: string;
+            suppliers: Array<{
+                supplierId: string;
+                supplierName: string;
+                unitPrice: number;
+                paymentTerms: string;
+            }>;
+            totalPurchaseAmount: number;
+        }>();
+
+        response.entries.forEach((item: any) => {
+            const materialCode = item.provided_material_code;
+            const materialName = item.provided_material_name;
+            const supplierCode = item.supplier_code;
+            const supplierName = item.supplier;
+            const unitPrice = Number(item.unit_price_with_tax || 0);
+
+            if (!materialCode) return;
+
+            if (!materialMap.has(materialCode)) {
+                materialMap.set(materialCode, {
+                    materialCode,
+                    materialName,
+                    suppliers: [],
+                    totalPurchaseAmount: 0,
+                });
+            }
+
+            const material = materialMap.get(materialCode)!;
+            material.suppliers.push({
+                supplierId: supplierCode,
+                supplierName: supplierName,
+                unitPrice,
+                paymentTerms: item.payment_terms || '',
+            });
+
+            // Estimate purchase amount (unit price * estimated quantity)
+            // Since we don't have actual purchase quantity, use unit price as proxy
+            material.totalPurchaseAmount += unitPrice * 1000; // Assume 1000 units as baseline
+        });
+
+        // Convert to array and sort by total purchase amount
+        const materials = Array.from(materialMap.values())
+            .sort((a, b) => b.totalPurchaseAmount - a.totalPurchaseAmount)
+            .map((material, index) => {
+                // Get the primary supplier (lowest price)
+                const primarySupplier = material.suppliers.sort((a, b) => a.unitPrice - b.unitPrice)[0];
+
+                return {
+                    rank: index + 1,
+                    materialCode: material.materialCode,
+                    materialName: material.materialName,
+                    supplierId: primarySupplier.supplierId,
+                    supplierName: primarySupplier.supplierName,
+                    annualPurchaseAmount: material.totalPurchaseAmount,
+                    currentStock: 0, // Not available in supplier API
+                    qualityRating: 85, // Mock value
+                    riskRating: 20, // Mock value
+                    onTimeDeliveryRate: 90, // Mock value
+                    riskCoefficient: 15, // Mock value
+                    qualityEvents: [], // Not available in supplier API
+                    alternativeSuppliers: material.suppliers.length - 1,
+                };
+            });
+
+        console.log(`[MaterialService] Found ${materials.length} materials from supplier data`);
+        return materials;
+    } catch (error) {
+        console.error('[MaterialService] Failed to get materials from supplier data:', error);
+        return [];
+    }
+}
 
 /**
  * Get main materials by purchase amount

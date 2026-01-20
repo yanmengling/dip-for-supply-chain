@@ -43,49 +43,94 @@ export interface ProductionStats {
     statusDistribution: { status: string; count: number; percentage: number }[];
 }
 
-import { httpClient } from '../api/httpClient';
+import { ontologyApi } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
+import { ApiConfigType, type OntologyObjectConfig } from '../types/apiConfig';
+
+const DEFAULT_PP_OBJECT_TYPE_ID = 'd5704qm9olk4bpa66vp0';
 
 /**
- * 加载生产计划数据 (仅API)
+ * Get configured Production Plan Object Type ID
+ */
+function getProductionPlanObjectTypeId(): string {
+    const configs = apiConfigService.getConfigsByType(ApiConfigType.ONTOLOGY_OBJECT) as OntologyObjectConfig[];
+
+    // Find by entityType 'production_plan'
+    const config = configs.find(c => c.enabled && c.entityType === 'production_plan');
+    if (config) {
+        console.log(`[ProductionPlanCalculator] Using configured object type: ${config.objectTypeId} (${config.name})`);
+        return config.objectTypeId;
+    }
+
+    // Fallback: Find by tag 'production'
+    const tagConfig = configs.find(c => c.enabled && c.tags?.includes('production'));
+    if (tagConfig) {
+        return tagConfig.objectTypeId;
+    }
+
+    console.warn(`[ProductionPlanCalculator] No configuration found, using default: ${DEFAULT_PP_OBJECT_TYPE_ID}`);
+    return DEFAULT_PP_OBJECT_TYPE_ID;
+}
+
+/**
+ * 加载生产计划数据 (从从知识网络获取)
+ * Target Object Type: d5704qm9olk4bpa66vp0 (工厂生产计划)
  */
 export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
     try {
-        console.log('[ProductionPlanCalculator] 尝试从API加载数据 (Direct HttpClient)...');
+        console.log('[ProductionPlanCalculator] 尝试从知识网络加载数据 (Ontology API)...');
 
-        // 使用用户指定的完整 API 路径 (通过 Proxy 转发)
-        // 目标: https://dip.aishu.cn/api/mdl-uniquery/v1/data-views/2004376134633480194?include_view=true
-        const viewId = '2004376134633480194';
-        const url = `/proxy-metric/v1/data-views/${viewId}?include_view=true`;
+        // 获取配置的对象类型 ID
+        const objectTypeId = getProductionPlanObjectTypeId();
 
-        const requestBody = {
-            limit: 1000,
-            offset: 0
-        };
+        let response;
+        try {
+            // 尝试首选查询配置
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                include_type_info: true,
+                include_logic_params: false,
+                limit: 1000,
+                need_total: true
+            });
+        } catch (firstError) {
+            console.warn('[ProductionPlanCalculator] 首选查询失败，尝试安全模式回退...', firstError);
 
-        const response = await httpClient.postAsGet<any>(url, requestBody);
+            // 安全模式回退：减少参数复杂度，降低limit
+            try {
+                response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                    include_type_info: false,
+                    include_logic_params: false,
+                    limit: 500,
+                    need_total: false
+                });
+                console.log('[ProductionPlanCalculator] 安全模式回退查询成功');
+            } catch (fallbackError) {
+                console.error('[ProductionPlanCalculator] 安全模式回退查询也失败:', fallbackError);
+                throw fallbackError;
+            }
+        }
 
-        // 兼容不同的响应结构
-        const rawData = response.data?.entries || response.data || [];
+        // Ontology API 返回的是 entries
+        const rawData = response.entries || [];
 
         if (Array.isArray(rawData) && rawData.length > 0) {
             console.log(`[ProductionPlanCalculator] API返回 ${rawData.length} 条记录`);
             console.log('[ProductionPlanCalculator] 第一条数据示例:', rawData[0]);
 
             return rawData.map((item: any) => ({
-                order_number: item.order_number || item.orderNumber || item.id || '',
+                // 尝试匹配可能的字段名 (基于常见命名规范)
+                order_number: item.order_number || item.orderNumber || item.order_no || item.id || '',
                 code: item.product_code || item.productCode || item.code || '',
-                quantity: parseFloat(item.quantity) || 0,
-                ordered: parseFloat(item.ordered) || 0,
-                start_time: item.start_time || item.startTime || item.startDate || '',
-                end_time: item.end_time || item.endTime || item.endDate || '',
+                quantity: parseFloat(item.quantity) || parseFloat(item.plan_quantity) || 0,
+                ordered: parseFloat(item.ordered) || parseFloat(item.ordered_quantity) || 0,
+                start_time: item.start_time || item.startTime || item.plan_start_time || '',
+                end_time: item.end_time || item.endTime || item.plan_end_time || '',
                 status: item.status || '待确认',
                 priority: parseInt(item.priority) || 0,
             }));
         }
 
-        if (!Array.isArray(rawData)) {
-            console.warn('[ProductionPlanCalculator] API响应数据格式不正确:', response.data);
-        } else {
+        if (rawData.length === 0) {
             console.warn('[ProductionPlanCalculator] API返回空数据');
         }
 

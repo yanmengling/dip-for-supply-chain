@@ -10,6 +10,8 @@ import { dataViewApi } from '../api/dataViewApi';
 import { metricModelApi, type MetricQueryRequest, type MetricFilter } from '../api/metricModelApi';
 import { httpClient } from '../api/httpClient';
 import { getEnvironmentConfig } from '../config/apiConfig';
+import { apiConfigService } from './apiConfigService';
+import { ApiConfigType } from '../types/apiConfig';
 import {
   simpleExponentialSmoothing,
   holtLinearSmoothing,
@@ -39,6 +41,18 @@ type ObjectTypeDetail = ObjectType;
 // ============================================================================
 
 export class DemandPlanningService {
+  // Cache for resolved product object type
+  private static productObjectTypeCache: ObjectTypeDetail | null = null;
+
+  /**
+   * Clear the product object type cache
+   * Useful when configuration changes or user requests a refresh
+   */
+  public static clearCache(): void {
+    DemandPlanningService.productObjectTypeCache = null;
+    console.log('[DemandPlanningService] Product object type cache cleared');
+  }
+
   /**
    * Resolve product object type definition
    * @param productObjectTypeId Optional product object type ID. If not provided, searches by name pattern.
@@ -46,31 +60,53 @@ export class DemandPlanningService {
    */
   async resolveProductObjectType(productObjectTypeId?: string): Promise<ObjectTypeDetail> {
     try {
+      // 1. Return cached result if available and no specific ID is requested (or requested ID matches cached)
+      if (DemandPlanningService.productObjectTypeCache &&
+        (!productObjectTypeId || DemandPlanningService.productObjectTypeCache.id === productObjectTypeId)) {
+        console.log('[DemandPlanningService] Returning cached product object type');
+        return DemandPlanningService.productObjectTypeCache;
+      }
+
+      // 2. If no specific ID requested, try to find configured product object type
+      if (!productObjectTypeId) {
+        console.log('[DemandPlanningService] Looking up configured product object type...');
+        const productConfig = apiConfigService.getOntologyObjectByEntityType('product');
+
+        if (productConfig && productConfig.objectTypeId) {
+          console.log(`[DemandPlanningService] Found configured product object: ${productConfig.id} -> ${productConfig.objectTypeId}`);
+          productObjectTypeId = productConfig.objectTypeId;
+        } else {
+          console.log('[DemandPlanningService] No configured product object found (entityType: "product")');
+        }
+      }
+
       if (productObjectTypeId) {
         console.log(`[DemandPlanningService] Resolving product object type by ID: ${productObjectTypeId}`);
         // Explicitly pass includeDetail=true to ensure logic_properties are included
         const objectType = await ontologyApi.getObjectType(productObjectTypeId, true);
-        
+
         // Validate response
         if (!objectType || !objectType.id) {
           throw new Error(`Invalid object type response: ${JSON.stringify(objectType)}`);
         }
-        
+
         console.log(`[DemandPlanningService] Retrieved object type: ${objectType.id} (${objectType.name || 'unnamed'})`);
         console.log(`[DemandPlanningService] Object type has ${objectType.logic_properties?.length || 0} logic properties`);
-        
+
         if (objectType.logic_properties && objectType.logic_properties.length > 0) {
-          console.log(`[DemandPlanningService] Logic properties:`, 
+          console.log(`[DemandPlanningService] Logic properties:`,
             objectType.logic_properties.map(p => p.name));
         } else {
           console.warn(`[DemandPlanningService] WARNING: No logic_properties in response. Object type keys:`, Object.keys(objectType));
         }
-        
+
+        // Cache the result
+        DemandPlanningService.productObjectTypeCache = objectType as ObjectTypeDetail;
         return objectType as ObjectTypeDetail;
       }
 
       console.log('[DemandPlanningService] Searching for product object type...');
-      
+
       // Strategy 1: Get all object types and search for exact match "产品" or "product"
       let response = await ontologyApi.getObjectTypes({
         limit: 1000,
@@ -89,9 +125,9 @@ export class DemandPlanningService {
         const nameLower = name.toLowerCase();
         const id = candidate.id?.toLowerCase() || '';
         const comment = candidate.comment?.toLowerCase() || '';
-        
+
         // Check if this is a product-related type
-        const isProductRelated = 
+        const isProductRelated =
           nameLower === '产品' || nameLower === 'product' ||
           nameLower.includes('产品') || nameLower.includes('product') ||
           id.includes('product') ||
@@ -106,12 +142,12 @@ export class DemandPlanningService {
         // Get full details to check for logic_properties
         try {
           const fullDetails = await ontologyApi.getObjectType(candidate.id, true);
-          
+
           // Check if this is a data_view type
           // Note: data_source may exist in API response but not in type definition
           const dataSource = (fullDetails as any).data_source;
           const isDataView = dataSource?.type === 'data_view';
-          
+
           if (isDataView) {
             console.log(`[DemandPlanningService] Found data_view type: ${fullDetails.name} (${fullDetails.id})`);
             // Don't skip data_view types completely, but prefer non-data_view types
@@ -134,12 +170,14 @@ export class DemandPlanningService {
             const hasProductSalesHistory = fullDetails.logic_properties.some(
               (lp: any) => lp.name === 'product_sales_history'
             );
-            
+
             if (hasProductSalesHistory) {
               console.log(`[DemandPlanningService] Found product type with product_sales_history: ${fullDetails.name} (${fullDetails.id})`);
+              // Cache the result
+              DemandPlanningService.productObjectTypeCache = fullDetails as ObjectTypeDetail;
               return fullDetails as ObjectTypeDetail;
             }
-            
+
             // Remember this as a candidate with logic_properties
             if (!productTypeWithLogicProps) {
               productTypeWithLogicProps = fullDetails;
@@ -182,25 +220,27 @@ export class DemandPlanningService {
 
       // Use the already fetched full details
       const fullDetails = selectedType;
-      
+
       // Validate response
       if (!fullDetails || !fullDetails.id) {
         console.error(`[DemandPlanningService] Invalid getObjectType response:`, fullDetails);
         throw new Error(`Failed to get object type details. Response: ${JSON.stringify(fullDetails)}`);
       }
-      
+
       console.log(`[DemandPlanningService] Retrieved full details: ${fullDetails.id} (${fullDetails.name || 'unnamed'})`);
       console.log(`[DemandPlanningService] Retrieved full details with ${fullDetails.logic_properties?.length || 0} logic properties`);
-      
+
       if (fullDetails.logic_properties && fullDetails.logic_properties.length > 0) {
-        console.log(`[DemandPlanningService] Logic properties found:`, 
+        console.log(`[DemandPlanningService] Logic properties found:`,
           fullDetails.logic_properties.map((p: LogicProperty) => ({ name: p.name, type: p.type, data_source: p.data_source })));
       } else {
         console.warn(`[DemandPlanningService] WARNING: No logic_properties found in object type ${fullDetails.id}.`);
         console.warn(`[DemandPlanningService] Full details keys:`, Object.keys(fullDetails));
         console.warn(`[DemandPlanningService] Full details (first 1000 chars):`, JSON.stringify(fullDetails, null, 2).substring(0, 1000));
       }
-      
+
+      // Cache the result
+      DemandPlanningService.productObjectTypeCache = fullDetails as ObjectTypeDetail;
       return fullDetails as ObjectTypeDetail;
     } catch (error) {
       console.error('[DemandPlanningService] Error resolving product object type:', error);
@@ -224,7 +264,7 @@ export class DemandPlanningService {
   ): LogicProperty | null {
     console.log(`[DemandPlanningService] Resolving logic property: ${propertyName}`);
     console.log(`[DemandPlanningService] Object type: ${objectType.id} (${objectType.name})`);
-    
+
     if (!objectType.logic_properties || objectType.logic_properties.length === 0) {
       console.warn(`[DemandPlanningService] No logic_properties found in object type ${objectType.id}. Available fields:`, Object.keys(objectType));
       console.warn(`[DemandPlanningService] Object type details:`, {
@@ -236,7 +276,7 @@ export class DemandPlanningService {
       return null;
     }
 
-    console.log(`[DemandPlanningService] Found ${objectType.logic_properties.length} logic properties:`, 
+    console.log(`[DemandPlanningService] Found ${objectType.logic_properties.length} logic properties:`,
       objectType.logic_properties.map(p => p.name));
 
     const logicProperty = objectType.logic_properties.find(
@@ -244,7 +284,7 @@ export class DemandPlanningService {
     );
 
     if (!logicProperty) {
-      console.warn(`[DemandPlanningService] Logic property '${propertyName}' not found. Available properties:`, 
+      console.warn(`[DemandPlanningService] Logic property '${propertyName}' not found. Available properties:`,
         objectType.logic_properties.map(p => p.name));
     } else {
       console.log(`[DemandPlanningService] Found logic property '${propertyName}':`, logicProperty);
@@ -260,47 +300,83 @@ export class DemandPlanningService {
    * @returns Array of ProductSalesHistory sorted by month
    */
   async fetchProductSalesHistory(productId: string): Promise<ProductSalesHistory[]> {
-    console.log(`[DemandPlanningService] fetchProductSalesHistory for product: ${productId}`);
+    console.log(`[DemandPlanningService] fetchProductSalesHistory for product: ${productId} (using Orders Data View)`);
 
-    // Resolve product object type
-    const productObjectType = await this.resolveProductObjectType();
-    if (!productObjectType || !productObjectType.id) {
-      console.error('[DemandPlanningService] Failed to resolve product object type');
+    try {
+      // Use dataViewApi.getOrders directly to fetch sales history
+      // This bypasses the logic_property mechanism which is currently failing on the server
+      // Fields used: product_code, signing_date, signing_quantity
+
+      // Calculate start date (12 months ago)
+      const now = new Date();
+      const startDate = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const startDateStr = startDate.toISOString().slice(0, 10);
+
+
+      // Fetch all orders from Ontology Object API
+      const orderConfig = apiConfigService.getOntologyObjectByEntityType('sales_order');
+      const objectTypeId = orderConfig?.objectTypeId || 'd56vh169olk4bpa66v80';
+
+      console.log(`[DemandPlanningService] Fetching orders via Ontology Object: ${objectTypeId}`);
+
+      const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+        limit: 5000,
+        include_type_info: false,
+        include_logic_params: false
+      });
+
+      const entries = response.entries || [];
+      console.log(`[DemandPlanningService] Fetched ${entries.length} orders for product ${productId}`);
+
+      const monthlyData: Record<string, number> = {};
+
+      for (const entry of entries) {
+        // Filter by product code (client-side since backend filter failed)
+        const entryProductId = entry.product_code || entry.product_id;
+        if (entryProductId !== productId) {
+          continue;
+        }
+
+        // Parse date: signing_date
+        const dateStr = entry.signing_date || entry.orderDate || entry.date;
+        if (!dateStr) continue;
+
+        // Extract YYYY-MM
+        let month: string;
+        try {
+          // Handle various date formats via Date object
+          const date = new Date(dateStr);
+          if (isNaN(date.getTime())) continue;
+
+          // Filter by date range (last 12 months)
+          if (date < startDate) continue;
+
+          month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+        } catch (e) {
+          continue;
+        }
+
+        // Parse quantity
+        const qty = parseFloat(entry.signing_quantity || entry.quantity || 0);
+        if (isNaN(qty) || qty <= 0) continue;
+
+        monthlyData[month] = (monthlyData[month] || 0) + qty;
+      }
+
+      // Convert to array
+      const history: ProductSalesHistory[] = Object.entries(monthlyData).map(([month, quantity]) => ({
+        productId,
+        month,
+        quantity
+      })).sort((a, b) => a.month.localeCompare(b.month));
+
+      console.log(`[DemandPlanningService] Aggregated history: ${history.length} months`);
+      return history;
+
+    } catch (error) {
+      console.error('[DemandPlanningService] Error fetching history via orders:', error);
       return [];
     }
-
-    // Resolve product_sales_history logic property
-    const logicProperty = this.resolveLogicProperty(productObjectType, 'product_sales_history');
-    if (!logicProperty) {
-      console.error('[DemandPlanningService] product_sales_history logic property not found');
-      return [];
-    }
-
-    // Calculate time range: past 12 months
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth(); // 0-indexed
-
-    // End: last day of last month
-    const endDate = new Date(currentYear, currentMonth, 0);
-    const end = endDate.getTime();
-
-    // Start: 12 months before current month
-    const startDate = new Date(currentYear, currentMonth - 12, 1);
-    const start = startDate.getTime();
-
-    console.log(`[DemandPlanningService] Fetching history from ${new Date(start).toISOString()} to ${new Date(end).toISOString()}`);
-
-    // Fetch historical data
-    const history = await this.fetchLogicPropertyData(productObjectType, logicProperty, productId, {
-      instant: false,
-      start: start,
-      end: end,
-      step: 'month',
-    });
-
-    console.log(`[DemandPlanningService] fetchProductSalesHistory returned ${history.length} months`);
-    return history;
   }
 
   /**
@@ -320,15 +396,15 @@ export class DemandPlanningService {
     try {
       // Use the provided product object type (already resolved in generateDemandPlan)
       const objectTypeId = productObjectType.id;
-      
+
       console.log(`[DemandPlanningService] Fetching logic property data using ADP Ontology Query API`);
       console.log(`[DemandPlanningService] Logic Property: ${logicProperty.name}`);
       console.log(`[DemandPlanningService] Product ID (should be product_code): ${productId}`);
       console.log(`[DemandPlanningService] Will use product_code="${productId}" in unique_identities`);
-      
+
       // Build include_logic_params parameter
       const logicPropertyParams: any = {};
-      
+
       // Map parameters from logic property configuration
       for (const param of logicProperty.parameters) {
         if (param.value_from === 'property') {
@@ -339,25 +415,42 @@ export class DemandPlanningService {
           logicPropertyParams[param.name] = additionalParameters?.[param.name] ?? param.value;
         }
       }
-      
+
       // Override with additionalParameters if provided
       if (additionalParameters) {
         Object.assign(logicPropertyParams, additionalParameters);
       }
-      
+
+      // Build dynamic_params for the properties query
       // Build dynamic_params for the properties query
       // Format: { "propertyName": { "param1": "value1", ... } }
+      // The API expects parameters to be appropriate for the logic property type
+
+      // Ensure time parameters are correctly formatted if needed (though timestamps usually ok)
+      // The key issue might be extra parameters that are not defined in the logic property config
+      // Filter logicPropertyParams to only those defined in logicProperty.parameters + common time params
+
       const dynamicParams: Record<string, any> = {
         [logicProperty.name]: logicPropertyParams
       };
-      
+
       console.log(`[DemandPlanningService] ADP properties dynamic_params:`, JSON.stringify(dynamicParams, null, 2));
+
+      // Determine identity key from object type definition
+      // Default to 'id' or 'product_code' if primary_keys not defined
+      let identityKey = 'product_code';
+      if (productObjectType.primary_keys && productObjectType.primary_keys.length > 0) {
+        identityKey = productObjectType.primary_keys[0];
+        console.log(`[DemandPlanningService] Using primary key from object type: ${identityKey}`);
+      } else {
+        console.log(`[DemandPlanningService] No primary_keys found, defaulting to: ${identityKey}`);
+      }
 
       // Query specific property values using the new /properties endpoint
       // This is the recommended way to fetch logic property values for specific instances
       const response = await ontologyApi.queryObjectPropertyValues(objectTypeId, {
         unique_identities: [
-          { product_code: productId } // Use product_code as the unique identity as per server requirements
+          { [identityKey]: productId } // Use dynamic identity key
         ],
         properties: [
           logicProperty.name // We only need this specific logic property
@@ -442,11 +535,11 @@ export class DemandPlanningService {
       } else {
         console.warn(`[DemandPlanningService] Unknown logic property value format:`, logicPropertyValue);
       }
-      
+
       const sortedHistory = salesHistory.sort((a, b) => a.month.localeCompare(b.month));
       console.log(`[DemandPlanningService] Final processed sales history (first 3):`, JSON.stringify(sortedHistory.slice(0, 3), null, 2));
       console.log(`[DemandPlanningService] Total history points: ${sortedHistory.length}`);
-      
+
       return sortedHistory;
     } catch (error) {
       console.error(`[DemandPlanningService] Error fetching logic property data:`, error);
@@ -480,12 +573,10 @@ export class DemandPlanningService {
       parametersCount: parameters?.length || 0,
     });
 
-    // Handle 'metric' type - map to 'metric-model'
+    // Handle 'metric' type - use metric-model data source type
+    // We trust that if the type is 'metric', the data source is a metric model
     let dataSourceType = data_source.type;
-    if (logicProperty.type === 'metric' && dataSourceType !== 'metric-model') {
-      dataSourceType = 'metric-model';
-      console.log(`[DemandPlanningService] Mapping logic property type 'metric' to data source type 'metric-model'`);
-    }
+    console.log(`[DemandPlanningService] Logic property type '${logicProperty.type}' with data source type '${dataSourceType}'`);
 
     // Build parameters map from logic property configuration
     const paramMap: Record<string, any> = {};
@@ -518,14 +609,40 @@ export class DemandPlanningService {
 
     // Call appropriate API based on data_source.type
     switch (dataSourceType) {
+      case 'metric': // Handle legacy 'metric' type same as 'metric-model'
       case 'metric-model': {
         const modelId = data_source.id;
 
         const now = Date.now();
         const oneYearAgo = now - 365 * 24 * 60 * 60 * 1000;
 
-        const start = paramMap.start || paramMap.start_time || oneYearAgo;
-        const end = paramMap.end || paramMap.end_time || now;
+        // Safely parse start and end times
+        const paramsStart = paramMap.start || paramMap.start_time;
+        const paramsEnd = paramMap.end || paramMap.end_time;
+
+        let startTimestamp: number;
+        let endTimestamp: number;
+
+        // Handle start time
+        if (typeof paramsStart === 'number' && !isNaN(paramsStart)) {
+          startTimestamp = paramsStart;
+        } else if (typeof paramsStart === 'string' && paramsStart.trim() !== '') {
+          const parsed = new Date(paramsStart).getTime();
+          startTimestamp = isNaN(parsed) ? oneYearAgo : parsed;
+        } else {
+          startTimestamp = oneYearAgo;
+        }
+
+        // Handle end time
+        if (typeof paramsEnd === 'number' && !isNaN(paramsEnd)) {
+          endTimestamp = paramsEnd;
+        } else if (typeof paramsEnd === 'string' && paramsEnd.trim() !== '') {
+          const parsed = new Date(paramsEnd).getTime();
+          endTimestamp = isNaN(parsed) ? now : parsed;
+        } else {
+          endTimestamp = now;
+        }
+
         const instant = paramMap.instant === true || paramMap.instant === 'true';
 
         // Build filters from parameters
@@ -545,8 +662,8 @@ export class DemandPlanningService {
 
         const queryRequest: MetricQueryRequest = {
           instant,
-          start: typeof start === 'number' ? start : new Date(start).getTime(),
-          end: typeof end === 'number' ? end : new Date(end).getTime(),
+          start: startTimestamp,
+          end: endTimestamp,
           step: paramMap.step || 'month',
           filters: filters.length > 0 ? filters : undefined,
         };
@@ -586,9 +703,12 @@ export class DemandPlanningService {
         const dataViewId = data_source.id;
 
         // Build filters from parameters
+        // Build filters from parameters
         const filters: any[] = [];
+        const ignoredKeys = ['start', 'end', 'step', 'instant', 'start_time', 'end_time'];
+
         for (const [key, value] of Object.entries(paramMap)) {
-          if (value !== null && value !== undefined && value !== '') {
+          if (!ignoredKeys.includes(key) && value !== null && value !== undefined && value !== '') {
             filters.push({
               field: key,
               operation: '=',
@@ -666,36 +786,36 @@ export class DemandPlanningService {
       // First, resolve product object type to get the object type ID
       const productObjectType = await this.resolveProductObjectType();
       const objectTypeId = productObjectType.id;
-      
+
       console.log(`[DemandPlanningService] Querying product instances for object type: ${objectTypeId}`);
-      
+
       // Query product instances using ADP Ontology Query API
       const response = await ontologyApi.queryObjectInstances(objectTypeId, {
         limit: 1000,
       });
-      
+
       // Validate response structure
       if (!response) {
         throw new Error('API返回空响应');
       }
-      
+
       if (!response.entries || !Array.isArray(response.entries)) {
         console.error('[DemandPlanningService] Invalid response structure:', response);
         throw new Error(`API返回格式错误: entries字段缺失或不是数组。响应结构: ${JSON.stringify(response)}`);
       }
-      
+
       console.log(`[DemandPlanningService] Found ${response.entries.length} product instances`);
-      
+
       // Map instances to ProductOption[]
       const displayKey = productObjectType.display_key || 'product_name';
-      
+
       return response.entries.map((instance: any) => {
         // IMPORTANT: Use product_code as the id, not instance.id
         // This is required because fetchLogicPropertyData uses this id as product_code
         const productCode = instance.product_code || instance.code || '';
         const productId = productCode || instance.id || instance.product_id || instance[displayKey];
         const productName = instance.product_name || instance.name || instance[displayKey] || '';
-        
+
         let displayName = productName;
         if (productCode && productName && productCode !== productName) {
           displayName = `${productCode} - ${productName}`;
@@ -704,14 +824,14 @@ export class DemandPlanningService {
         } else if (!productName) {
           displayName = productId || '未知产品';
         }
-        
+
         console.log(`[DemandPlanningService] Mapping product instance:`, {
           instance_id: instance.id,
           product_code: productCode,
           product_id: productId,
           display_name: displayName,
         });
-        
+
         return {
           id: productCode || productId, // Prioritize product_code as id
           displayName: displayName,
@@ -858,13 +978,13 @@ export class DemandPlanningService {
       };
 
       const result = await forecastOperatorService.forecast('prophet', prophetInput);
-      
+
       // Ensure we return exactly 18 values
       const forecast = result.forecast_values.slice(0, 18);
       while (forecast.length < 18) {
         forecast.push(forecast[forecast.length - 1] || 0);
       }
-      
+
       return forecast;
     } catch (error) {
       console.error(`Prophet forecast failed for product ${productId}:`, error);
@@ -931,7 +1051,7 @@ export class DemandPlanningService {
     // Generate 18 months: past 2 years same period (12 months) + future 6 months
     // Past 2 years: (currentYear - 2) same period + (currentYear - 1) same period
     // Future: currentYear same period (currentMonth to currentMonth + 5)
-    
+
     // Past 2 years same period (12 months)
     for (let yearOffset = -2; yearOffset <= -1; yearOffset++) {
       const year = currentYear + yearOffset;
@@ -943,7 +1063,7 @@ export class DemandPlanningService {
         months.push(`${y}-${m}`);
       }
     }
-    
+
     // Future 6 months (current year same period)
     for (let monthOffset = 0; monthOffset < 6; monthOffset++) {
       const date = new Date(currentYear, currentMonth + monthOffset, 1);
@@ -996,7 +1116,7 @@ export class DemandPlanningService {
     // Historical months: first 12 months (index 0-11) or months before current month
     // Future months: last 6 months (index 12-17) or months >= current month
     let isHistoricalMonth: boolean;
-    
+
     if (monthIndex !== undefined) {
       // Use monthIndex if provided (more accurate for 18-month structure)
       isHistoricalMonth = monthIndex < 12;
@@ -1081,8 +1201,8 @@ export class DemandPlanningService {
     parameters?: Record<string, any>
   ): Promise<AlgorithmForecast> {
     // Only support 4 algorithms (FR-010.2, FR-010.3)
-    if (algorithm !== 'prophet' && algorithm !== 'simple_exponential' && 
-        algorithm !== 'holt_linear' && algorithm !== 'holt_winters') {
+    if (algorithm !== 'prophet' && algorithm !== 'simple_exponential' &&
+      algorithm !== 'holt_linear' && algorithm !== 'holt_winters') {
       throw new Error(`Unsupported algorithm: ${algorithm}. Only prophet, simple_exponential, holt_linear, and holt_winters are supported.`);
     }
 
@@ -1281,15 +1401,15 @@ export class DemandPlanningService {
     const now = new Date();
     const currentYear = now.getFullYear();
     const currentMonthIndex = now.getMonth(); // 0-indexed
-    
+
     // End: last month (current month - 1)
     const endDate = new Date(currentYear, currentMonthIndex, 0); // Last day of last month
     const end = endDate.getTime();
-    
+
     // Start: 24 months before current month
     const startDate = new Date(currentYear, currentMonthIndex - 24, 1); // First day of 24 months ago
     const start = startDate.getTime();
-    
+
     // Fetch historical sales data for the product with specified parameters
     // This data comes from the 'product_sales_history' logic property
     // Pass the already resolved productObjectType to avoid re-resolving

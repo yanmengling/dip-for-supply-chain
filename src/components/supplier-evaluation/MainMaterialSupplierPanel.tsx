@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getMainMaterialsByPurchaseAmount } from '../../services/materialService';
+import { getMainMaterialsFromSupplierData } from '../../services/materialService';
 import type { MainMaterialSupplier } from '../../types/ontology';
 import RiskBadge from './RiskBadge';
 import { AlertCircle, ArrowRight } from 'lucide-react';
@@ -35,7 +35,7 @@ const MainMaterialSupplierPanel = ({
     const loadMaterials = async () => {
       setLoading(true);
       try {
-        const materialsData = await getMainMaterialsByPurchaseAmount();
+        const materialsData = await getMainMaterialsFromSupplierData();
         const data = materialsData.slice(0, limit);
         setMaterials(data);
       } catch (error) {

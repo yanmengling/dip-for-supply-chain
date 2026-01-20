@@ -1,0 +1,5 @@
+src/components/config-backend/ApiConfigEditor.tsx(81,26): error TS2304: Cannot find name 'OntologyObjectConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(148,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(151,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(175,41): error TS7006: Parameter 't' implicitly has an 'any' type.
+src/components/config-backend/KnowledgeGraphView.tsx(175,44): error TS7006: Parameter 'i' implicitly has an 'any' type.

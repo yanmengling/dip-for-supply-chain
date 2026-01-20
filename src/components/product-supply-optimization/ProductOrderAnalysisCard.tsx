@@ -3,6 +3,7 @@ import { ShoppingCart, Loader2, AlertCircle, ChevronRight, CheckCircle2, Clock, 
 import { loadSalesOrderEvents } from '../../services/ontologyDataService';
 import { loadOrderInfo } from '../../services/productSupplyCalculator';
 import { metricModelApi, createLastDaysRange } from '../../api';
+import { apiConfigService } from '../../services/apiConfigService';
 import { OrderAnalysisModal } from './OrderAnalysisModal';
 
 interface Props {
@@ -19,8 +20,8 @@ interface OrderAnalysisResult {
   orderCount: number;
 }
 
-// 统一使用产品库存指标模型
-const PRODUCT_INVENTORY_MODEL_ID = 'd58keb5g5lk40hvh48og';
+// Note: Metric Model ID is now loaded from config service
+// - Product Inventory Optimization: mm_product_inventory_optimization_huida
 const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
 const SUPPORTED_PRODUCTS = ['T01-000055', 'T01-000167', 'T01-000173'];
 
@@ -111,8 +112,17 @@ export const ProductOrderAnalysisCard: React.FC<Props> = ({
       try {
         const range = createLastDaysRange(1);
 
+        // Load metric model ID from config
+        const modelId = apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida');
+
+        if (!modelId) {
+          console.warn('[ProductOrderAnalysisCard] Metric model ID not configured');
+          setInventoryCount(0);
+          setInventoryLoading(false);
+          return;
+        }
         const result = await metricModelApi.queryByModelId(
-          PRODUCT_INVENTORY_MODEL_ID,
+          modelId as string,
           {
             instant: true,
             start: range.start,
@@ -126,7 +136,8 @@ export const ProductOrderAnalysisCard: React.FC<Props> = ({
         let total = 0;
         if (result.datas && result.datas.length > 0) {
           for (const series of result.datas) {
-            const materialCode = series.labels?.material_code || '';
+            if (!series || !series.labels) continue;
+            const materialCode = series.labels.material_code || '';
 
             if (materialCode === productId) {
               const availableQty = series.labels?.available_quantity;

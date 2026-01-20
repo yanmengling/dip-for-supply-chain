@@ -135,6 +135,8 @@ export interface DeliveryOrder {
   productCode: string;                // 产品编码
   productName: string;                // 产品名称
   quantity: number;                   // 数量
+  shippingQuantity?: number;          // 发货数量
+  signingQuantity?: number;           // 签约数量
   unit: string;                       // 单位
 
   // 金额信息

@@ -60,13 +60,18 @@ const ProcurementPanel = ({ onNavigate: _onNavigate }: Props) => {
     transform: latestValueTransform,
   });
 
-  const {
-    value: inTransitQuantityFromApi,
-    loading: inTransitQuantityLoading,
-  } = useMetricData(currentMetricIds.IN_TRANSIT_QUANTITY, {
-    instant: true,
-    transform: latestValueTransform,
-  });
+  // FIXME: This metric returns 500 error, temporarily disabled
+  // const {
+  //   value: inTransitQuantityFromApi,
+  //   loading: inTransitQuantityLoading,
+  // } = useMetricData(currentMetricIds.IN_TRANSIT_QUANTITY, {
+  //   instant: true,
+  //   transform: latestValueTransform,
+  // });
+
+  // Temporarily use mock data for in-transit quantity
+  const inTransitQuantityFromApi = null;
+  const inTransitQuantityLoading = false;
 
   // 使用 API 数据，如果失败则使用 mock 数据
   const monthlyPlannedTotal = plannedPurchaseTotalFromApi ?? summary.monthlyPlannedTotal;

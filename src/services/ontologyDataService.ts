@@ -22,8 +22,7 @@ const OBJECT_TYPE_IDS = {
     BOM: 'd56vqtm9olk4bpa66vfg',              // 产品BOM对象类型
     INVENTORY: 'd56vcuu9olk4bpa66v3g',         // 库存对象类型
     SALES_ORDER: 'd56vh169olk4bpa66v80',       // 销售订单对象类型
-    SUPPLIER_PERFORMANCE: 'd5700000000000000', // 供应商绩效对象类型 (需确认)
-    PROCUREMENT_EVENT: 'd5700000000000001',    // 采购事件对象类型 (需确认)
+    // Note: Supplier performance and procurement events are not available in current knowledge network
 } as const;
 
 // ============================================================================
@@ -200,6 +199,8 @@ export async function loadInventoryEvents(forceReload: boolean = false): Promise
 /**
  * Load supplier entities
  * Returns: supplier_id, supplier_name, etc.
+ * Note: The SUPPLIER object type returns supplier-material relationship data,
+ * so we need to deduplicate by supplier_code to get unique suppliers.
  */
 export async function loadSupplierEntities(forceReload: boolean = false): Promise<any[]> {
     const cacheKey = 'supplier_entities';
@@ -220,19 +221,36 @@ export async function loadSupplierEntities(forceReload: boolean = false): Promis
             need_total: false,
         });
 
-        const suppliers = response.entries.map((item: any) => ({
-            supplier_id: item.supplier_id || item.supplier_code,
-            supplier_code: item.supplier_code,
-            supplier_name: item.supplier_name || '',
-            supplier_type: item.supplier_type,
-            contact: item.contact,
-            phone: item.phone,
-            email: item.email,
-            address: item.address,
-            status: item.status || 'Active',
-        }));
+        // API returns supplier-material relationship data with fields:
+        // supplier_code, supplier, provided_material_code, provided_material_name, unit_price_with_tax, payment_terms
 
-        console.log(`[OntologyDataService] Loaded ${suppliers.length} supplier entities`);
+        // Group by supplier_code to get unique suppliers
+        const supplierMap = new Map<string, any>();
+
+        response.entries.forEach((item: any) => {
+            const supplierCode = item.supplier_code || item.supplier_id;
+            const supplierName = item.supplier || item.supplier_name || '';
+
+            if (supplierCode && !supplierMap.has(supplierCode)) {
+                supplierMap.set(supplierCode, {
+                    supplier_id: supplierCode,
+                    supplier_code: supplierCode,
+                    supplier_name: supplierName,
+                    supplierId: supplierCode,  // Add this for compatibility
+                    supplierName: supplierName, // Add this for compatibility
+                    supplier_type: item.supplier_type,
+                    contact: item.contact,
+                    phone: item.phone,
+                    email: item.email,
+                    address: item.address,
+                    status: item.status || 'Active',
+                });
+            }
+        });
+
+        const suppliers = Array.from(supplierMap.values());
+
+        console.log(`[OntologyDataService] Loaded ${suppliers.length} supplier entities (from ${response.entries.length} supplier-material records)`);
         setCache(cacheKey, suppliers);
         return suppliers;
     } catch (error) {

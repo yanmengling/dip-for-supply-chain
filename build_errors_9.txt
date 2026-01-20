@@ -1,0 +1,7 @@
+src/components/config-backend/ApiConfigEditor.tsx(81,26): error TS2304: Cannot find name 'OntologyObjectConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(148,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(151,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(157,50): error TS2339: Property 'entries' does not exist on type '{}'.
+src/components/config-backend/KnowledgeGraphView.tsx(158,26): error TS2339: Property 'entries' does not exist on type 'ApiResponse<unknown>'.
+src/components/config-backend/KnowledgeGraphView.tsx(160,54): error TS2339: Property 'entries' does not exist on type '{}'.
+src/components/config-backend/KnowledgeGraphView.tsx(161,28): error TS2339: Property 'entries' does not exist on type 'ApiResponse<unknown>'.

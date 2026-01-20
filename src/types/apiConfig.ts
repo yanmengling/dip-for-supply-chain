@@ -20,7 +20,7 @@
  */
 export const ApiConfigType = {
     KNOWLEDGE_NETWORK: 'knowledge_network',
-    DATA_VIEW: 'data_view',
+    ONTOLOGY_OBJECT: 'ontology_object',  // Renamed from DATA_VIEW
     METRIC_MODEL: 'metric_model',
     AGENT: 'agent',
     WORKFLOW: 'workflow'
@@ -149,20 +149,33 @@ export interface KnowledgeNetworkConfig extends BaseApiConfig {
     relationTypes?: Record<string, RelationTypeMapping>;
 }
 
+/**
+ * Knowledge Network Preset
+ */
+export interface KnowledgeNetworkPreset {
+    id: string;
+    name: string;
+    description: string;
+    isDefault: boolean;
+    category: string;
+    tags?: string[];
+}
+
 // ============================================================================
 // Data View Configuration
 // ============================================================================
 
 /**
- * Data View Configuration
+ * Ontology Object Type Configuration (业务知识网络对象)
+ * Formerly known as Data View Configuration
  */
-export interface DataViewConfig extends BaseApiConfig {
-    type: typeof ApiConfigType.DATA_VIEW;
+export interface OntologyObjectConfig extends BaseApiConfig {
+    type: typeof ApiConfigType.ONTOLOGY_OBJECT;
 
-    /** Data View ID */
-    viewId: string;
+    /** Object Type ID from Knowledge Network */
+    objectTypeId: string;
 
-    /** Entity type (supplier, material, product, etc.) */
+    /** Entity type (order, supplier, material, product, etc.) */
     entityType: string;
 
     /** Field list to query */
@@ -177,6 +190,9 @@ export interface DataViewConfig extends BaseApiConfig {
     /** Default sort direction */
     sortDirection?: 'asc' | 'desc';
 }
+
+/** Legacy alias for backward compatibility */
+export type DataViewConfig = OntologyObjectConfig;
 
 // ============================================================================
 // Metric Model Configuration
@@ -295,8 +311,11 @@ export interface ApiConfigCollection {
     /** Knowledge Network configurations */
     knowledgeNetworks: KnowledgeNetworkConfig[];
 
-    /** Data View configurations */
-    dataViews: DataViewConfig[];
+    /** Ontology Object configurations (Primary) */
+    ontologyObjects?: OntologyObjectConfig[];
+
+    /** Data View configurations (Legacy) */
+    dataViews?: DataViewConfig[];
 
     /** Metric Model configurations */
     metricModels: MetricModelConfig[];

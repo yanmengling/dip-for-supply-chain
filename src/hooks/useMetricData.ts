@@ -81,6 +81,8 @@ export interface UseMetricDataOptions {
   analysisDimensions?: string[];
   /** 数据转换函数 */
   transform?: (result: MetricQueryResult) => number | null;
+  /** 是否包含模型信息 */
+  includeModel?: boolean;
 }
 
 /** 带维度的数据项 */
@@ -237,6 +239,12 @@ export function useMetricData(
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(true);
 
+  // 对 options 中的原始参数进行 memo，确保即使 options 对象本身是不稳定的，提取出的值在内容一致时也是稳定的
+  const startMemo = start;
+  const endMemo = end;
+  const instantMemo = instant;
+  const stepMemo = step;
+
   const fetchData = useCallback(async () => {
     if (!modelId) {
       setError('指标模型 ID 不能为空');
@@ -246,32 +254,38 @@ export function useMetricData(
     // 取消之前的请求
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
-      console.log(`[useMetricData] Aborted previous request for ${modelId}`);
     }
 
     // 创建新的 AbortController
     abortControllerRef.current = new AbortController();
     const currentController = abortControllerRef.current;
 
-    // 默认时间范围：最近1天（避免长跨度查询导致500错误）
-    const defaultRange = createLastDaysRange(1);
-    const queryStart = start ?? defaultRange.start;
-    const queryEnd = end ?? defaultRange.end;
+    // 默认时间范围：最近1天
+    const now = Date.now();
+    const alignedEnd = Math.floor(now / 60000) * 60000;
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+
+    const defaultRange = {
+      start: alignedEnd - ONE_DAY,
+      end: alignedEnd
+    };
+
+    const queryStart = startMemo ?? defaultRange.start;
+    const queryEnd = endMemo ?? defaultRange.end;
 
     // 生成缓存键 (基于请求参数)
-    const cacheKey = `${modelId}-${instant}-${queryStart}-${queryEnd}-${step}`;
-    const now = Date.now();
+    const cacheKey = `${modelId}-${instantMemo}-${queryStart}-${queryEnd}-${stepMemo}`;
 
     // 检查缓存中是否有相同的请求
     const cached = requestCache.get(cacheKey);
     if (cached && (now - cached.timestamp) < CACHE_TTL) {
-      console.log(`[useMetricData] Using cached request for ${modelId}`);
+      if (import.meta.env.DEV) {
+        console.log(`[useMetricData] Using cached request for ${modelId}`);
+      }
       try {
         const result = await cached.promise;
 
-        // 检查请求是否已被取消或组件已卸载
         if (currentController.signal.aborted || !isMountedRef.current) {
-          console.log(`[useMetricData] Request cancelled for ${modelId}`);
           return;
         }
 
@@ -281,30 +295,28 @@ export function useMetricData(
         setLoading(false);
         return;
       } catch (err) {
-        // 缓存的请求失败了,清除缓存并继续执行新请求
-        console.warn(`[useMetricData] Cached request failed for ${modelId}, retrying...`);
         requestCache.delete(cacheKey);
       }
     }
 
+    // 只有在非加载状态或 modelId 变化时才设置 loading，减少不必要的重绘
     setLoading(true);
     setError(null);
 
     try {
       const request: MetricQueryRequest = {
-        instant,
+        instant: instantMemo,
         start: queryStart,
         end: queryEnd,
       };
 
-      // 范围查询需要 step
-      if (!instant) {
-        request.step = step;
+      if (!instantMemo) {
+        request.step = stepMemo;
       }
 
       // 创建新请求
       const requestPromise = metricModelApi.queryByModelId(modelId, request, {
-        includeModel: true,
+        includeModel: options.includeModel ?? false,
       });
 
       // 将请求存入缓存
@@ -313,13 +325,13 @@ export function useMetricData(
         timestamp: now
       });
 
-      console.log(`[useMetricData] Fetching metric ${modelId} (cached: ${cacheKey})`);
+      if (import.meta.env.DEV) {
+        console.log(`[useMetricData] Fetching metric ${modelId}`);
+      }
 
       const result = await requestPromise;
 
-      // 检查请求是否已被取消或组件已卸载
       if (currentController.signal.aborted || !isMountedRef.current) {
-        console.log(`[useMetricData] Request cancelled for ${modelId}`);
         return;
       }
 
@@ -327,13 +339,10 @@ export function useMetricData(
       const transformedValue = transformRef.current(result);
       setValue(transformedValue);
     } catch (err) {
-      // 忽略 AbortError
       if (err instanceof Error && err.name === 'AbortError') {
-        console.log(`[useMetricData] Request aborted for ${modelId}`);
         return;
       }
 
-      // 检查组件是否已卸载
       if (!isMountedRef.current) {
         return;
       }
@@ -341,14 +350,13 @@ export function useMetricData(
       const errorMessage = err instanceof Error ? err.message : '获取指标数据失败';
       setError(errorMessage);
       console.error(`[useMetricData] 获取指标 ${modelId} 失败:`, err);
-      // 请求失败时从缓存中移除
       requestCache.delete(cacheKey);
     } finally {
       if (isMountedRef.current) {
         setLoading(false);
       }
     }
-  }, [modelId, instant, start, end, step]);
+  }, [modelId, instantMemo, startMemo, endMemo, stepMemo, options.includeModel]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -496,6 +504,12 @@ export function useDimensionMetricData(
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(true);
 
+  // 对 options 中的原始参数进行 memo
+  const startMemo = start;
+  const endMemo = end;
+  const instantMemo = instant;
+  const stepMemo = step;
+
   const fetchData = useCallback(async () => {
     if (!modelId) {
       setError('指标模型 ID 不能为空');
@@ -517,37 +531,39 @@ export function useDimensionMetricData(
 
     try {
       const defaultRange = createLastDaysRange(1);
-      const queryStart = start ?? defaultRange.start;
-      const queryEnd = end ?? defaultRange.end;
+      const queryStart = startMemo ?? defaultRange.start;
+      const queryEnd = endMemo ?? defaultRange.end;
 
       // 从序列化的字符串恢复 dimensions
       const parsedDimensions = JSON.parse(dimensionsKey) as string[];
 
       const request: MetricQueryRequest = {
-        instant,
+        instant: instantMemo,
         start: queryStart,
         end: queryEnd,
         analysis_dimensions: parsedDimensions,
       };
 
-      if (!instant) {
-        request.step = step;
+      if (!instantMemo) {
+        request.step = stepMemo;
       }
 
       // 生成缓存键 (基于请求参数)
-      const cacheKey = `${modelId}-${instant}-${queryStart}-${queryEnd}-${step}-${dimensionsKey}`;
+      const cacheKey = `${modelId}-${instantMemo}-${queryStart}-${queryEnd}-${stepMemo}-${dimensionsKey}`;
       const now = Date.now();
 
       // 检查缓存中是否有相同的请求
       const cached = requestCache.get(cacheKey);
       if (cached && (now - cached.timestamp) < CACHE_TTL) {
-        console.log(`[useDimensionMetricData] Using cached request for ${modelId}`);
+        if (import.meta.env.DEV) {
+          console.log(`[useDimensionMetricData] Using cached request for ${modelId}`);
+        }
         try {
           const result = await cached.promise;
 
           // 检查请求是否已被取消或组件已卸载
           if (currentController.signal.aborted || !isMountedRef.current) {
-            console.log(`[useDimensionMetricData] Request cancelled for ${modelId}`);
+            // console.log(`[useDimensionMetricData] Request cancelled for ${modelId}`);
             return;
           }
 
@@ -591,7 +607,7 @@ export function useDimensionMetricData(
 
       // 创建新请求
       const requestPromise = metricModelApi.queryByModelId(modelId, request, {
-        includeModel: true,
+        includeModel: options.includeModel ?? false,
       });
 
       // 将请求存入缓存
@@ -600,13 +616,15 @@ export function useDimensionMetricData(
         timestamp: now
       });
 
-      console.log(`[useDimensionMetricData] Fetching metric ${modelId} (cached: ${cacheKey})`);
+      if (import.meta.env.DEV) {
+        console.log(`[useDimensionMetricData] Fetching metric ${modelId}`);
+      }
 
       const result = await requestPromise;
 
       // 检查请求是否已被取消或组件已卸载
       if (currentController.signal.aborted || !isMountedRef.current) {
-        console.log(`[useDimensionMetricData] Request cancelled for ${modelId}`);
+        // console.log(`[useDimensionMetricData] Request cancelled for ${modelId}`);
         return;
       }
 
@@ -655,7 +673,8 @@ export function useDimensionMetricData(
       setError(errorMessage);
       console.error(`[useDimensionMetricData] 获取指标 ${modelId} 失败:`, err);
       // 请求失败时从缓存中移除
-      const cacheKey = `${modelId}-${instant}-${start ?? createLastDaysRange(1).start}-${end ?? createLastDaysRange(1).end}-${step}-${dimensionsKey}`;
+      const defaultRange = createLastDaysRange(1);
+      const cacheKey = `${modelId}-${instantMemo}-${startMemo ?? defaultRange.start}-${endMemo ?? defaultRange.end}-${stepMemo}-${dimensionsKey}`;
       requestCache.delete(cacheKey);
     } finally {
       if (isMountedRef.current) {
@@ -663,7 +682,7 @@ export function useDimensionMetricData(
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelId, dimensionsKey, instant, start, end, step]);
+  }, [modelId, dimensionsKey, instantMemo, startMemo, endMemo, stepMemo, options.includeModel]);
 
   useEffect(() => {
     isMountedRef.current = true;

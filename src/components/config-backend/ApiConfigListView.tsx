@@ -36,7 +36,7 @@ interface ApiConfigListViewProps {
 function getConfigTypeLabel(type: ApiConfigType): string {
     const labels: Record<ApiConfigType, string> = {
         knowledge_network: '业务知识网络配置',
-        data_view: '数据视图配置',
+        ontology_object: '业务知识网络对象配置',
         metric_model: '指标模型配置',
         agent: 'Agent 配置',
         workflow: '工作流配置'
@@ -50,7 +50,7 @@ function getConfigTypeLabel(type: ApiConfigType): string {
 function getConfigTypeDescription(type: ApiConfigType): string {
     const descriptions: Record<ApiConfigType, string> = {
         knowledge_network: '管理业务知识网络、对象类型和关系类型配置',
-        data_view: '管理数据查询视图配置，用于查询各类业务数据',
+        ontology_object: '管理业务知识网络对象类型配置，用于查询各类业务数据',
         metric_model: '管理指标模型配置，用于查询和计算业务指标',
         agent: '管理智能助手配置，包括对话模式和参数设置',
         workflow: '管理工作流配置，包括 DAG 工作流和自动化任务'

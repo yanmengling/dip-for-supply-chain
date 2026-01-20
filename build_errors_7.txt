@@ -1,0 +1,11 @@
+src/components/config-backend/ApiConfigEditor.tsx(81,26): error TS2304: Cannot find name 'OntologyObjectConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(148,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(151,11): error TS2353: Object literal may only specify known properties, and 'params' does not exist in type 'RequestConfig'.
+src/components/config-backend/KnowledgeGraphView.tsx(157,50): error TS2339: Property 'entries' does not exist on type '{}'.
+src/components/config-backend/KnowledgeGraphView.tsx(158,26): error TS2339: Property 'entries' does not exist on type 'ApiResponse<unknown>'.
+src/components/config-backend/KnowledgeGraphView.tsx(160,54): error TS2339: Property 'entries' does not exist on type '{}'.
+src/components/config-backend/KnowledgeGraphView.tsx(161,28): error TS2339: Property 'entries' does not exist on type 'ApiResponse<unknown>'.
+src/components/product-supply-optimization/OrderAnalysisModal.tsx(81,70): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+  Type 'undefined' is not assignable to type 'string'.
+src/config/apiConfig.ts(606,5): error TS2740: Type 'KnowledgeNetworkPreset' is missing the following properties from type 'KnowledgeNetworkConfig': type, knowledgeNetworkId, objectTypes, enabled, and 2 more.
+src/config/apiConfig.ts(610,3): error TS2740: Type '{ id: string; name: string; }' is missing the following properties from type 'KnowledgeNetworkConfig': type, knowledgeNetworkId, objectTypes, enabled, and 2 more.

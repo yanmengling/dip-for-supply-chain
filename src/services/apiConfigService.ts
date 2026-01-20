@@ -11,6 +11,7 @@ import {
     type BaseApiConfig,
     type AnyApiConfig,
     type KnowledgeNetworkConfig,
+    type OntologyObjectConfig,
     type DataViewConfig,
     type MetricModelConfig,
     type AgentConfig,
@@ -50,8 +51,8 @@ class ApiConfigService {
         switch (type) {
             case ApiConfigType.KNOWLEDGE_NETWORK:
                 return all.knowledgeNetworks as unknown as T[];
-            case ApiConfigType.DATA_VIEW:
-                return all.dataViews as unknown as T[];
+            case ApiConfigType.ONTOLOGY_OBJECT:
+                return (all.ontologyObjects || all.dataViews || []) as unknown as T[];
             case ApiConfigType.METRIC_MODEL:
                 return all.metricModels as unknown as T[];
             case ApiConfigType.AGENT:
@@ -77,7 +78,8 @@ class ApiConfigService {
         const all = this.getAllConfigs();
         const allConfigs: AnyApiConfig[] = [
             ...all.knowledgeNetworks,
-            ...all.dataViews,
+            ...(all.ontologyObjects || []),
+            ...(all.dataViews || []),
             ...all.metricModels,
             ...all.agents,
             ...all.workflows
@@ -87,10 +89,18 @@ class ApiConfigService {
 
     /**
      * Get configuration by entity type (for Data Views)
+     * @deprecated Use getOntologyObjectByEntityType instead
      */
     getDataViewByEntityType(entityType: string): DataViewConfig | null {
-        const dataViews = this.getEnabledConfigsByType<DataViewConfig>(ApiConfigType.DATA_VIEW);
-        return dataViews.find(dv => dv.entityType === entityType) || null;
+        return this.getOntologyObjectByEntityType(entityType);
+    }
+
+    /**
+     * Get configuration by entity type (for Ontology Objects)
+     */
+    getOntologyObjectByEntityType(entityType: string): OntologyObjectConfig | null {
+        const configs = this.getEnabledConfigsByType<OntologyObjectConfig>(ApiConfigType.ONTOLOGY_OBJECT);
+        return configs.find(c => c.entityType === entityType) || null;
     }
 
     /**
@@ -119,8 +129,11 @@ class ApiConfigService {
             case ApiConfigType.KNOWLEDGE_NETWORK:
                 this.updateConfigArray(all.knowledgeNetworks, config as KnowledgeNetworkConfig);
                 break;
-            case ApiConfigType.DATA_VIEW:
-                this.updateConfigArray(all.dataViews, config as DataViewConfig);
+            case ApiConfigType.ONTOLOGY_OBJECT:
+                if (!all.ontologyObjects) {
+                    all.ontologyObjects = [];
+                }
+                this.updateConfigArray(all.ontologyObjects, config as OntologyObjectConfig);
                 break;
             case ApiConfigType.METRIC_MODEL:
                 this.updateConfigArray(all.metricModels, config as MetricModelConfig);
@@ -137,6 +150,29 @@ class ApiConfigService {
         console.log(`[ApiConfigService] Saved configuration: ${config.id} (${config.name})`);
     }
 
+
+
+    /**
+     * Get all Metric Model configurations
+     */
+    getMetricModelConfigs(): MetricModelConfig[] {
+        return this.getConfigsByType(ApiConfigType.METRIC_MODEL) as MetricModelConfig[];
+    }
+
+    /**
+     * Get all Ontology Object configurations
+     */
+    getOntologyObjectConfigs(): OntologyObjectConfig[] {
+        return this.getConfigsByType(ApiConfigType.ONTOLOGY_OBJECT) as OntologyObjectConfig[];
+    }
+
+    /**
+     * Get all Knowledge Network configurations
+     */
+    getKnowledgeNetworkConfigs(): KnowledgeNetworkConfig[] {
+        return this.getConfigsByType(ApiConfigType.KNOWLEDGE_NETWORK) as KnowledgeNetworkConfig[];
+    }
+
     /**
      * Delete configuration by ID
      */
@@ -145,7 +181,12 @@ class ApiConfigService {
         const initialCount = this.getTotalConfigCount(all);
 
         all.knowledgeNetworks = all.knowledgeNetworks.filter(c => c.id !== id);
-        all.dataViews = all.dataViews.filter(c => c.id !== id);
+        if (all.ontologyObjects) {
+            all.ontologyObjects = all.ontologyObjects.filter(c => c.id !== id);
+        }
+        if (all.dataViews) {
+            all.dataViews = all.dataViews.filter(c => c.id !== id);
+        }
         all.metricModels = all.metricModels.filter(c => c.id !== id);
         all.agents = all.agents.filter(c => c.id !== id);
         all.workflows = all.workflows.filter(c => c.id !== id);
@@ -174,6 +215,24 @@ class ApiConfigService {
         this.saveConfig(config);
         console.log(`[ApiConfigService] Toggled enabled status for ${id}: ${config.enabled}`);
         return true;
+    }
+
+    /**
+     * Get Ontology Object Type ID by Config ID
+     * Returns the configured objectTypeId
+     */
+    getOntologyObjectId(configId: string): string | undefined {
+        const config = this.getConfigById(configId) as OntologyObjectConfig;
+        return config?.objectTypeId;
+    }
+
+    /**
+     * Get Metric Model ID by Config ID
+     * Returns the configured modelId
+     */
+    getMetricModelId(configId: string): string | undefined {
+        const config = this.getConfigById(configId) as MetricModelConfig;
+        return config?.modelId;
     }
 
     /**
@@ -215,8 +274,8 @@ class ApiConfigService {
             switch (config.type) {
                 case ApiConfigType.KNOWLEDGE_NETWORK:
                     return await this.testKnowledgeNetworkConnection(config as KnowledgeNetworkConfig, timestamp);
-                case ApiConfigType.DATA_VIEW:
-                    return await this.testDataViewConnection(config as DataViewConfig, timestamp);
+                case ApiConfigType.ONTOLOGY_OBJECT:
+                    return await this.testOntologyObjectConnection(config as OntologyObjectConfig, timestamp);
                 case ApiConfigType.METRIC_MODEL:
                     return await this.testMetricModelConnection(config as MetricModelConfig, timestamp);
                 case ApiConfigType.AGENT:
@@ -272,19 +331,19 @@ class ApiConfigService {
     }
 
     /**
-     * Test Data View API connection
+     * Test Ontology Object API connection
      */
-    private async testDataViewConnection(
-        config: DataViewConfig,
+    private async testOntologyObjectConnection(
+        config: OntologyObjectConfig,
         timestamp: number
     ): Promise<ConfigTestResult> {
-        const response = await dataViewApi.queryDataView(config.viewId, { limit: 1 });
+        const response = await ontologyApi.queryObjectInstances(config.objectTypeId, { limit: 1 });
 
         return {
             success: true,
-            message: `成功查询数据视图，返回 ${response.entries.length} 条记录`,
+            message: `成功查询业务对象，返回 ${response.entries.length} 条记录`,
             details: {
-                viewId: config.viewId,
+                objectTypeId: config.objectTypeId,
                 entityType: config.entityType,
                 recordCount: response.entries.length
             },
@@ -393,7 +452,8 @@ class ApiConfigService {
     private getTotalConfigCount(collection: ApiConfigCollection): number {
         return (
             collection.knowledgeNetworks.length +
-            collection.dataViews.length +
+            (collection.ontologyObjects?.length || 0) +
+            (collection.dataViews?.length || 0) +
             collection.metricModels.length +
             collection.agents.length +
             collection.workflows.length
@@ -412,7 +472,8 @@ class ApiConfigService {
         } else {
             configs = [
                 ...all.knowledgeNetworks,
-                ...all.dataViews,
+                ...(all.ontologyObjects || []),
+                ...(all.dataViews || []),
                 ...all.metricModels,
                 ...all.agents,
                 ...all.workflows
@@ -438,7 +499,8 @@ class ApiConfigService {
         const all = this.getAllConfigs();
         const allConfigs: AnyApiConfig[] = [
             ...all.knowledgeNetworks,
-            ...all.dataViews,
+            ...(all.ontologyObjects || []),
+            ...(all.dataViews || []),
             ...all.metricModels,
             ...all.agents,
             ...all.workflows

@@ -6,23 +6,32 @@ import { saveAs } from 'file-saver';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { apiConfigService } from '../../../services/apiConfigService';
+import { ApiConfigType, type WorkflowConfig } from '../../../types/apiConfig';
 
 /**
  * Get DAG ID from configuration service with fallback
  */
 function getInventoryWorkflowDagId(): string {
     try {
-        const workflow = apiConfigService.getWorkflowByDagId('602382917091510487');
-        if (workflow && workflow.enabled) {
-            console.log('[InventoryAIAnalysisPanel] Using configured DAG ID:', workflow.dagId);
-            return workflow.dagId;
+        // Get all enabled workflows
+        const workflows = apiConfigService.getEnabledConfigsByType<WorkflowConfig>(ApiConfigType.WORKFLOW);
+
+        // Find workflow with 'inventory' tag
+        const inventoryWorkflow = workflows.find(wf =>
+            wf.tags?.includes('inventory')
+        );
+
+        if (inventoryWorkflow) {
+            console.log('[InventoryAIAnalysisPanel] Using configured inventory workflow:', inventoryWorkflow.dagId, `(${inventoryWorkflow.name})`);
+            return inventoryWorkflow.dagId;
         }
     } catch (error) {
         console.warn('[InventoryAIAnalysisPanel] Failed to get DAG ID from config:', error);
     }
+
     // Fallback to hardcoded value
-    console.log('[InventoryAIAnalysisPanel] Using hardcoded DAG ID: 602382917091510487');
-    return '602382917091510487';
+    console.log('[InventoryAIAnalysisPanel] Using hardcoded DAG ID: 602192728104683735');
+    return '602192728104683735';
 }
 
 // Inventory AI Analysis Panel - 库存优化专用AI分析面板

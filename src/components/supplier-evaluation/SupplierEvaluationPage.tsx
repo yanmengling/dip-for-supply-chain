@@ -14,7 +14,7 @@ import { MessageSquare } from 'lucide-react';
 import MainMaterialSupplierPanel from './MainMaterialSupplierPanel';
 import SupplierComparisonModal from './SupplierComparisonModal';
 import Supplier360Scorecard from './Supplier360Scorecard';
-import { getMainMaterialsByPurchaseAmount, getMainMaterialsByStock } from '../../services/materialService';
+import { getMainMaterialsFromSupplierData } from '../../services/materialService';
 import { supplier360ScorecardsData } from '../../utils/entityConfigService';
 
 
@@ -31,7 +31,7 @@ const SupplierEvaluationPage = ({ toggleCopilot }: { toggleCopilot?: () => void 
   useEffect(() => {
     const setDefaultSupplier = async () => {
       // Load supplier data from API
-      const materialsData = await getMainMaterialsByPurchaseAmount();
+      const materialsData = await getMainMaterialsFromSupplierData();
       const materials = materialsData.slice(0, 5);
 
       if (materials.length > 0) {
@@ -97,7 +97,7 @@ const SupplierEvaluationPage = ({ toggleCopilot }: { toggleCopilot?: () => void 
             onSwitchSupplier={async () => {
               // Find material code for this supplier
               // Load supplier data
-              const materialsData = await getMainMaterialsByPurchaseAmount();
+              const materialsData = await getMainMaterialsFromSupplierData();
               const materials = materialsData.slice(0, 5);
               const material = materials.find(m => m.supplierId === selectedSupplierId);
               if (material) {

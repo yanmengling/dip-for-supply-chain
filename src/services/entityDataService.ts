@@ -5,13 +5,40 @@
  * into the format expected by EntityListPage and entity configs.
  */
 
-import { dataViewApi } from '../api/dataViewApi';
+import { ontologyApi } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
 import { getCurrentEnvironment } from '../config/apiConfig';
 import type { EntityType } from '../types/ontology';
+
+/**
+ * 默认ID后备 (与智能计算和BOM服务保持一致)
+ */
+const DEFAULT_IDS: Record<string, string> = {
+  supplier: 'd5700je9olk4bpa66vkg',
+  material: 'd56voju9olk4bpa66vcg',
+  product: 'd56v4ue9olk4bpa66v00',
+  // Default if not configured
+  order: 'd56vh169olk4bpa66v80',
+
+};
+
+/**
+ * 获取对象类型ID
+ */
+const getObjectTypeId = (type: string): string => {
+  const entityType = type === 'order' ? 'sales_order' : type;
+  const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+  if (config?.objectTypeId) {
+    return config.objectTypeId;
+  }
+  return DEFAULT_IDS[type] || '';
+};
 
 // ============================================================================
 // Field Mapping Functions
 // ============================================================================
+
+// ... (mapping functions remain the same)
 
 /**
  * Map supplier data from API to expected format
@@ -295,111 +322,56 @@ const mapOrderStatus = (apiStatus: string): string => {
 // ============================================================================
 
 /**
- * Fetch entities by type from real data-view APIs
- * Note: Backend API has a hard limit of 1000 records per request and does not support offset parameter
+ * Fetch entities by type from real Ontology APIs
  */
 export const fetchEntitiesByType = async (type: EntityType): Promise<any[]> => {
   try {
-    console.log(`[EntityDataService] Fetching ${type} data from API...`);
-    console.warn(`[EntityDataService] Note: API限制最多返回1000条记录`);
+    console.log(`[EntityDataService] Fetching ${type} data from Ontology API...`);
 
+    const objectTypeId = getObjectTypeId(type);
+    if (!objectTypeId) {
+      console.warn(`[EntityDataService] No objectTypeId found for type: ${type}`);
+      return [];
+    }
+
+    const response = await ontologyApi.queryObjectInstances(objectTypeId, {
+      limit: 1000,
+      include_type_info: false,
+      include_logic_params: false
+    });
+
+    const entries = response.entries || [];
+    console.log(`[EntityDataService] ${type} - Total records retrieved: ${entries.length}`);
+
+    // Brain Mode: Return raw data as requested by user
+    if (getCurrentEnvironment() === 'huida-new') {
+      return entries;
+    }
+
+    // Map to standard format based on type
     switch (type) {
-      case 'supplier': {
-        const response = await dataViewApi.getSuppliers({ limit: 1000 });
-        console.log(`[EntityDataService] Supplier - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data as requested by user
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        // Mock Mode: Map to standard format
-        return mapSupplierData(response.entries || []);
-      }
-
-      case 'material': {
-        const response = await dataViewApi.getMaterials({ limit: 1000 });
-        console.log(`[EntityDataService] Material - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapMaterialData(response.entries || []);
-      }
-
-      case 'product': {
-        const response = await dataViewApi.getProducts({ limit: 1000 });
-        console.log(`[EntityDataService] Product - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapProductData(response.entries || []);
-      }
-
-      case 'factory': {
-        const response = await dataViewApi.getFactories({ limit: 1000 });
-        console.log(`[EntityDataService] Factory - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapFactoryData(response.entries || []);
-      }
-
-      case 'warehouse': {
-        const response = await dataViewApi.getWarehouses({ limit: 1000 });
-        console.log(`[EntityDataService] Warehouse - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapWarehouseData(response.entries || []);
-      }
-
-      case 'order': {
-        const response = await dataViewApi.getOrders({ limit: 1000 });
-        console.log(`[EntityDataService] Order - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapSalesOrderData(response.entries || []);
-      }
-
-      case 'customer': {
-        const response = await dataViewApi.getCustomers({ limit: 1000 });
-        console.log(`[EntityDataService] Customer - Total records: ${response.entries?.length || 0}`);
-
-        // Brain Mode: Return raw data
-        if (getCurrentEnvironment() === 'huida-new') {
-          return response.entries || [];
-        }
-
-        return mapCustomerData(response.entries || []);
-      }
-
-      case 'logistics': {
-        console.log(`[EntityDataService] Logistics data not available from API`);
+      case 'supplier':
+        return mapSupplierData(entries);
+      case 'material':
+        return mapMaterialData(entries);
+      case 'product':
+        return mapProductData(entries);
+      case 'factory':
+        return mapFactoryData(entries);
+      case 'warehouse':
+        return mapWarehouseData(entries);
+      case 'order':
+        return mapSalesOrderData(entries);
+      case 'customer':
+        return mapCustomerData(entries);
+      case 'logistics':
         return [];
-      }
-
       default:
         console.warn(`[EntityDataService] Unknown entity type: ${type}`);
         return [];
     }
   } catch (error) {
-    console.error(`[EntityDataService] Failed to fetch ${type} data:`, error);
+    console.error(`[EntityDataService] Failed to fetch ${type} data from Ontology:`, error);
     throw error;
   }
 };

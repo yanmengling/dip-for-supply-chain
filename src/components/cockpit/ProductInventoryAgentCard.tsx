@@ -9,8 +9,10 @@ import { AlertTriangle, CheckCircle, TrendingUp, Package } from 'lucide-react';
 import { metricModelApi, createLastDaysRange } from '../../api';
 import type { ProductInventoryResult } from '../../services/productInventoryCalculator';
 
+import { apiConfigService } from '../../services/apiConfigService';
+
 // 指标模型 ID 和分析维度配置
-const PRODUCT_INVENTORY_MODEL_ID = 'd58keb5g5lk40hvh48og';
+const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
 const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
 
 const ProductInventoryAgentCard = () => {
@@ -23,11 +25,11 @@ const ProductInventoryAgentCard = () => {
             try {
                 setLoading(true);
                 setError(null);
-                
+
                 const timeRange = createLastDaysRange(1);
-                
+
                 const result = await metricModelApi.queryByModelId(
-                    PRODUCT_INVENTORY_MODEL_ID,
+                    getProductInventoryModelId(),
                     {
                         instant: true,
                         start: timeRange.start,
@@ -39,18 +41,18 @@ const ProductInventoryAgentCard = () => {
 
                 // 转换 API 数据为组件期望的格式
                 const transformedData: ProductInventoryResult[] = [];
-                
+
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
                         const materialCode = series.labels?.material_code || '';
                         const materialName = series.labels?.material_name || '';
                         // 获取 available_quantity：可能在 labels 中作为维度，或在 values 中作为度量值
                         let availableQuantity = 0;
-                        
+
                         // 优先从 labels 中获取（如果作为维度传递）
                         if (series.labels?.available_quantity) {
                             availableQuantity = parseFloat(series.labels.available_quantity) || 0;
-                        } 
+                        }
                         // 其次从 values 中获取最新值（如果作为度量值）
                         else if (series.values && series.values.length > 0) {
                             // 取最后一个非空值
@@ -73,7 +75,7 @@ const ProductInventoryAgentCard = () => {
 
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.calculatedStock - a.calculatedStock);
-                
+
                 setProducts(transformedData);
             } catch (err) {
                 console.error('[Product Inventory Agent] API call failed:', err);
