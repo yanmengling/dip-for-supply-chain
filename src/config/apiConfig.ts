@@ -6,6 +6,7 @@
  */
 
 import { type KnowledgeNetworkConfig, type KnowledgeNetworkPreset, ApiConfigType } from '../types/apiConfig';
+import { globalSettingsService } from '../services/globalSettingsService';
 
 // ============================================================================
 // 类型定义
@@ -63,12 +64,12 @@ export interface GlobalApiConfig {
 
 // 默认 Token（作为 fallback）
 const DEFAULT_API_TOKEN = 'ory_at_7m2C7HYOIJtdConlo7Ntfcoy9-wyQ7wzdblSm_gER0k.h8DMS8RWII1Agln8oX_w7N1y6dor77fz_ZKf6FEc8RY';
+// 默认知识网络ID
+const DEFAULT_KNOWLEDGE_NETWORK_ID = 'd56v1l69olk4bpa66uv0';
 
 // 动态获取 Token：优先从 globalSettingsService 读取，否则使用默认值
 function getGlobalApiToken(): string {
   try {
-    // 延迟导入以避免循环依赖
-    const { globalSettingsService } = require('../services/globalSettingsService');
     const token = globalSettingsService.getApiToken();
     return token || DEFAULT_API_TOKEN;
   } catch (error) {
@@ -82,7 +83,6 @@ function getGlobalApiToken(): string {
 // 动态获取知识网络 ID
 function getGlobalKnowledgeNetworkId(defaultId?: string): string {
   try {
-    const { globalSettingsService } = require('../services/globalSettingsService');
     const knId = globalSettingsService.getKnowledgeNetworkId();
     // If service returns default, but we have a specific env default, prioritize env default if service's is just generic default?
     // Actually service handles defaults. But we prefer what's in settings.
@@ -353,8 +353,7 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
 // Knowledge Network Configuration
 // ============================================================================
 
-/** 默认知识网络ID */
-const DEFAULT_KNOWLEDGE_NETWORK_ID = 'd56v1l69olk4bpa66uv0';
+
 
 /** 知识网络预设配置 */
 export const knowledgeNetworkPresets: KnowledgeNetworkPreset[] = [
@@ -585,8 +584,8 @@ export function setKnowledgeNetworkId(id: string): void {
   currentKnowledgeNetworkId = id;
 
   // Sync to global settings persistence
+  // Sync to global settings persistence
   try {
-    const { globalSettingsService } = require('../services/globalSettingsService');
     globalSettingsService.updateKnowledgeNetworkId(id);
   } catch (error) {
     console.warn('[ApiConfig] Failed to persist KN ID to settings:', error);

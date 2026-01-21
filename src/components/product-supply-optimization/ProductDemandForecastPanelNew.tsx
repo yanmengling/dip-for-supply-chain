@@ -347,7 +347,7 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
       // 基于历史数据点数和回测误差确定置信度
       const confidenceLevel: 'high' | 'medium' | 'low' =
         history.length >= 12 && backtestMAPE < 15 ? 'high' :
-        history.length >= 6 && backtestMAPE < 25 ? 'medium' : 'low';
+          history.length >= 6 && backtestMAPE < 25 ? 'medium' : 'low';
 
       const newStats = {
         avgActual: Math.round(avgActual),
@@ -415,7 +415,7 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
 
   if (externalLoading) {
     return (
-      <div className="bg-white rounded-xl border shadow-sm p-6">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         <div className="animate-pulse">
           <div className="h-6 bg-slate-200 rounded w-48 mb-4"></div>
           <div className="h-64 bg-slate-100 rounded"></div>
@@ -425,7 +425,7 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
   }
 
   return (
-    <div className="mt-6 bg-white rounded-xl border shadow-sm p-6 hover:shadow-md transition-shadow">
+    <div className="mt-6 bg-white rounded-xl border border-slate-200 shadow-sm p-6 hover:shadow-md transition-shadow">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">

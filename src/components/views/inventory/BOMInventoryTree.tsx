@@ -17,7 +17,8 @@ import {
     RefreshCw,
     ArrowLeftRight,
     Loader2,
-    BarChart3
+    BarChart3,
+    Calculator
 } from 'lucide-react';
 import type { BOMNode, ProductBOMTree, ProductionAnalysisResult } from '../../../services/bomInventoryService';
 import { loadAllBOMTrees, TARGET_PRODUCTS, calculateProductionAnalysis } from '../../../services/bomInventoryService';
@@ -366,14 +367,14 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose }) =
     return (
         <div className="flex flex-col h-full">
             {/* 标题栏 */}
-            <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-indigo-50 to-purple-50">
+            <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white">
                 <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-                        <Layers className="text-white" size={20} />
+                    <div className="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center">
+                        <Calculator className="text-blue-600" size={20} />
                     </div>
                     <div>
-                        <h2 className="text-lg font-semibold text-slate-800">逆向生产计算器</h2>
-                        <p className="text-sm text-slate-500">BOM库存分析</p>
+                        <h2 className="text-lg font-bold text-slate-800">逆向生产计算器</h2>
+                        <p className="text-sm text-slate-500 font-medium">BOM库存分析</p>
                     </div>
                 </div>
                 <button

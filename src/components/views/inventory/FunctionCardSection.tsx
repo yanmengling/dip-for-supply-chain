@@ -7,7 +7,7 @@
  * - Order Delivery Timeline
  */
 
-import { Calculator, TrendingUp, Clock } from 'lucide-react';
+import { Calculator, TrendingUp, Clock, ArrowRight, type LucideIcon } from 'lucide-react';
 
 interface FunctionCardSectionProps {
     onOpenReverseCalculator?: () => void;
@@ -15,43 +15,58 @@ interface FunctionCardSectionProps {
     onOpenDeliveryTimeline?: () => void;
 }
 
+interface CardProps {
+    id: string;
+    title: string;
+    description: string;
+    icon: LucideIcon;
+    colorClass: string;
+    bgClass: string;
+    onClick: () => void;
+}
+
 export const FunctionCardSection = ({
     onOpenReverseCalculator = () => { },
     onOpenMOQAnalysis = () => { },
     onOpenDeliveryTimeline = () => { }
 }: FunctionCardSectionProps = {}) => {
-    const cards = [
+    const cards: CardProps[] = [
         {
             id: 'reverse-calculator',
             title: '逆向生产计算器',
-            description: '基于现有库存计算可生产数量',
+            description: '基于现有库存智能推算可生产数量，优化产能分配',
             icon: Calculator,
-            gradient: 'from-blue-500 to-indigo-600',
+            colorClass: 'text-blue-600',
+            bgClass: 'bg-blue-50',
             onClick: onOpenReverseCalculator
         },
         {
             id: 'moq-analysis',
-            title: 'MOQ影响分析',
-            description: '起订量对成本的影响分析',
+            title: 'MOQ 影响分析',
+            description: '深度分析最小起订量对库存成本与资金占用的影响',
             icon: TrendingUp,
-            gradient: 'from-purple-500 to-pink-600',
+            colorClass: 'text-purple-600',
+            bgClass: 'bg-purple-50',
             onClick: onOpenMOQAnalysis
         },
         {
             id: 'delivery-timeline',
             title: '订单交期预警',
-            description: '预测交付时间及风险点',
+            description: 'AI 预测交付时间，提前识别延期风险并智能预警',
             icon: Clock,
-            gradient: 'from-orange-500 to-red-600',
+            colorClass: 'text-orange-600',
+            bgClass: 'bg-orange-50',
             onClick: onOpenDeliveryTimeline
         }
     ];
 
     return (
-        <div className="mb-6">
-            <h2 className="text-lg font-semibold text-slate-800 mb-4">功能工具</h2>
+        <section className="mb-8">
+            <div className="flex items-center justify-between mb-6">
+                <h2 className="text-xl font-bold text-slate-900 tracking-tight">智能工具箱</h2>
+            </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 {cards.map((card) => {
                     const Icon = card.icon;
 
@@ -59,36 +74,39 @@ export const FunctionCardSection = ({
                         <button
                             key={card.id}
                             onClick={card.onClick}
-                            className="group relative bg-white rounded-lg border border-slate-200 p-6 text-left hover:shadow-lg transition-all duration-300 overflow-hidden"
+                            className="group relative flex flex-col bg-white rounded-2xl p-6 border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 ease-in-out text-left overflow-hidden"
                         >
-                            {/* Gradient background on hover */}
-                            <div className={`absolute inset-0 bg-gradient-to-br ${card.gradient} opacity-0 group-hover:opacity-5 transition-opacity duration-300`}></div>
+                            {/* Decorative background circle */}
+                            <div className={`absolute -right-4 -top-4 w-24 h-24 rounded-full ${card.bgClass} opacity-50 blur-2xl group-hover:scale-150 transition-transform duration-500`} />
 
-                            {/* Content */}
-                            <div className="relative z-10">
-                                <div className={`inline-flex items-center justify-center w-12 h-12 rounded-lg bg-gradient-to-br ${card.gradient} mb-4 group-hover:scale-110 transition-transform duration-300`}>
-                                    <Icon className="text-white" size={24} />
+                            <div className="relative z-10 flex flex-col h-full">
+                                {/* Header */}
+                                <div className="flex items-start justify-between mb-4">
+                                    <div className={`p-3 rounded-xl ${card.bgClass} ${card.colorClass} group-hover:scale-110 transition-transform duration-300`}>
+                                        <Icon size={24} strokeWidth={2.5} />
+                                    </div>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300 ${card.bgClass}`}>
+                                        <ArrowRight size={16} className={card.colorClass} />
+                                    </div>
                                 </div>
 
-                                <h3 className="text-lg font-semibold text-slate-800 mb-2 group-hover:text-indigo-600 transition-colors">
-                                    {card.title}
-                                </h3>
-
-                                <p className="text-sm text-slate-600 mb-4">
-                                    {card.description}
-                                </p>
-
-                                <div className="flex items-center text-sm font-medium text-indigo-600 group-hover:translate-x-1 transition-transform">
-                                    打开工具
-                                    <svg className="ml-1 w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                                    </svg>
+                                {/* Content */}
+                                <div className="flex-1">
+                                    <h3 className="text-lg font-bold text-slate-800 mb-2 group-hover:text-slate-900 transition-colors">
+                                        {card.title}
+                                    </h3>
+                                    <p className="text-sm text-slate-500 font-medium leading-relaxed group-hover:text-slate-600 transition-colors">
+                                        {card.description}
+                                    </p>
                                 </div>
+
+                                {/* Bottom Accent Line */}
+                                <div className={`absolute bottom-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-${card.colorClass.split('-')[1]}-500 to-transparent transform scale-x-0 group-hover:scale-x-100 transition-transform duration-500 origin-left`} />
                             </div>
                         </button>
                     );
                 })}
             </div>
-        </div>
+        </section>
     );
 };

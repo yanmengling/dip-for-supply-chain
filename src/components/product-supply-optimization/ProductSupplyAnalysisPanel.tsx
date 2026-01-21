@@ -65,7 +65,7 @@ export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
 
 
   return (
-    <div className="bg-white rounded-xl border shadow-sm p-6 hover:shadow-md transition-shadow">
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 hover:shadow-md transition-shadow">
       {/* AI Suggestions Section */}
       {allProducts.length > 0 && (
         <div className="mb-6 bg-gradient-to-br from-indigo-50 to-purple-50 border-2 border-indigo-200 rounded-xl p-4">
