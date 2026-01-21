@@ -90,6 +90,12 @@ const SupplyChainAppContent = () => {
     getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
   }, [currentView, globalConversationId]);
 
+  // Refresh suggestions when opening (so dynamic context from pages can be picked up)
+  useEffect(() => {
+    if (!copilotOpen) return;
+    getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
+  }, [copilotOpen, currentView, globalConversationId]);
+
   // Callback to save global conversation ID
   const handleConversationCreated = useCallback((conversationId: string) => {
     setGlobalConversationId(conversationId);

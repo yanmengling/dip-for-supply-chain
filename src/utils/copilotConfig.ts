@@ -224,6 +224,15 @@ export const getCopilotConfig = async (
 
   // Get suggestions based on current view
   const getSuggestions = (view: string): string[] => {
+    const safeGetSession = (key: string): string => {
+      try {
+        if (typeof window === 'undefined') return '';
+        return window.sessionStorage.getItem(key) || '';
+      } catch {
+        return '';
+      }
+    };
+
     switch (view) {
       case 'evaluation':
         return [
@@ -240,21 +249,27 @@ export const getCopilotConfig = async (
       case 'cockpit':
         return [
           '供应链整体情况如何？',
-          '今日有哪些异常情况？',
-          '关键指标监控'
+          '生产计划情况如何？',
+          '物料库存情况怎么样？'
         ];
       case 'optimization':
-        return [
-          '产品供应优化方案',
-          '预测分析结果',
-          '优化建议'
-        ];
+        {
+          const selectedProductId = safeGetSession('copilot.optimization.selectedProductId');
+          const productLabel = selectedProductId ? `产品编码 ${selectedProductId}` : '当前选择的产品';
+          return [
+            `${productLabel} 的生产、物料供应情况如何？`,
+            `${productLabel} 的物料供应商情况如何？`
+          ];
+        }
       case 'delivery':
-        return [
-          '订单交付进度',
-          '延误订单分析',
-          '交付优化建议'
-        ];
+        {
+          const delayedOrderNumber = safeGetSession('copilot.delivery.firstDelayedOrderNumber');
+          const orderLabel = delayedOrderNumber ? `订单号 ${delayedOrderNumber}` : '当前交付延期订单';
+          return [
+            `${orderLabel} 的交付进度情况如何？`,
+            '当前的销售订单总体交付情况。'
+          ];
+        }
       default:
         return ['请问您需要什么帮助？'];
     }

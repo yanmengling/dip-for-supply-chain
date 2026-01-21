@@ -266,13 +266,13 @@ export const CopilotSidebar = ({
               {msg.type === 'user' ? <User size={12} /> : <Bot size={12} />}
             </div>
             <div
-              className={`flex-1 text-sm leading-5 px-3 py-2 rounded-xl ${msg.type === 'user'
+              className={`flex-1 text-[13px] leading-5 px-3 py-2 rounded-xl ${msg.type === 'user'
                 ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white'
                 : 'bg-white/70 text-slate-800'
                 }`}
             >
               {msg.type === 'bot' ? (
-                <div className="prose prose-sm prose-slate max-w-none break-words prose-headings:text-slate-800 prose-a:text-indigo-600 prose-hr:border-slate-200 prose-p:leading-5 prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-code:break-words prose-table:block prose-table:overflow-x-auto [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                <div className="prose prose-slate max-w-none text-[13px] break-words prose-headings:text-slate-800 prose-headings:font-semibold prose-headings:leading-5 prose-h1:text-[15px] prose-h2:text-[14px] prose-h3:text-[12px] prose-h4:text-[12px] prose-h5:text-[12px] prose-a:text-indigo-600 prose-hr:border-slate-200 prose-p:leading-5 prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-code:break-words prose-table:block prose-table:overflow-x-auto [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                   <Streamdown>{msg.text}</Streamdown>
                 </div>
               ) : (
@@ -321,7 +321,7 @@ export const CopilotSidebar = ({
       <div className="p-3 bg-white">
         <div className="relative">
           <textarea
-            rows={4}
+            rows={3}
             placeholder={isLoading ? '正在处理中...' : '输入问题...'}
             className="w-full pl-4 pr-12 py-2 bg-slate-50 border border-slate-100 rounded-2xl text-sm leading-5 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed resize-none"
             value={input}
