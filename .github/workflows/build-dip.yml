@@ -42,8 +42,7 @@ jobs:
       
       - name: Build DIP package
         run: |
-          cd buildkit
-          python scripts/build_package.py --arch amd64
+          python buildkit/scripts/build_package.py --arch amd64
       
       - name: Upload DIP package
         uses: actions/upload-artifact@v4
