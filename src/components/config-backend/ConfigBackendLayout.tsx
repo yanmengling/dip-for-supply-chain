@@ -36,7 +36,7 @@ const MENU_ITEMS = [
     id: ApiConfigType.KNOWLEDGE_NETWORK,
     label: '业务知识网络配置',
     icon: Settings,
-    group: '本体模型',
+    group: '系统配置',
     subItems: [
       {
         id: ApiConfigType.ONTOLOGY_OBJECT,
@@ -54,13 +54,13 @@ const MENU_ITEMS = [
     id: ApiConfigType.AGENT,
     label: 'Decision Agent 配置',
     icon: Bot,
-    group: '智能体与工作流'
+    group: '系统配置'
   },
   {
     id: ApiConfigType.WORKFLOW,
     label: 'Workflow 配置',
     icon: Workflow,
-    group: '智能体与工作流'
+    group: '系统配置'
   }
 ];
 
@@ -156,7 +156,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto py-4">
           <div className="space-y-6 px-2">
-            {['可视化', '本体模型', '智能体与工作流'].map(group => {
+            {['可视化', '系统配置'].map(group => {
               const groupItems = MENU_ITEMS.filter(i => i.group === group);
               if (groupItems.length === 0) return null;
 

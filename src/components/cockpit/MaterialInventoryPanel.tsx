@@ -28,7 +28,7 @@ const getMetricIds = () => {
     const typeMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('count'));
 
     return {
-      // 物料库存量 (惠达)
+      // 物料库存量
       TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58je8lg5lk40hvh48n0',
       // 其他指标
       TOTAL_MATERIAL_TYPES: typeMetric?.modelId || 'd58ihclg5lk40hvh48mg',
@@ -88,7 +88,7 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
   // 使用 API 数据，如果失败则回退到 mock 数据
   const totalMaterialTypes = totalMaterialTypesFromApi ?? summary.totalTypes;
 
-  // 在惠达供应链大脑模式下，直接获取总库存量（API不支持维度分析）
+  // 在供应链大脑模式下，直接获取总库存量（API不支持维度分析）
   // 在Mock模式下，通过维度分析获取详细数据
   const stockOptions = useMemo(() => ({
     instant: true,

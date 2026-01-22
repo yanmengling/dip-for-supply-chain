@@ -7,48 +7,82 @@
 import type { CopilotSidebarProps } from '../components/shared/CopilotSidebar';
 import type { CopilotRichContent, StreamMessage } from '../types/ontology';
 import { agentApiClient } from '../services/agentApi';
+import { apiConfigService } from '../services/apiConfigService';
 
-// Agent configurations for different views
-// IMPORTANT: Based on OFFICIAL API documentation, use agent_key (NOT agent_id)
-// Official example: { agent_key: "01KBCGGGD7RT20RW7J7ABRA7YW", agent_version: "v2", query, stream, history: [] }
-const AGENT_CONFIGS = {
-  evaluation: {
-    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A',  // Official agent_key from documentation
-    agent_version: 'v1',                       // Updated to v1 (confirmed working)
-    name: '供应商评估助手',
-    description: '专业的供应商评估和分析助手'
-  },
-  cockpit: {
-    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A',
-    agent_version: 'v1',
-    name: '供应链驾驶舱助手',
-    description: '供应链整体监控和分析助手'
-  },
-  inventory: {
-    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A',
-    agent_version: 'v1',
-    name: '库存优化助手',
-    description: '库存管理和优化分析助手'
-  },
-  optimization: {
-    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A',
-    agent_version: 'v1',
-    name: '产品供应优化助手',
-    description: '产品供应优化和预测助手'
-  },
-  delivery: {
-    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A',
-    agent_version: 'v1',
-    name: '订单交付助手',
-    description: '订单交付管理和跟踪助手'
-  }
+// Agent configuration mapping for different views
+// Maps view names to agent config IDs in the configuration center
+const VIEW_AGENT_MAP: Record<string, string> = {
+  evaluation: 'agent_supplier_evaluation',
+  cockpit: 'agent_supply_chain_cockpit',
+  inventory: 'agent_inventory_optimization',
+  optimization: 'agent_product_supply_optimization',
+  delivery: 'agent_order_delivery',
+  planning: 'agent_pmc_planning',
+  search: 'agent_search'
 };
+
+// Fallback agent names for display
+const FALLBACK_AGENT_NAMES: Record<string, { name: string; description: string }> = {
+  evaluation: { name: '供应商评估助手', description: '专业的供应商评估和分析助手' },
+  cockpit: { name: '供应链驾驶舱助手', description: '供应链整体监控和分析助手' },
+  inventory: { name: '库存优化助手', description: '库存管理和优化分析助手' },
+  optimization: { name: '产品供应优化助手', description: '产品供应优化和预测助手' },
+  delivery: { name: '订单交付助手', description: '订单交付管理和跟踪助手' },
+  planning: { name: 'PMC决策助手', description: 'PMC决策中心助手' },
+  search: { name: '搜索助手', description: '智能搜索助手' }
+};
+
+/**
+ * Get agent configuration from configuration center
+ */
+async function getAgentConfig(viewId: string): Promise<{ agent_key: string; agent_version: string; name: string; description: string } | null> {
+  try {
+    const agentConfigId = VIEW_AGENT_MAP[viewId];
+    if (!agentConfigId) {
+      console.warn(`[CopilotConfig] No agent mapping found for view: ${viewId}`);
+      return null;
+    }
+
+    const agentKey = await apiConfigService.getAgentKey(agentConfigId);
+    if (!agentKey) {
+      console.warn(`[CopilotConfig] No agent key found for config ID: ${agentConfigId}`);
+      return null;
+    }
+
+    // Get agent version from config (default to 'v1')
+    const agentVersion = await apiConfigService.getAgentVersion(agentConfigId) || 'v1';
+
+    // Get agent name and description from config
+    const agentName = await apiConfigService.getAgentName(agentConfigId) || FALLBACK_AGENT_NAMES[viewId]?.name || '智能助手';
+    const agentDescription = await apiConfigService.getAgentDescription(agentConfigId) || FALLBACK_AGENT_NAMES[viewId]?.description || '智能分析助手';
+
+    return {
+      agent_key: agentKey,
+      agent_version: agentVersion,
+      name: agentName,
+      description: agentDescription
+    };
+  } catch (error) {
+    console.error('[CopilotConfig] Failed to load agent config:', error);
+    return null;
+  }
+}
 
 export const getCopilotConfig = async (
   currentView: string,
   conversationId?: string
 ): Promise<Omit<CopilotSidebarProps, 'isOpen' | 'onClose'>> => {
-  const agentConfig = AGENT_CONFIGS[currentView as keyof typeof AGENT_CONFIGS] || AGENT_CONFIGS.cockpit;
+  // Load agent config from configuration center
+  const agentConfig = await getAgentConfig(currentView);
+
+  // Fallback to default if config not found
+  const fallback = FALLBACK_AGENT_NAMES[currentView] || FALLBACK_AGENT_NAMES.cockpit;
+  const finalConfig = agentConfig || {
+    agent_key: '01KEX8BP0GR6TMXQR7GE3XN16A', // Fallback agent key
+    agent_version: 'v1',
+    name: fallback.name,
+    description: fallback.description
+  };
 
   const handleQuery = async (
     query: string,
@@ -66,8 +100,8 @@ export const getCopilotConfig = async (
       // 首次对话: 不提供 conversation_id,系统会自动创建会话
       // 继续对话: 使用返回的 conversation_id 维护多轮对话上下文
       const requestData: any = {
-        agent_key: agentConfig.agent_key,
-        agent_version: agentConfig.agent_version,
+        agent_key: finalConfig.agent_key,
+        agent_version: finalConfig.agent_version,
         query: query,
         stream: !!onStream,
         history: []  // Required field as per official example
@@ -276,11 +310,11 @@ export const getCopilotConfig = async (
   };
 
   return {
-    title: agentConfig.name,
+    title: finalConfig.name,
     initialMessages: [
       {
         type: 'bot',
-        text: `您好！我是${agentConfig.description}。请告诉我您需要什么帮助，我会尽力为您提供专业的分析和建议。`
+        text: `您好！我是${finalConfig.description}。请告诉我您需要什么帮助，我会尽力为您提供专业的分析和建议。`
       }
     ],
     suggestions: getSuggestions(currentView),

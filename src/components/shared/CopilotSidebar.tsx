@@ -88,6 +88,12 @@ export const CopilotSidebar = ({
   }, [messages, isOpen]); // Also scroll when opened
 
   const handleNewChat = () => {
+    // Cancel any ongoing request
+    if (isLoading && onCancel) {
+      onCancel();
+    }
+    setIsLoading(false);
+
     if (onNewConversation) {
       onNewConversation();
     }
@@ -135,11 +141,17 @@ export const CopilotSidebar = ({
                 // Update the streaming message
                 setMessages(currentMsgs => {
                   const updatedMsgs = [...currentMsgs];
-                  const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+                  const lastIndex = updatedMsgs.length - 1;
+                  const lastMsg = updatedMsgs[lastIndex];
+
                   if (lastMsg && lastMsg.isStreaming) {
-                    lastMsg.text = accumulatedText;
-                    lastMsg.conversationId = data.conversation_id;
-                    lastMsg.messageId = data.assistant_message_id;
+                    // Create a new object for the updated message to ensure immutability
+                    updatedMsgs[lastIndex] = {
+                      ...lastMsg,
+                      text: accumulatedText,
+                      conversationId: data.conversation_id,
+                      messageId: data.assistant_message_id
+                    };
                   }
                   return updatedMsgs;
                 });
@@ -163,9 +175,14 @@ export const CopilotSidebar = ({
             // Mark streaming as complete
             setMessages(currentMsgs => {
               const updatedMsgs = [...currentMsgs];
-              const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+              const lastIndex = updatedMsgs.length - 1;
+              const lastMsg = updatedMsgs[lastIndex];
+
               if (lastMsg && lastMsg.isStreaming) {
-                lastMsg.isStreaming = false;
+                updatedMsgs[lastIndex] = {
+                  ...lastMsg,
+                  isStreaming: false
+                };
               }
               return updatedMsgs;
             });
@@ -173,10 +190,15 @@ export const CopilotSidebar = ({
             // Handle streaming error
             setMessages(currentMsgs => {
               const updatedMsgs = [...currentMsgs];
-              const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+              const lastIndex = updatedMsgs.length - 1;
+              const lastMsg = updatedMsgs[lastIndex];
+
               if (lastMsg && lastMsg.isStreaming) {
-                lastMsg.text = `抱歉，处理查询时出现错误：${streamMessage.error || '未知错误'}`;
-                lastMsg.isStreaming = false;
+                updatedMsgs[lastIndex] = {
+                  ...lastMsg,
+                  text: `抱歉，处理查询时出现错误：${streamMessage.error || '未知错误'}`,
+                  isStreaming: false
+                };
               }
               return updatedMsgs;
             });
@@ -187,21 +209,31 @@ export const CopilotSidebar = ({
         if (typeof response === 'string') {
           setMessages(currentMsgs => {
             const updatedMsgs = [...currentMsgs];
-            const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+            const lastIndex = updatedMsgs.length - 1;
+            const lastMsg = updatedMsgs[lastIndex];
+
             if (lastMsg && lastMsg.isStreaming) {
-              lastMsg.text = response;
-              lastMsg.isStreaming = false;
+              updatedMsgs[lastIndex] = {
+                ...lastMsg,
+                text: response,
+                isStreaming: false
+              };
             }
             return updatedMsgs;
           });
         } else if (response) {
           setMessages(currentMsgs => {
             const updatedMsgs = [...currentMsgs];
-            const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+            const lastIndex = updatedMsgs.length - 1;
+            const lastMsg = updatedMsgs[lastIndex];
+
             if (lastMsg && lastMsg.isStreaming) {
-              lastMsg.text = response.text;
-              lastMsg.richContent = response.richContent;
-              lastMsg.isStreaming = false;
+              updatedMsgs[lastIndex] = {
+                ...lastMsg,
+                text: response.text,
+                richContent: response.richContent,
+                isStreaming: false
+              };
             }
             return updatedMsgs;
           });
@@ -210,10 +242,15 @@ export const CopilotSidebar = ({
         console.error('Query processing error:', error);
         setMessages(currentMsgs => {
           const updatedMsgs = [...currentMsgs];
-          const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+          const lastIndex = updatedMsgs.length - 1;
+          const lastMsg = updatedMsgs[lastIndex];
+
           if (lastMsg && lastMsg.isStreaming) {
-            lastMsg.text = '抱歉，处理查询时出现错误。请稍后重试。';
-            lastMsg.isStreaming = false;
+            updatedMsgs[lastIndex] = {
+              ...lastMsg,
+              text: '抱歉，处理查询时出现错误。请稍后重试。',
+              isStreaming: false
+            };
           }
           return updatedMsgs;
         });
@@ -223,10 +260,15 @@ export const CopilotSidebar = ({
       setTimeout(() => {
         setMessages(currentMsgs => {
           const updatedMsgs = [...currentMsgs];
-          const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+          const lastIndex = updatedMsgs.length - 1;
+          const lastMsg = updatedMsgs[lastIndex];
+
           if (lastMsg && lastMsg.isStreaming) {
-            lastMsg.text = '正在分析数据... 建议已生成，请查看详情。';
-            lastMsg.isStreaming = false;
+            updatedMsgs[lastIndex] = {
+              ...lastMsg,
+              text: '正在分析数据... 建议已生成，请查看详情。',
+              isStreaming: false
+            };
           }
           return updatedMsgs;
         });

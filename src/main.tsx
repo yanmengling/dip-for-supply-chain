@@ -13,40 +13,61 @@ if (import.meta.env.DEV) {
   import('./utils/showRawData')
 }
 
+import type { MicroAppProps } from './micro-app'
+
+
 let root: ReturnType<typeof createRoot> | null = null;
 
-function render(container?: HTMLElement) {
+function render(container?: HTMLElement, props?: MicroAppProps) {
   const target = container ? container.querySelector('#root') : document.getElementById('root');
   if (!target) return;
 
   root = createRoot(target);
   root.render(
     <StrictMode>
-      <App />
+      <App {...props} />
     </StrictMode>,
   )
 }
 
-renderWithQiankun({
-  mount(props) {
-    console.log('[SupplyChainBrain] mount', props);
-    render(props.container);
-  },
-  bootstrap() {
+const qiankunLifeCycle = {
+  async bootstrap() {
     console.log('[SupplyChainBrain] bootstrap');
   },
-  unmount(props) {
+  async mount(props: any) {
+    console.log('[SupplyChainBrain] mount', props);
+    render(props.container, props as MicroAppProps);
+  },
+  async unmount(props: any) {
     console.log('[SupplyChainBrain] unmount', props);
     if (root) {
       root.unmount();
       root = null;
     }
   },
-  update(props) {
+  async update(props: any) {
     console.log('[SupplyChainBrain] update', props);
-  }
-});
+  },
+};
 
+renderWithQiankun(qiankunLifeCycle);
+
+// Manual backup for global assignment - ensure host can find the lifecycles
+if (qiankunWindow.__POWERED_BY_QIANKUN__) {
+  console.log('[SupplyChainBrain] Detected qiankun environment, setting global lifecycles');
+  const appName = 'supply-chain-brain';
+  // @ts-ignore
+  qiankunWindow[appName] = qiankunLifeCycle;
+}
+
+// Fallback for standalone mode
 if (!qiankunWindow.__POWERED_BY_QIANKUN__) {
+  console.log('[SupplyChainBrain] Standalone mode');
   render();
 }
+
+// Explicit exports for ESM compatibility
+export const bootstrap = qiankunLifeCycle.bootstrap;
+export const mount = qiankunLifeCycle.mount;
+export const unmount = qiankunLifeCycle.unmount;
+export const update = qiankunLifeCycle.update;

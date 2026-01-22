@@ -151,13 +151,7 @@ def main() -> None:
 
     task_dir = create_task_dir(base_dir / ".cache")
 
-    # Only build if dist doesn't exist or requested
-    dist_dir = project_root / "dist"
-    if not dist_dir.exists():
-        print(f"Building application in {project_root}...")
-        run_command(["npm", "run", "build"], cwd=project_root)
-    else:
-        print("Using existing dist directory.")
+    run_command(["npm", "run", "build"], cwd=project_root)
 
     copy_dist(project_root / "dist", task_dir / "dist")
 
@@ -213,7 +207,7 @@ def main() -> None:
             f"docker-daemon:{image_tag}",
             (
                 f"oci-archive:{images_dir}/{name}-{tag}_{args.arch}.tar"
-                f":{name}:{tag}"
+                f":{image_tag}"
             ),
         ]
     )
@@ -240,15 +234,8 @@ def main() -> None:
     if packaged_charts[0].resolve() != target_chart.resolve():
         shutil.move(str(packaged_charts[0]), target_chart)
 
-    print(f"All components prepared. Zipping into DIP package...")
     dip_output = task_dir / "package" / f"{name}-{tag}_{args.arch}.dip"
     build_dip_package(task_dir / "package" / args.arch, dip_output)
-    
-    print(f"Successfully created DIP package at: {dip_output.absolute()}")
-    # Also copy to a more predictable location for CI
-    final_output = project_root / f"{name}-{tag}_{args.arch}.dip"
-    shutil.copy2(dip_output, final_output)
-    print(f"Copied package to root: {final_output.absolute()}")
 
 
 if __name__ == "__main__":

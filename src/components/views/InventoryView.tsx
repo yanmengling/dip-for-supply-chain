@@ -33,8 +33,8 @@ const validateMetricModel = async (modelId: string) => {
 import { apiConfigService } from '../../services/apiConfigService';
 
 // 动态获取指标模型ID
-const getProductInventoryMetricId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
-const getMaterialInventoryMetricId = () => apiConfigService.getMetricModelId('mm_material_inventory_optimization_huida') || 'd58je8lg5lk40hvh48n0';
+const getProductInventoryMetricId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
+const getMaterialInventoryMetricId = () => apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58je8lg5lk40hvh48n0';
 
 interface Props {
   toggleCopilot?: () => void;

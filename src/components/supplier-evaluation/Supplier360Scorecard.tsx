@@ -66,7 +66,7 @@ const Supplier360Scorecard = ({
     const loadScorecardData = async () => {
       setLoading(true);
       try {
-        // 大脑模式：使用惠达供应链数据
+        // 大脑模式：使用供应链数据
         const hdScorecard = await loadHDSupplierScorecard(currentSupplierId);
         if (hdScorecard) {
           console.log('✅ Loaded HD scorecard for', hdScorecard.supplierName);

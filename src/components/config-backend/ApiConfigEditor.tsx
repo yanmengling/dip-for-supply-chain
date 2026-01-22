@@ -129,11 +129,11 @@ function validateConfig(config: Partial<AnyApiConfig>): ConfigValidationError[] 
             break;
 
         case 'ontology_object':
-            const dv = config as Partial<DataViewConfig>;
-            if (!dv.objectTypeId?.trim()) {
+            const ov = config as Partial<OntologyObjectConfig>;
+            if (!ov.objectTypeId?.trim()) {
                 errors.push({ field: 'objectTypeId', message: '对象类型 ID 不能为空' });
             }
-            if (!dv.entityType?.trim()) {
+            if (!ov.entityType?.trim()) {
                 errors.push({ field: 'entityType', message: '实体类型不能为空' });
             }
             break;
@@ -273,13 +273,13 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                 );
 
             case 'ontology_object':
-                const dv = formData as Partial<DataViewConfig>;
+                const ov = formData as Partial<OntologyObjectConfig>;
                 return (
                     <>
                         <FormField label="对象类型 ID" required error={getFieldError('objectTypeId')}>
                             <input
                                 type="text"
-                                value={dv.objectTypeId || ''}
+                                value={ov.objectTypeId || ''}
                                 onChange={(e) => handleChange('objectTypeId', e.target.value)}
                                 className="form-input"
                                 placeholder="例如: 2004376134633480193"
@@ -287,7 +287,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                         </FormField>
                         <FormField label="实体类型" required error={getFieldError('entityType')}>
                             <select
-                                value={dv.entityType || ''}
+                                value={ov.entityType || ''}
                                 onChange={(e) => handleChange('entityType', e.target.value)}
                                 className="form-input"
                             >

@@ -12,7 +12,7 @@ interface Props {
 import { apiConfigService } from '../../services/apiConfigService';
 
 // 统一使用产品库存指标模型
-const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
+const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
 const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
 
 // 支持的产品列表

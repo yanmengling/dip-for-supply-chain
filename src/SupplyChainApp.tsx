@@ -217,7 +217,18 @@ const SupplyChainAppContent = () => {
 // Data Mode Switcher removed - moved to Config Backend
 
 // Main App
-const SupplyChainApp = () => {
+import type { MicroAppProps } from './micro-app';
+
+const SupplyChainApp = (props: Partial<MicroAppProps>) => {
+  useEffect(() => {
+    if (props.User) {
+      console.log('Integrated User Info:', props.User);
+    }
+    if (props.token) {
+      console.log('Integrated Token:', props.token);
+    }
+  }, [props.User, props.token]);
+
   return (
     <SupplyChainAppContent />
   );

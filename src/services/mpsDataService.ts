@@ -27,11 +27,11 @@ import { apiConfigService } from './apiConfigService';
 // ============================================================================
 
 const getObjectTypeIds = () => ({
-  PRODUCT: apiConfigService.getOntologyObjectId('oo_product_huida') || '',           // 产品对象类型
-  PRODUCTION_PLAN: apiConfigService.getOntologyObjectId('oo_production_plan_huida') || 'd5704qm9olk4bpa66vp0',   // 工厂生产计划对象类型
-  INVENTORY: apiConfigService.getOntologyObjectId('oo_inventory_huida') || '',         // 库存对象类型
-  SALES_ORDER: apiConfigService.getOntologyObjectId('oo_sales_order_huida') || '',       // 销售订单对象类型
-  BOM: apiConfigService.getOntologyObjectId('oo_bom_huida') || '',              // 产品BOM对象类型
+  PRODUCT: apiConfigService.getOntologyObjectId('oo_product') || '',           // 产品对象类型
+  PRODUCTION_PLAN: apiConfigService.getOntologyObjectId('oo_production_plan') || 'd5704qm9olk4bpa66vp0',   // 工厂生产计划对象类型
+  INVENTORY: apiConfigService.getOntologyObjectId('oo_inventory') || '',         // 库存对象类型
+  SALES_ORDER: apiConfigService.getOntologyObjectId('oo_sales_order') || '',       // 销售订单对象类型
+  BOM: apiConfigService.getOntologyObjectId('oo_bom') || '',              // 产品BOM对象类型
 });
 
 // Note: DataSourceResponse type removed - all functions now return direct data from API
@@ -591,7 +591,7 @@ export async function fetchMaterialDetails(
 
   const objectTypeIds = getObjectTypeIds();
   // Using material ID from config if possible, but fetching dynamically
-  const materialObjectId = apiConfigService.getOntologyObjectId('oo_material_huida') || '';
+  const materialObjectId = apiConfigService.getOntologyObjectId('oo_material') || '';
 
   const response = await ontologyApi.queryObjectInstances(materialObjectId, {
     condition,

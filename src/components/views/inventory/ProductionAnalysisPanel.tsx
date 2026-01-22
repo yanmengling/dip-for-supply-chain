@@ -1,7 +1,7 @@
 /**
  * 生产数量分析面板 (Phase 2)
  *
- * 按照惠达科技机器人事业部的设计:
+ * 按照机器人事业部的设计:
  * - 按起订量分析: 实际补料金额与剩余呆滞料金额随生产数量的变化
  * - 无起订量分析: 实际补料金额与新增呆滞金额随生产数量的变化
  * 
@@ -86,7 +86,7 @@ function formatQuantity(value: number): string {
  * 3. 综合考虑：在补料成本增速加快前的最后一个高效消耗点
  */
 function analyzeData(
-    data: ChartDataPoint[], 
+    data: ChartDataPoint[],
     topMaterials: MaterialRequirement[],
     withMOQ: boolean
 ): DataAnalysis {
@@ -105,7 +105,7 @@ function analyzeData(
 
     // 找到起始分析点（第一个有数据的点）
     const startPoint = data[0].quantity;
-    
+
     // 获取最高价值物料信息
     const topMaterial = topMaterials[0];
     const startMaterial = topMaterial?.name || '高价值物料';
@@ -115,18 +115,18 @@ function analyzeData(
     // 计算最优生产节点 - 基于边际效益分析
     let optimalPoint = startPoint;
     let bestEfficiencyRatio = 0;
-    
+
     for (let i = 1; i < data.length; i++) {
         // 计算边际呆滞消耗（每增加1套消耗的呆滞金额）
-        const stagnantConsumed = data[i-1].remainingStagnant - data[i].remainingStagnant;
+        const stagnantConsumed = data[i - 1].remainingStagnant - data[i].remainingStagnant;
         // 计算边际补料增加（每增加1套需要的补料金额）
-        const replenishmentAdded = data[i].replenishment - data[i-1].replenishment;
-        const quantityStep = data[i].quantity - data[i-1].quantity;
-        
+        const replenishmentAdded = data[i].replenishment - data[i - 1].replenishment;
+        const quantityStep = data[i].quantity - data[i - 1].quantity;
+
         if (quantityStep > 0 && replenishmentAdded > 0) {
             // 效益比 = 消耗的呆滞金额 / 新增的补料金额
             const efficiencyRatio = stagnantConsumed / replenishmentAdded;
-            
+
             // 找到效益比开始下降前的最优点
             // 当效益比还大于1（消耗呆滞比新增补料多）且仍有呆滞可消耗时，继续推进
             if (efficiencyRatio > 1 && data[i].remainingStagnant > 0) {
@@ -140,7 +140,7 @@ function analyzeData(
             }
         }
     }
-    
+
     // 如果最优点还是起始点，取数据中间位置作为合理建议
     if (optimalPoint === startPoint && data.length > 3) {
         const midIndex = Math.floor(data.length / 2);
@@ -150,16 +150,16 @@ function analyzeData(
     // 计算线性关系 - 分析前后半段斜率
     const firstHalf = data.slice(0, Math.floor(data.length / 2));
     const secondHalf = data.slice(Math.floor(data.length / 2));
-    
-    const slope1 = firstHalf.length > 1 
-        ? (firstHalf[firstHalf.length-1].replenishment - firstHalf[0].replenishment) / 
-          (firstHalf[firstHalf.length-1].quantity - firstHalf[0].quantity)
+
+    const slope1 = firstHalf.length > 1
+        ? (firstHalf[firstHalf.length - 1].replenishment - firstHalf[0].replenishment) /
+        (firstHalf[firstHalf.length - 1].quantity - firstHalf[0].quantity)
         : 0;
     const slope2 = secondHalf.length > 1
-        ? (secondHalf[secondHalf.length-1].replenishment - secondHalf[0].replenishment) / 
-          (secondHalf[secondHalf.length-1].quantity - secondHalf[0].quantity)
+        ? (secondHalf[secondHalf.length - 1].replenishment - secondHalf[0].replenishment) /
+        (secondHalf[secondHalf.length - 1].quantity - secondHalf[0].quantity)
         : 0;
-    
+
     const linearRelation = Math.abs(slope1 - slope2) < slope1 * 0.5; // 斜率变化小于50%认为是线性
     const slopeDescription = linearRelation ? '斜率较平缓' : '斜率变化明显';
 
@@ -176,7 +176,7 @@ function analyzeData(
 }
 
 // ============================================================================
-// 子组件：分析图表（带右侧文字分析）- 惠达科技风格
+// 子组件：分析图表（带右侧文字分析）
 // ============================================================================
 
 interface HuidaStyleChartProps {
@@ -199,19 +199,19 @@ const HuidaStyleChart: React.FC<HuidaStyleChartProps> = ({
     // 计算Y轴范围
     const maxReplenishment = Math.max(...data.map(d => d.replenishment), 1);
     const maxStagnant = Math.max(...data.map(d => d.remainingStagnant), 1);
-    
+
     // 找到最优点的数据
     const optimalData = data.find(d => d.quantity === analysis.optimalPoint) || data[Math.floor(data.length / 2)];
-    
+
     // 计算关键数据
     const minReplenishment = Math.min(...data.map(d => d.replenishment));
-    const stagnantReduction = data.length > 0 
+    const stagnantReduction = data.length > 0
         ? data[0].remainingStagnant - (data[data.length - 1]?.remainingStagnant || 0)
         : 0;
 
     return (
         <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-            {/* 标题栏 - 惠达风格 */}
+            {/* 标题栏 */}
             <div className="px-4 py-3 border-b border-slate-100 bg-gradient-to-r from-amber-50 to-orange-50">
                 <h3 className="text-base font-bold text-amber-800">{title}</h3>
             </div>
@@ -224,27 +224,27 @@ const HuidaStyleChart: React.FC<HuidaStyleChartProps> = ({
                     <div className="text-center mb-2">
                         <span className="text-sm text-slate-600">{chartTitle}</span>
                     </div>
-                    
+
                     <div className="h-64">
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={data} margin={{ top: 10, right: 60, left: 60, bottom: 30 }}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                                
+
                                 <XAxis
                                     dataKey="quantity"
                                     tick={{ fontSize: 11, fill: '#374151' }}
                                     tickFormatter={(v) => String(v)}
                                     axisLine={{ stroke: '#9ca3af' }}
                                     tickLine={{ stroke: '#9ca3af' }}
-                                    label={{ 
-                                        value: '生产数量', 
-                                        position: 'insideBottom', 
-                                        offset: -15, 
-                                        fontSize: 12, 
-                                        fill: '#374151' 
+                                    label={{
+                                        value: '生产数量',
+                                        position: 'insideBottom',
+                                        offset: -15,
+                                        fontSize: 12,
+                                        fill: '#374151'
                                     }}
                                 />
-                                
+
                                 {/* 左Y轴 - 实际补料金额 (红色) */}
                                 <YAxis
                                     yAxisId="left"
@@ -254,17 +254,17 @@ const HuidaStyleChart: React.FC<HuidaStyleChartProps> = ({
                                     axisLine={{ stroke: '#dc2626', strokeWidth: 1 }}
                                     tickLine={{ stroke: '#dc2626' }}
                                     domain={[0, maxReplenishment * 1.1]}
-                                    label={{ 
-                                        value: '实际补料金额', 
-                                        angle: -90, 
+                                    label={{
+                                        value: '实际补料金额',
+                                        angle: -90,
                                         position: 'insideLeft',
                                         offset: 0,
-                                        fontSize: 11, 
+                                        fontSize: 11,
                                         fill: '#dc2626',
                                         style: { textAnchor: 'middle' }
                                     }}
                                 />
-                                
+
                                 {/* 右Y轴 - 剩余呆滞料金额 (蓝色) */}
                                 <YAxis
                                     yAxisId="right"
@@ -274,27 +274,27 @@ const HuidaStyleChart: React.FC<HuidaStyleChartProps> = ({
                                     axisLine={{ stroke: '#2563eb', strokeWidth: 1 }}
                                     tickLine={{ stroke: '#2563eb' }}
                                     domain={[0, maxStagnant * 1.1]}
-                                    label={{ 
-                                        value: withMOQ ? '剩余呆滞料金额' : '新增呆滞金额', 
-                                        angle: 90, 
+                                    label={{
+                                        value: withMOQ ? '剩余呆滞料金额' : '新增呆滞金额',
+                                        angle: 90,
                                         position: 'insideRight',
                                         offset: 0,
-                                        fontSize: 11, 
+                                        fontSize: 11,
                                         fill: '#2563eb',
                                         style: { textAnchor: 'middle' }
                                     }}
                                 />
-                                
+
                                 <Tooltip
-                                    contentStyle={{ 
-                                        backgroundColor: 'white', 
+                                    contentStyle={{
+                                        backgroundColor: 'white',
                                         border: '1px solid #e5e7eb',
                                         borderRadius: '6px',
                                         boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
                                     }}
                                     formatter={(value: number, name: string) => {
-                                        const label = name === 'replenishment' 
-                                            ? '实际补料金额' 
+                                        const label = name === 'replenishment'
+                                            ? '实际补料金额'
                                             : (withMOQ ? '剩余呆滞料金额' : '新增呆滞金额');
                                         return [`¥${formatCurrency(value)}`, label];
                                     }}
@@ -341,11 +341,11 @@ const HuidaStyleChart: React.FC<HuidaStyleChartProps> = ({
                     </div>
                 </div>
 
-                {/* 右侧分析文字 - 惠达风格 */}
+                {/* 右侧分析文字 */}
                 <div className="w-72 p-4 bg-slate-50 border-l border-slate-200">
                     <div className="space-y-4">
                         <h4 className="text-sm font-bold text-slate-800">数据分析{withMOQ ? '' : '（无起定量）'}：</h4>
-                        
+
                         {withMOQ ? (
                             // 按起订量分析的详细文字
                             <div className="space-y-3 text-sm text-slate-700 leading-relaxed">
@@ -411,12 +411,11 @@ const TopMaterialsCard: React.FC<TopMaterialsCardProps> = ({ materials }) => {
                         className="flex items-center justify-between py-2 px-3 bg-slate-50 rounded-lg"
                     >
                         <div className="flex items-center gap-3 min-w-0">
-                            <span className={`w-6 h-6 flex items-center justify-center text-xs font-bold rounded-full ${
-                                index === 0 ? 'bg-amber-500 text-white' :
-                                index === 1 ? 'bg-slate-400 text-white' :
-                                index === 2 ? 'bg-amber-700 text-white' :
-                                'bg-slate-200 text-slate-600'
-                            }`}>
+                            <span className={`w-6 h-6 flex items-center justify-center text-xs font-bold rounded-full ${index === 0 ? 'bg-amber-500 text-white' :
+                                    index === 1 ? 'bg-slate-400 text-white' :
+                                        index === 2 ? 'bg-amber-700 text-white' :
+                                            'bg-slate-200 text-slate-600'
+                                }`}>
                                 {index + 1}
                             </span>
                             <div className="min-w-0">
@@ -455,11 +454,11 @@ interface KeyMetricsProps {
     topMaterialCount: number;
 }
 
-const KeyMetrics: React.FC<KeyMetricsProps> = ({ 
-    maxProducible, 
-    crossPoint, 
+const KeyMetrics: React.FC<KeyMetricsProps> = ({
+    maxProducible,
+    crossPoint,
     totalStagnantValue,
-    topMaterialCount 
+    topMaterialCount
 }) => {
     return (
         <div className="grid grid-cols-4 gap-4">
@@ -557,11 +556,11 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
     // 注意：暂时把所有库存都当作呆滞库存处理
     const chartDataWithMOQ = useMemo(() => {
         if (!analysisResult) return [];
-        
+
         // 使用所有物料的总库存价值，而不是只用前10个
-        const totalStagnant = analysisResult.totalInventoryValue || 
+        const totalStagnant = analysisResult.totalInventoryValue ||
             analysisResult.topExpensiveMaterials.reduce((sum, m) => sum + m.stockValue, 0);
-        
+
         return analysisResult.productionQuantities.map((qty, i) => ({
             quantity: qty,
             replenishment: analysisResult.newProcurementCostsWithMOQ[i], // 实际补料金额
@@ -572,11 +571,11 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
     // 构建图表数据 - 无起订量分析
     const chartDataNoMOQ = useMemo(() => {
         if (!analysisResult) return [];
-        
+
         // 使用所有物料的总库存价值，而不是只用前10个
-        const totalStagnant = analysisResult.totalInventoryValue || 
+        const totalStagnant = analysisResult.totalInventoryValue ||
             analysisResult.topExpensiveMaterials.reduce((sum, m) => sum + m.stockValue, 0);
-        
+
         return analysisResult.productionQuantities.map((qty, i) => ({
             quantity: qty,
             replenishment: analysisResult.newProcurementCosts[i], // 实际补料金额
@@ -598,7 +597,7 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
     const totalStagnantValue = useMemo(() => {
         if (!analysisResult) return 0;
         // 使用所有物料的总库存价值
-        return analysisResult.totalInventoryValue || 
+        return analysisResult.totalInventoryValue ||
             analysisResult.topExpensiveMaterials.reduce((sum, m) => sum + m.stockValue, 0);
     }, [analysisResult]);
 
@@ -634,7 +633,7 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
                 topMaterialCount={analysisResult.topExpensiveMaterials.length}
             />
 
-            {/* 按起订量分析 - 惠达风格 */}
+            {/* 按起订量分析 */}
             <HuidaStyleChart
                 title="1. 按起订量分析"
                 chartTitle="实际补料金额与剩余呆滞料金额随生产数量的变化"
@@ -644,7 +643,7 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
                 totalStagnantValue={totalStagnantValue}
             />
 
-            {/* 无起订量分析 - 惠达风格 */}
+            {/* 无起订量分析 */}
             <HuidaStyleChart
                 title="2. 无起订量分析"
                 chartTitle="实际补料金额与新增呆滞金额随生产数量的变化"

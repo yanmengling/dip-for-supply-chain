@@ -1,0 +1,66 @@
+name: Build DIP Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build frontend
+        run: npm run build
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml jinja2
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+      
+      - name: Install skopeo and helm
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      
+      - name: Build DIP package
+        run: |
+          python buildkit/scripts/build_package.py --arch amd64
+      
+      - name: Upload DIP package
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-brain-dip
+          path: '*.dip'
+          retention-days: 30
+      
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: '*.dip'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

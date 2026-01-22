@@ -9,10 +9,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
     qiankun('supply-chain-brain', {
-      useDevMode: true
+      useDevMode: false
     })
   ],
-  base: '/supply-chain-brain/',
+  base: '/supply-chain-brain/', // Base path for the micro-app
   server: {
     port: 5173,
     host: '127.0.0.1',

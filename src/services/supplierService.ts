@@ -93,7 +93,7 @@ export async function getSupplierComparison(supplierId: string): Promise<any | n
     const { apiConfigService } = await import('./apiConfigService');
 
     // Load supplier-material relationship data using config
-    const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier_evaluation_huida') || '';
+    const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier') || '';
     const response = await ontologyApi.queryObjectInstances(objectTypeId, {
       limit: 10000,
       need_total: false,

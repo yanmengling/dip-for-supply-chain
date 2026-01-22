@@ -1,8 +1,8 @@
-namespace: anyshare
-name: supply-chain-brain
-alias: 供应链大脑 2.0
-version: 0.1.0
-category: Supply Chain
-port: 8751
-description: 供应链智能分析与协同平台
-key: 7f8a9b2c3d4e5f6a7b8c9d0e1f2a3b4c # Random 32-char key
+namespace: anyshare # Kubernetes 命名空间，如果你不知道这是什么就别去动。
+name: supply-chain-brain # 应用名称
+alias: KWeaver 供应链大脑 # 应用别名，会显示在 DIP 平台的界面上。
+version: 0.1.0 # 符合语义版本规范的版本号。
+category: DIP for Supply Chain # 应用分类，会显示在 DIP 平台的界面上。
+port: 8891 # 应用对外暴露的端口号。
+description: KWeaver 供应链大脑应用 # 应用描述，会显示在 DIP 应用卡片的介绍上。
+key: apR1WJZ7F9HcYEB4T8Qm2Kx6D0S5Lc3N # （新应用一定要替换！）应用标识，32 位随机字符，用于确认应用唯一性，如果是同一个应用请保持这个 key 不变

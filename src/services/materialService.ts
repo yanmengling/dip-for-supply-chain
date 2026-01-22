@@ -20,10 +20,10 @@ export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
         const { apiConfigService } = await import('./apiConfigService');
 
         // Load supplier-material relationship data using config
-        const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier_evaluation_huida') || '';
+        const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier');
 
         if (!objectTypeId) {
-            console.warn('[MaterialService] Missing configuration for "oo_supplier_evaluation_huida". Data fetching skipped. Please try resetting to default configuration in the Configuration Center if this persists.');
+            console.warn('[MaterialService] Missing configuration for "oo_supplier". Data fetching skipped. Please check Configuration Center.');
             return [];
         }
 
