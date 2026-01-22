@@ -1,5 +1,5 @@
 /**
- * ChainNeural Supply Chain App V2
+ * DIP for Supply Chain - Supply Chain Brain
  * 
  * Main application component integrating all supply chain management views.
  * 
@@ -15,6 +15,7 @@ import {
   LayoutDashboard, Package, Truck, Users, TrendingUp, Settings,
   Brain, Database, Calendar
 } from 'lucide-react';
+import logoIcon from './assets/logo.svg';
 import SupplierEvaluationPage from './components/supplier-evaluation/SupplierEvaluationPage';
 import { ProductSupplyOptimizationPage } from './components/product-supply-optimization/ProductSupplyOptimizationPage';
 import { CopilotSidebar } from './components/shared/CopilotSidebar';
@@ -90,6 +91,12 @@ const SupplyChainAppContent = () => {
     getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
   }, [currentView, globalConversationId]);
 
+  // Refresh suggestions when opening (so dynamic context from pages can be picked up)
+  useEffect(() => {
+    if (!copilotOpen) return;
+    getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
+  }, [copilotOpen, currentView, globalConversationId]);
+
   // Callback to save global conversation ID
   const handleConversationCreated = useCallback((conversationId: string) => {
     setGlobalConversationId(conversationId);
@@ -131,22 +138,14 @@ const SupplyChainAppContent = () => {
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <img
-                  src="/logo.svg"
+                  src={logoIcon}
                   alt="供应链大脑"
-                  className="w-10 h-10"
-                  onError={(e) => {
-                    // Fallback to icon if logo fails to load
-                    const target = e.currentTarget;
-                    target.style.display = 'none';
-                    const fallback = document.createElement('div');
-                    fallback.className = 'w-10 h-10 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center';
-                    fallback.innerHTML = '<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>';
-                    target.parentNode?.insertBefore(fallback, target);
-                  }}
+                  className="w-10 h-10 object-contain flex-shrink-0"
+                  style={{ display: 'block' }}
                 />
                 <div>
-                  <h1 className="text-xl font-bold text-slate-800">供应链大脑 2.0</h1>
-                  <p className="text-xs text-slate-500">ChainNeural</p>
+                  <h1 className="text-xl font-bold text-slate-800">供应链大脑</h1>
+                  <p className="text-xs text-slate-500">DIP for Supply Chain</p>
                 </div>
               </div>
               <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">

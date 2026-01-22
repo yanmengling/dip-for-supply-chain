@@ -47,12 +47,12 @@ function getMetricIds() {
     console.warn('[SupplyChainGraphPanel] Failed to load metric IDs from config, using defaults:', error);
     // Fallback to hardcoded values
     return {
-      ORDER_DEMAND_COUNT: apiConfigService.getMetricModelId('mm_order_demand_huida') || 'd58fu5lg5lk40hvh48kg',
-      PRODUCT_COUNT: apiConfigService.getMetricModelId('mm_product_count_huida') || 'd58fv0lg5lk40hvh48l0',
+      ORDER_DEMAND_COUNT: apiConfigService.getMetricModelId('mm_order_demand') || 'd58fu5lg5lk40hvh48kg',
+      PRODUCT_COUNT: apiConfigService.getMetricModelId('mm_product_count') || 'd58fv0lg5lk40hvh48l0',
       WAREHOUSE_COUNT: 'd51m9htg5lk40hvh48fg',
-      MATERIAL_COUNT: apiConfigService.getMetricModelId('mm_material_count_huida') || 'd58g085g5lk40hvh48lg',
-      SUPPLIER_COUNT: apiConfigService.getMetricModelId('mm_supplier_count_huida') || 'd58g53lg5lk40hvh48m0',
-      PRODUCT_INVENTORY_DETAIL: apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og',
+      MATERIAL_COUNT: apiConfigService.getMetricModelId('mm_material_count') || 'd58g085g5lk40hvh48lg',
+      SUPPLIER_COUNT: apiConfigService.getMetricModelId('mm_supplier_count') || 'd58g53lg5lk40hvh48m0',
+      PRODUCT_INVENTORY_DETAIL: apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og',
     };
   }
 }

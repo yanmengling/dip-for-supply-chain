@@ -109,6 +109,23 @@ const DeliveryViewEnhanced = (_props: Props) => {
     });
   }, [allOrders]);
 
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      const firstDelayed = enrichedOrders
+        .filter(o => o.isOverdue)
+        .sort((a, b) => a.daysUntilDue - b.daysUntilDue)[0];
+
+      if (firstDelayed?.orderNumber) {
+        window.sessionStorage.setItem('copilot.delivery.firstDelayedOrderNumber', firstDelayed.orderNumber);
+      } else {
+        window.sessionStorage.removeItem('copilot.delivery.firstDelayedOrderNumber');
+      }
+    } catch (e) {
+      console.warn('[Copilot] Failed to persist first delayed order:', e);
+    }
+  }, [enrichedOrders]);
+
   // 2. 应用筛选 (Filtering)
   const filteredOrders = useMemo(() => {
     // 使用本地筛选逻辑替代 service 中的 filterDeliveryOrders，因为我们需要基于 enriched 字段筛选
@@ -561,4 +578,3 @@ const DeliveryViewEnhanced = (_props: Props) => {
 };
 
 export default DeliveryViewEnhanced;
-

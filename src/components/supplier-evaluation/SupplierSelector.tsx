@@ -34,7 +34,7 @@ const SupplierSelector = ({
       try {
         let data: Array<any> = [];
 
-        // 大脑模式：加载惠达供应商
+        // 大脑模式：加载供应商
         const hdSuppliers = await loadHDSupplierList();
         data = hdSuppliers.map(s => ({
           ...s,

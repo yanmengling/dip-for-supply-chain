@@ -113,7 +113,7 @@ export const ProductOrderAnalysisCard: React.FC<Props> = ({
         const range = createLastDaysRange(1);
 
         // Load metric model ID from config
-        const modelId = apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida');
+        const modelId = apiConfigService.getMetricModelId('mm_product_inventory_optimization');
 
         if (!modelId) {
           console.warn('[ProductOrderAnalysisCard] Metric model ID not configured');

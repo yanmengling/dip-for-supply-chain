@@ -88,6 +88,12 @@ export const CopilotSidebar = ({
   }, [messages, isOpen]); // Also scroll when opened
 
   const handleNewChat = () => {
+    // Cancel any ongoing request
+    if (isLoading && onCancel) {
+      onCancel();
+    }
+    setIsLoading(false);
+
     if (onNewConversation) {
       onNewConversation();
     }
@@ -135,11 +141,17 @@ export const CopilotSidebar = ({
                 // Update the streaming message
                 setMessages(currentMsgs => {
                   const updatedMsgs = [...currentMsgs];
-                  const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+                  const lastIndex = updatedMsgs.length - 1;
+                  const lastMsg = updatedMsgs[lastIndex];
+
                   if (lastMsg && lastMsg.isStreaming) {
-                    lastMsg.text = accumulatedText;
-                    lastMsg.conversationId = data.conversation_id;
-                    lastMsg.messageId = data.assistant_message_id;
+                    // Create a new object for the updated message to ensure immutability
+                    updatedMsgs[lastIndex] = {
+                      ...lastMsg,
+                      text: accumulatedText,
+                      conversationId: data.conversation_id,
+                      messageId: data.assistant_message_id
+                    };
                   }
                   return updatedMsgs;
                 });
@@ -163,9 +175,14 @@ export const CopilotSidebar = ({
             // Mark streaming as complete
             setMessages(currentMsgs => {
               const updatedMsgs = [...currentMsgs];
-              const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+              const lastIndex = updatedMsgs.length - 1;
+              const lastMsg = updatedMsgs[lastIndex];
+
               if (lastMsg && lastMsg.isStreaming) {
-                lastMsg.isStreaming = false;
+                updatedMsgs[lastIndex] = {
+                  ...lastMsg,
+                  isStreaming: false
+                };
               }
               return updatedMsgs;
             });
@@ -173,10 +190,15 @@ export const CopilotSidebar = ({
             // Handle streaming error
             setMessages(currentMsgs => {
               const updatedMsgs = [...currentMsgs];
-              const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+              const lastIndex = updatedMsgs.length - 1;
+              const lastMsg = updatedMsgs[lastIndex];
+
               if (lastMsg && lastMsg.isStreaming) {
-                lastMsg.text = `抱歉，处理查询时出现错误：${streamMessage.error || '未知错误'}`;
-                lastMsg.isStreaming = false;
+                updatedMsgs[lastIndex] = {
+                  ...lastMsg,
+                  text: `抱歉，处理查询时出现错误：${streamMessage.error || '未知错误'}`,
+                  isStreaming: false
+                };
               }
               return updatedMsgs;
             });
@@ -187,21 +209,31 @@ export const CopilotSidebar = ({
         if (typeof response === 'string') {
           setMessages(currentMsgs => {
             const updatedMsgs = [...currentMsgs];
-            const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+            const lastIndex = updatedMsgs.length - 1;
+            const lastMsg = updatedMsgs[lastIndex];
+
             if (lastMsg && lastMsg.isStreaming) {
-              lastMsg.text = response;
-              lastMsg.isStreaming = false;
+              updatedMsgs[lastIndex] = {
+                ...lastMsg,
+                text: response,
+                isStreaming: false
+              };
             }
             return updatedMsgs;
           });
         } else if (response) {
           setMessages(currentMsgs => {
             const updatedMsgs = [...currentMsgs];
-            const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+            const lastIndex = updatedMsgs.length - 1;
+            const lastMsg = updatedMsgs[lastIndex];
+
             if (lastMsg && lastMsg.isStreaming) {
-              lastMsg.text = response.text;
-              lastMsg.richContent = response.richContent;
-              lastMsg.isStreaming = false;
+              updatedMsgs[lastIndex] = {
+                ...lastMsg,
+                text: response.text,
+                richContent: response.richContent,
+                isStreaming: false
+              };
             }
             return updatedMsgs;
           });
@@ -210,10 +242,15 @@ export const CopilotSidebar = ({
         console.error('Query processing error:', error);
         setMessages(currentMsgs => {
           const updatedMsgs = [...currentMsgs];
-          const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+          const lastIndex = updatedMsgs.length - 1;
+          const lastMsg = updatedMsgs[lastIndex];
+
           if (lastMsg && lastMsg.isStreaming) {
-            lastMsg.text = '抱歉，处理查询时出现错误。请稍后重试。';
-            lastMsg.isStreaming = false;
+            updatedMsgs[lastIndex] = {
+              ...lastMsg,
+              text: '抱歉，处理查询时出现错误。请稍后重试。',
+              isStreaming: false
+            };
           }
           return updatedMsgs;
         });
@@ -223,10 +260,15 @@ export const CopilotSidebar = ({
       setTimeout(() => {
         setMessages(currentMsgs => {
           const updatedMsgs = [...currentMsgs];
-          const lastMsg = updatedMsgs[updatedMsgs.length - 1];
+          const lastIndex = updatedMsgs.length - 1;
+          const lastMsg = updatedMsgs[lastIndex];
+
           if (lastMsg && lastMsg.isStreaming) {
-            lastMsg.text = '正在分析数据... 建议已生成，请查看详情。';
-            lastMsg.isStreaming = false;
+            updatedMsgs[lastIndex] = {
+              ...lastMsg,
+              text: '正在分析数据... 建议已生成，请查看详情。',
+              isStreaming: false
+            };
           }
           return updatedMsgs;
         });
@@ -238,12 +280,12 @@ export const CopilotSidebar = ({
 
   return (
     <div
-      className={`fixed right-0 w-96 bg-white border-l border-slate-200 shadow-lg rounded-l-lg transform transition-transform duration-300 z-50 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+      className={`fixed right-0 w-[33rem] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-l border-slate-100 shadow-xl rounded-l-2xl transform transition-transform duration-300 z-50 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
       style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
     >
-      <div className="p-4 border-b flex justify-between items-center bg-gradient-to-r from-indigo-50 to-purple-50">
+      <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-indigo-50/80 to-purple-50/80">
         <div className="flex items-center gap-2 font-bold text-slate-800">
-          <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 bg-gradient-to-br from-indigo-600 to-purple-600 rounded-xl flex items-center justify-center shadow-sm">
             <Bot size={18} className="text-white" />
           </div>
           {title}
@@ -259,22 +301,29 @@ export const CopilotSidebar = ({
           <button onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg"><X size={18} /></button>
         </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-slate-50/40">
         {messages.map((msg, idx) => (
-          <div key={idx} className={`flex gap-3 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${msg.type === 'user' ? 'bg-indigo-100 text-indigo-600' : 'bg-white border border-slate-200 text-slate-600'}`}>
-              {msg.type === 'user' ? <User size={14} /> : <Bot size={14} />}
+          <div key={idx} className={`flex gap-2 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
+            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${msg.type === 'user' ? 'bg-indigo-100 text-indigo-700' : 'bg-white border border-slate-100 text-slate-600 shadow-sm'}`}>
+              {msg.type === 'user' ? <User size={12} /> : <Bot size={12} />}
             </div>
-            <div className={`p-3 rounded-xl text-sm max-w-[90%] ${msg.type === 'user' ? 'bg-gradient-to-br from-indigo-600 to-indigo-500 text-white rounded-tr-none shadow-md' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm'}`}>
+            <div
+              className={`flex-1 text-[13px] leading-5 px-3 py-2 rounded-xl ${msg.type === 'user'
+                ? 'bg-gradient-to-br from-indigo-600 to-purple-600 text-white'
+                : 'bg-white/70 text-slate-800'
+                }`}
+            >
               {msg.type === 'bot' ? (
-                <div className="prose prose-sm prose-slate max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                <div className="prose prose-slate max-w-none text-[13px] break-words prose-headings:text-slate-800 prose-headings:font-semibold prose-headings:leading-5 prose-h1:text-[15px] prose-h2:text-[14px] prose-h3:text-[12px] prose-h4:text-[12px] prose-h5:text-[12px] prose-a:text-indigo-600 prose-hr:border-slate-200 prose-p:leading-5 prose-pre:overflow-x-auto prose-pre:whitespace-pre-wrap prose-code:break-words prose-table:block prose-table:overflow-x-auto [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                   <Streamdown>{msg.text}</Streamdown>
                 </div>
               ) : (
-                msg.text
+                <div className="whitespace-pre-wrap break-words">
+                  {msg.text}
+                </div>
               )}
               {msg.isStreaming && (
-                <span className="inline-block w-2 h-4 bg-indigo-500 ml-1 animate-pulse"></span>
+                <span className="inline-block w-[2px] h-4 bg-indigo-400/70 ml-1 rounded-full animate-pulse"></span>
               )}
               {/* Rich Content: BOM Recommendation */}
               {msg.richContent && msg.richContent.type === 'bom_recommendation' && (
@@ -311,21 +360,26 @@ export const CopilotSidebar = ({
         ))}
         <div ref={messagesEndRef} />
       </div>
-      <div className="p-4 border-t bg-white">
+      <div className="p-3 bg-white">
         <div className="relative">
-          <input
-            type="text"
-            placeholder={isLoading ? "正在处理中..." : "输入问题..."}
-            className="w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+          <textarea
+            rows={3}
+            placeholder={isLoading ? '正在处理中...' : '输入问题...'}
+            className="w-full pl-4 pr-12 py-2 bg-slate-50 border border-slate-100 rounded-2xl text-sm leading-5 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed resize-none"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && !isLoading && handleSend()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey && !isLoading && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
             disabled={isLoading}
           />
           <button
             onClick={isLoading ? () => { onCancel?.(); setIsLoading(false); } : handleSend}
             disabled={(!isLoading && !input.trim())}
-            className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 
+            className={`absolute right-2 bottom-1.5 p-1.5 
               ${isLoading ? 'bg-red-500 hover:bg-red-600' : 'bg-gradient-to-br from-indigo-600 to-purple-600'} 
               text-white rounded-lg hover:shadow-md transition-shadow disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none`}
             title={isLoading ? "取消生成" : "发送消息"}
@@ -333,7 +387,7 @@ export const CopilotSidebar = ({
             {isLoading ? <Square size={14} fill="currentColor" /> : <Send size={14} />}
           </button>
         </div>
-        <div className="mt-3 flex gap-2 overflow-x-auto">
+        <div className="mt-2 flex gap-2 overflow-x-auto">
           {suggestions.map((s, i) => (
             <button
               key={i}

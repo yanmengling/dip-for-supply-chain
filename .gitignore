@@ -9,6 +9,10 @@ coverage/
 .cursor/
 *.log
 
+# Build logs and errors
+build_*
+build-*
+
 # Test files - ignore all files starting with test (anywhere)
 **/test-*
 **/test_*
@@ -27,3 +31,4 @@ __pycache__/
 *$py.class
 *.so
 .Python
+src/services/productSupplyCalculator.ts

@@ -226,13 +226,41 @@ class ApiConfigService {
         return config?.objectTypeId;
     }
 
-    /**
-     * Get Metric Model ID by Config ID
-     * Returns the configured modelId
-     */
     getMetricModelId(configId: string): string | undefined {
         const config = this.getConfigById(configId) as MetricModelConfig;
         return config?.modelId;
+    }
+
+    /**
+     * Get Agent Key by Config ID
+     */
+    getAgentKey(configId: string): string | undefined {
+        const config = this.getConfigById(configId) as AgentConfig;
+        return config?.agentKey;
+    }
+
+    /**
+     * Get Agent Version by Config ID
+     */
+    getAgentVersion(configId: string): string | undefined {
+        const config = this.getConfigById(configId) as AgentConfig;
+        return config?.agentVersion;
+    }
+
+    /**
+     * Get Agent Name by Config ID
+     */
+    getAgentName(configId: string): string | undefined {
+        const config = this.getConfigById(configId);
+        return config?.name;
+    }
+
+    /**
+     * Get Agent Description by Config ID
+     */
+    getAgentDescription(configId: string): string | undefined {
+        const config = this.getConfigById(configId);
+        return config?.description;
     }
 
     /**

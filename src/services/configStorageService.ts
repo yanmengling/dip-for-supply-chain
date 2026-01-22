@@ -22,7 +22,7 @@ import {
 // ============================================================================
 
 const STORAGE_KEY = 'supply_chain_api_config_collection';
-const CONFIG_VERSION = '1.0.8';
+const CONFIG_VERSION = '1.0.9';
 
 // ============================================================================
 // Configuration Storage Service
@@ -89,44 +89,6 @@ class ConfigStorageService {
                     }
                 }
 
-                // MIGRATION 1.0.4: Add Production Plan Object
-                if (!parsed.ontologyObjects) parsed.ontologyObjects = [];
-                const ppExists = parsed.ontologyObjects.some(o => o.id === 'oo_production_plan_huida');
-                if (!ppExists) {
-                    const defaults = this.getDefaultConfig();
-                    const ppConfig = defaults.ontologyObjects?.find(o => o.id === 'oo_production_plan_huida');
-                    if (ppConfig) {
-                        parsed.ontologyObjects.push(ppConfig);
-                        console.log('[ConfigStorage] Migration: Added Production Plan object configuration');
-                    }
-                }
-
-                // MIGRATION 1.0.5: Update Ontology Object IDs for BOM Service
-                // Automatically update the objectTypeIds to the new Ontology API values
-                if (parsed.ontologyObjects) {
-                    const updates = {
-                        'oo_product_huida': 'd56v4ue9olk4bpa66v00',
-                        'oo_bom_huida': 'd56vqtm9olk4bpa66vfg',
-                        'oo_inventory_huida': 'd56vcuu9olk4bpa66v3g',
-                        'oo_material_huida': 'd56voju9olk4bpa66vcg',
-                        'oo_supplier_huida': 'd5700je9olk4bpa66vkg'
-                    };
-
-                    let updatedCount = 0;
-                    parsed.ontologyObjects.forEach(obj => {
-                        if (updates[obj.id as keyof typeof updates]) {
-                            const newId = updates[obj.id as keyof typeof updates];
-                            if (obj.objectTypeId !== newId) {
-                                obj.objectTypeId = newId;
-                                updatedCount++;
-                            }
-                        }
-                    });
-
-                    if (updatedCount > 0) {
-                        console.log(`[ConfigStorage] Migration: Updated ${updatedCount} ontology object IDs to new values`);
-                    }
-                }
 
                 // MIGRATION 1.0.6: Add new metric models for inventory and graph
                 if (!parsed.metricModels) parsed.metricModels = [];
@@ -156,16 +118,44 @@ class ConfigStorageService {
                     console.log(`[ConfigStorage] Migration: Added ${addedMetrics} new metric models`);
                 }
 
-                // MIGRATION 1.0.8: Aggressive ensure Supplier Evaluation Object
-                if (!parsed.ontologyObjects) parsed.ontologyObjects = [];
-                const seExistsFinal = parsed.ontologyObjects.some(o => o.id === 'oo_supplier_evaluation_huida');
-                if (!seExistsFinal) {
-                    const defaults = this.getDefaultConfig();
-                    const seConfig = defaults.ontologyObjects?.find(o => o.id === 'oo_supplier_evaluation_huida');
-                    if (seConfig) {
-                        parsed.ontologyObjects.push(seConfig);
-                        console.log('[ConfigStorage] Migration 1.0.8: Force added Supplier Evaluation object configuration');
+                // MIGRATION 1.0.9: Remove all Huida references from IDs
+                const idMappings: Record<string, string> = {
+                    // Knowledge Networks
+                    'kn_huida': 'kn_supply_chain_brain',
+                    // Ontology Objects
+                    'oo_supplier_huida': 'oo_supplier',
+                    'oo_supplier_evaluation_huida': 'oo_supplier_evaluation',
+                    'oo_material_huida': 'oo_material',
+                    'oo_product_huida': 'oo_product',
+                    'oo_bom_huida': 'oo_bom',
+                    'oo_inventory_huida': 'oo_inventory',
+                    'oo_sales_order_huida': 'oo_sales_order',
+                    'oo_customer_huida': 'oo_customer',
+                    'oo_production_plan_huida': 'oo_production_plan',
+                    // Metric Models
+                    'mm_order_demand_huida': 'mm_order_demand',
+                    'mm_product_count_huida': 'mm_product_count',
+                    'mm_material_count_huida': 'mm_material_count',
+                    'mm_supplier_count_huida': 'mm_supplier_count',
+                    'mm_product_inventory_optimization_huida': 'mm_product_inventory_optimization',
+                    'mm_material_inventory_optimization_huida': 'mm_material_inventory_optimization'
+                };
+
+                let migratedCount = 0;
+                // Migrate all configuration arrays
+                (['knowledgeNetworks', 'ontologyObjects', 'metricModels'] as const).forEach(key => {
+                    if (parsed[key]) {
+                        parsed[key]!.forEach((item: any) => {
+                            if (idMappings[item.id]) {
+                                item.id = idMappings[item.id];
+                                migratedCount++;
+                            }
+                        });
                     }
+                });
+
+                if (migratedCount > 0) {
+                    console.log(`[ConfigStorage] Migration 1.0.9: Removed Huida references from ${migratedCount} configuration IDs`);
                 }
 
                 // Update version and save immediately
@@ -415,10 +405,10 @@ class ConfigStorageService {
         return {
             knowledgeNetworks: [
                 {
-                    id: 'kn_huida',
+                    id: 'kn_supply_chain_brain',
                     type: ApiConfigType.KNOWLEDGE_NETWORK,
-                    name: '惠达供应链大脑网络',
-                    description: '惠达供应链大脑标准业务环境',
+                    name: '供应链大脑网络',
+                    description: '供应链大脑标准业务环境',
                     knowledgeNetworkId: 'd56v1l69olk4bpa66uv0',
                     enabled: true,
                     objectTypes: {
@@ -430,177 +420,177 @@ class ConfigStorageService {
                         order: { id: 'order', name: '订单', icon: 'ShoppingCart' },
                         customer: { id: 'customer', name: '客户', icon: 'Award' }
                     },
-                    tags: ['huida', 'brain', 'default'],
+                    tags: ['brain', 'default'],
                     createdAt: now,
                     updatedAt: now
                 }
             ],
             ontologyObjects: [
                 {
-                    id: 'oo_supplier_huida',
+                    id: 'oo_supplier',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达供应商对象',
-                    description: '惠达供应链大脑 - 供应商对象类型',
+                    name: '供应商对象',
+                    description: '供应链大脑 - 供应商对象类型',
                     objectTypeId: 'd5700je9olk4bpa66vkg',
                     entityType: 'supplier',
                     enabled: true,
-                    tags: ['huida', 'supplier'],
+                    tags: ['supplier'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_supplier_evaluation_huida',
+                    id: 'oo_supplier_evaluation',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达供应商评估对象',
-                    description: '惠达供应链大脑 - 供应商评估对象类型',
+                    name: '供应商评估对象',
+                    description: '供应链大脑 - 供应商评估对象类型',
                     objectTypeId: 'd5700je9olk4bpa66vkg',
                     entityType: 'supplier_evaluation',
                     enabled: true,
-                    tags: ['huida', 'supplier', 'evaluation'],
+                    tags: ['supplier', 'evaluation'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_material_huida',
+                    id: 'oo_material',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达物料对象',
-                    description: '惠达供应链大脑 - 物料对象类型',
+                    name: '物料对象',
+                    description: '供应链大脑 - 物料对象类型',
                     objectTypeId: 'd56voju9olk4bpa66vcg', // Updated to new ID
                     entityType: 'material',
                     enabled: true,
-                    tags: ['huida', 'material'],
+                    tags: ['material'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_product_huida',
+                    id: 'oo_product',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达产品对象',
-                    description: '惠达供应链大脑 - 产品对象类型',
+                    name: '产品对象',
+                    description: '供应链大脑 - 产品对象类型',
                     objectTypeId: 'd56v4ue9olk4bpa66v00', // Updated to new ID
                     entityType: 'product',
                     enabled: true,
-                    tags: ['huida', 'product'],
+                    tags: ['product'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_bom_huida',
+                    id: 'oo_bom',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达BOM对象',
-                    description: '惠达供应链大脑 - BOM对象类型',
+                    name: 'BOM对象',
+                    description: '供应链大脑 - BOM对象类型',
                     objectTypeId: 'd56vqtm9olk4bpa66vfg', // Updated to new ID
                     entityType: 'bom',
                     enabled: true,
-                    tags: ['huida', 'bom'],
+                    tags: ['bom'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_inventory_huida',
+                    id: 'oo_inventory',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达库存对象',
-                    description: '惠达供应链大脑 - 库存对象类型',
+                    name: '库存对象',
+                    description: '供应链大脑 - 库存对象类型',
                     objectTypeId: 'd56vcuu9olk4bpa66v3g', // Updated to new ID
                     entityType: 'inventory',
                     enabled: true,
-                    tags: ['huida', 'inventory'],
+                    tags: ['inventory'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_sales_order_huida',
+                    id: 'oo_sales_order',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达销售订单对象',
-                    description: '惠达供应链大脑 - 销售订单对象类型',
+                    name: '销售订单对象',
+                    description: '供应链大脑 - 销售订单对象类型',
                     objectTypeId: 'd56vh169olk4bpa66v80',
                     entityType: 'sales_order',
                     enabled: true,
-                    tags: ['huida', 'order', 'sales', 'cockpit'],
+                    tags: ['order', 'sales', 'cockpit'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_customer_huida',
+                    id: 'oo_customer',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '惠达客户对象',
-                    description: '惠达供应链大脑 - 客户对象类型',
+                    name: '客户对象',
+                    description: '供应链大脑 - 客户对象类型',
                     objectTypeId: '2004376134633480194',
                     entityType: 'customer',
                     enabled: true,
-                    tags: ['huida', 'customer'],
+                    tags: ['customer'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'oo_production_plan_huida',
+                    id: 'oo_production_plan',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '工厂生产计划',
-                    description: '惠达供应链大脑 - 生产计划对象类型',
+                    description: '供应链大脑 - 生产计划对象类型',
                     objectTypeId: 'd5704qm9olk4bpa66vp0',
                     entityType: 'production_plan',
                     enabled: true,
-                    tags: ['huida', 'production', 'plan'],
+                    tags: ['production', 'plan'],
                     createdAt: now,
                     updatedAt: now
                 }
             ],
             metricModels: [
 
-                // 供应链图谱指标 - API 模式 (惠达)
+                // 供应链图谱指标 - API 模式
                 {
                     id: 'mm_order_demand_count_api',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '订单需求数量 (惠达)',
-                    description: '供应链图谱 - 惠达订单需求总数统计',
+                    name: '订单需求数量',
+                    description: '供应链图谱 - 订单需求总数统计',
                     modelId: 'd58fu5lg5lk40hvh48kg',
                     groupName: '供应链图谱',
                     modelName: '订单需求数',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'huida', 'order'],
+                    tags: ['graph', 'order'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
                     id: 'mm_product_count_api',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '产品数量 (惠达)',
-                    description: '供应链图谱 - 惠达产品总数统计',
+                    name: '产品数量',
+                    description: '供应链图谱 - 产品总数统计',
                     modelId: 'd58fv0lg5lk40hvh48l0',
                     groupName: '供应链图谱',
                     modelName: '产品数',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'huida', 'product'],
+                    tags: ['graph', 'product'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
                     id: 'mm_material_count_api',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '物料数量 (惠达)',
-                    description: '供应链图谱 - 惠达物料总数统计',
+                    name: '物料数量',
+                    description: '供应链图谱 - 物料总数统计',
                     modelId: 'd58g085g5lk40hvh48lg',
                     groupName: '供应链图谱',
                     modelName: '物料数',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'huida', 'material'],
+                    tags: ['graph', 'material'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
                     id: 'mm_supplier_count_api',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '供应商数量 (惠达)',
-                    description: '供应链图谱 - 惠达供应商总数统计',
+                    name: '供应商数量',
+                    description: '供应链图谱 - 供应商总数统计',
                     modelId: 'd58g53lg5lk40hvh48m0',
                     groupName: '供应链图谱',
                     modelName: '供应商数',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'huida', 'supplier'],
+                    tags: ['graph', 'supplier'],
                     createdAt: now,
                     updatedAt: now
                 },
@@ -621,88 +611,88 @@ class ConfigStorageService {
 
                 // 库存优化指标
                 {
-                    id: 'mm_product_inventory_optimization_huida',
+                    id: 'mm_product_inventory_optimization',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '产品库存优化模型 (惠达)',
+                    name: '产品库存优化模型',
                     description: '库存优化 - 产品库存分析核心模型',
                     modelId: 'd58keb5g5lk40hvh48og',
                     groupName: '库存优化',
                     modelName: '产品库存优化',
                     unit: '个',
                     enabled: true,
-                    tags: ['inventory', 'product', 'optimization', 'huida'],
+                    tags: ['inventory', 'product', 'optimization'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'mm_material_inventory_optimization_huida',
+                    id: 'mm_material_inventory_optimization',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '物料库存优化模型 (惠达)',
+                    name: '物料库存优化模型',
                     description: '库存优化 - 物料库存分析核心模型',
                     modelId: 'd58ihclg5lk40hvh48mg',
                     groupName: '库存优化',
                     modelName: '物料库存优化',
                     unit: '个',
                     enabled: true,
-                    tags: ['inventory', 'material', 'optimization', 'huida'],
+                    tags: ['inventory', 'material', 'optimization'],
                     createdAt: now,
                     updatedAt: now
                 },
 
                 // 供应链图谱指标 (新命名规范)
                 {
-                    id: 'mm_order_demand_huida',
+                    id: 'mm_order_demand',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '订单需求指标 (惠达)',
+                    name: '订单需求指标',
                     description: '供应链图谱 - 订单需求统计',
                     modelId: 'd58fu5lg5lk40hvh48kg',
                     groupName: '供应链图谱',
                     modelName: '订单需求',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'order', 'huida'],
+                    tags: ['graph', 'order'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'mm_product_count_huida',
+                    id: 'mm_product_count',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '产品数量指标 (惠达)',
+                    name: '产品数量指标',
                     description: '供应链图谱 - 产品数量统计',
                     modelId: 'd58fv0lg5lk40hvh48l0',
                     groupName: '供应链图谱',
                     modelName: '产品数量',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'product', 'huida'],
+                    tags: ['graph', 'product'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'mm_material_count_huida',
+                    id: 'mm_material_count',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '物料数量指标 (惠达)',
+                    name: '物料数量指标',
                     description: '供应链图谱 - 物料数量统计',
                     modelId: 'd58g085g5lk40hvh48lg',
                     groupName: '供应链图谱',
                     modelName: '物料数量',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'material', 'huida'],
+                    tags: ['graph', 'material'],
                     createdAt: now,
                     updatedAt: now
                 },
                 {
-                    id: 'mm_supplier_count_huida',
+                    id: 'mm_supplier_count',
                     type: ApiConfigType.METRIC_MODEL,
-                    name: '供应商数量指标 (惠达)',
+                    name: '供应商数量指标',
                     description: '供应链图谱 - 供应商数量统计',
                     modelId: 'd58g53lg5lk40hvh48m0',
                     groupName: '供应链图谱',
                     modelName: '供应商数量',
                     unit: '个',
                     enabled: true,
-                    tags: ['graph', 'supplier', 'huida'],
+                    tags: ['graph', 'supplier'],
                     createdAt: now,
                     updatedAt: now
                 }

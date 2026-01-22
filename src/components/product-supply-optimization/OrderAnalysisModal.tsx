@@ -78,7 +78,7 @@ export const OrderAnalysisModal: React.FC<Props> = ({ isOpen, onClose, productId
 
         // Load object type ID from config
         // Load object type ID from config
-        const salesOrderOtId = apiConfigService.getOntologyObjectId('oo_sales_order_huida') || '';
+        const salesOrderOtId = apiConfigService.getOntologyObjectId('oo_sales_order') || '';
 
         if (!salesOrderOtId) {
           throw new Error('Sales Order Object Type ID not configured');

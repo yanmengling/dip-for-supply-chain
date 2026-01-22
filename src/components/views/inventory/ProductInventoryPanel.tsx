@@ -5,7 +5,7 @@ import { metricModelApi, createLastDaysRange } from '../../../api';
 import { apiConfigService } from '../../../services/apiConfigService';
 
 // 指标模型 ID 和分析维度配置
-const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_huida') || 'd58keb5g5lk40hvh48og';
+const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
 
 // 请求指标模型中实际存在的维度字段
 const PRODUCT_INVENTORY_DIMENSIONS = [

@@ -112,6 +112,19 @@ export const ProductSupplyOptimizationPage: React.FC<{ toggleCopilot?: () => voi
 
   const selectedAnalysis = analyses.find(a => a.productId === selectedProductId);
 
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      if (selectedProductId) {
+        window.sessionStorage.setItem('copilot.optimization.selectedProductId', selectedProductId);
+      } else {
+        window.sessionStorage.removeItem('copilot.optimization.selectedProductId');
+      }
+    } catch (e) {
+      console.warn('[Copilot] Failed to persist selectedProductId:', e);
+    }
+  }, [selectedProductId]);
+
   return (
     <div className="space-y-6">
       {/* Header */}

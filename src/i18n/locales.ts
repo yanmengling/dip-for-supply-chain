@@ -4,7 +4,7 @@ export const translations = {
     // 页眉
     header: {
       title: '供应链神经中枢',
-      subtitle: 'ChainNeural 2.0',
+      subtitle: 'DIP for Supply Chain',
       simulationMode: '模拟推演中',
       realtimeMode: '实时监控模式',
       exitSimulation: '退出模拟',
@@ -83,7 +83,7 @@ export const translations = {
         optimizeStock: '库存优化分析',
         simulateRisk: '风险模拟',
       },
-      welcome: '欢迎使用 ChainNeural。当前监控：2家供应商，3类物料库存，4条产品线。请问有什么可以帮您？',
+      welcome: '欢迎使用供应链大脑。当前监控：2家供应商，3类物料库存，4条产品线。请问有什么可以帮您？',
       responses: {
         analyzing: '正在分析全链路数据...',
         orderQuery: '查询结果：订单-101 (客户 A) 目前处于【海运中】，预计 10月20日 交付。订单-102 (客户 B) 正在上海工厂【生产中】，进度正常。',
@@ -102,7 +102,7 @@ export const translations = {
     // Header
     header: {
       title: 'Supply Chain Neural Hub',
-      subtitle: 'ChainNeural 2.0',
+      subtitle: 'DIP for Supply Chain',
       simulationMode: 'Simulation Mode',
       realtimeMode: 'Realtime Monitoring',
       exitSimulation: 'Exit Simulation',
@@ -181,7 +181,7 @@ export const translations = {
         optimizeStock: 'Stock Optimization',
         simulateRisk: 'Risk Simulation',
       },
-      welcome: 'Welcome to ChainNeural. Currently monitoring: 2 suppliers, 3 material stocks, 4 product lines. How can I help you?',
+      welcome: 'Welcome to DIP for Supply Chain. Currently monitoring: 2 suppliers, 3 material stocks, 4 product lines. How can I help you?',
       responses: {
         analyzing: 'Analyzing full-chain data...',
         orderQuery: 'Query results: Order-101 (Client A) is currently [In Shipping], expected delivery on Oct 20. Order-102 (Client B) is [In Production] at Shanghai factory, progress normal.',

@@ -169,7 +169,7 @@ function getEnvConfig(): Partial<{
 
 /**
  * API 环境类型
- * - huida-new: 惠达供应链大脑模式，对接新的惠达数据 API
+ * - huida-new: 供应链大脑模式，对接数据 API
  */
 export type ApiEnvironment = 'huida-new';
 
@@ -196,14 +196,14 @@ export interface EnvironmentConfig {
  * 环境配置集合
  * 
  * 数据模式：
- * - huida-new (惠达供应链大脑): 对接新的惠达数据 API，提供优化后的数据服务
+ * - huida-new (供应链大脑): 对接数据 API，提供优化后的数据服务
  */
 export const ENVIRONMENTS: Record<ApiEnvironment, EnvironmentConfig> = {
 
 
   'huida-new': {
-    name: '惠达供应链大脑',
-    description: '对接新的惠达数据 API',
+    name: '供应链大脑',
+    description: '对接数据 API',
     baseUrl: '',
     token: GLOBAL_API_TOKEN,
     services: {
@@ -360,7 +360,7 @@ export const knowledgeNetworkPresets: KnowledgeNetworkPreset[] = [
 
   {
     id: 'd56v1l69olk4bpa66uv0',
-    name: '惠达供应链大脑网络',
+    name: '供应链大脑网络',
     description: '管理配置后台业务知识网络',
     isDefault: false,
     category: 'production',

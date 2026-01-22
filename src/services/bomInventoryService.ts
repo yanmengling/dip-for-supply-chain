@@ -32,16 +32,16 @@ const getObjectTypeId = (entityType: string, defaultId: string) => {
 
     switch (entityType) {
         case 'product':
-            configuredId = apiConfigService.getOntologyObjectId('oo_product_huida') || '';
+            configuredId = apiConfigService.getOntologyObjectId('oo_product') || '';
             break;
         case 'bom':
-            configuredId = apiConfigService.getOntologyObjectId('oo_bom_huida') || '';
+            configuredId = apiConfigService.getOntologyObjectId('oo_bom') || '';
             break;
         case 'inventory':
-            configuredId = apiConfigService.getOntologyObjectId('oo_inventory_huida') || '';
+            configuredId = apiConfigService.getOntologyObjectId('oo_inventory') || '';
             break;
         case 'material':
-            configuredId = apiConfigService.getOntologyObjectId('oo_material_huida') || '';
+            configuredId = apiConfigService.getOntologyObjectId('oo_material') || '';
             break;
     }
 
@@ -1031,7 +1031,7 @@ function getFlatMaterialList(rootNode: BOMNode): MaterialRequirement[] {
 /**
  * 生成智能分析结论
  * 
- * 基于惠达科技机器人事业部的分析逻辑：
+ * 基于机器人事业部的分析逻辑：
  * - 分析线性关系和斜率特征
  * - 计算极差并给出决策建议
  * - 以高价值物料为起点规划消耗策略
