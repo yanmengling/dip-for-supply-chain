@@ -1,12 +1,14 @@
 /**
  * Global Settings View
- * 
+ *
  * UI for managing global application settings including API Token.
+ * In DIP mode, token configuration is hidden as it's managed by the platform.
  */
 
 import { useState, useEffect } from 'react';
-import { Save, Eye, EyeOff, RotateCcw, Loader2, Key } from 'lucide-react';
+import { Save, Eye, EyeOff, RotateCcw, Loader2, Key, Info } from 'lucide-react';
 import { globalSettingsService } from '../../services/globalSettingsService';
+import { dipEnvironmentService } from '../../services/dipEnvironmentService';
 import type { GlobalSettings } from '../../types/globalSettings';
 
 const GlobalSettingsView = () => {
@@ -18,6 +20,9 @@ const GlobalSettingsView = () => {
 
     const [isSaving, setIsSaving] = useState(false);
     const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+    // Check if running in DIP mode
+    const isDipMode = dipEnvironmentService.isDipMode();
 
     // Load settings on mount
     useEffect(() => {
@@ -105,6 +110,21 @@ const GlobalSettingsView = () => {
             <div className="mb-6">
                 <h1 className="text-2xl font-bold text-slate-800 mb-2">全局设置</h1>
                 <p className="text-slate-600">管理应用程序的全局配置参数</p>
+
+                {/* DIP Mode Notice */}
+                {isDipMode && (
+                    <div className="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-3">
+                        <Info className="text-blue-500 flex-shrink-0 mt-0.5" size={20} />
+                        <div>
+                            <p className="text-sm font-medium text-blue-800">
+                                当前运行在 DIP 容器中
+                            </p>
+                            <p className="text-sm text-blue-600 mt-1">
+                                API 认证由平台统一管理，无需手动配置 Token
+                            </p>
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Save Message */}
@@ -115,7 +135,8 @@ const GlobalSettingsView = () => {
                 </div>
             )}
 
-            {/* API Authentication Section */}
+            {/* API Authentication Section - Only show in standalone mode */}
+            {!isDipMode && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
                 <div className="flex items-center gap-3 mb-4">
                     <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center">
@@ -205,8 +226,10 @@ const GlobalSettingsView = () => {
                     )}
                 </div>
             </div>
+            )}
 
-            {/* Reset Section */}
+            {/* Reset Section - Only show in standalone mode */}
+            {!isDipMode && (
             <div className="mt-6 pt-6 border-t border-slate-200">
                 <button
                     onClick={handleReset}
@@ -219,6 +242,7 @@ const GlobalSettingsView = () => {
                     这将恢复所有设置为默认值，包括 API Token
                 </p>
             </div>
+            )}
         </div>
     );
 };
