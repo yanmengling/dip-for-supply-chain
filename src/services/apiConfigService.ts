@@ -147,7 +147,29 @@ class ApiConfigService {
         }
 
         this.storage.saveConfig(all);
+
+        // Sync runtime state for configs that affect global runtime behavior
+        this.syncRuntimeState(config);
+
         console.log(`[ApiConfigService] Saved configuration: ${config.id} (${config.name})`);
+    }
+
+    /**
+     * Sync saved configuration to runtime state.
+     * Ensures that changes in config center take effect immediately
+     * without requiring a page refresh.
+     */
+    private syncRuntimeState(config: AnyApiConfig): void {
+        switch (config.type) {
+            case ApiConfigType.KNOWLEDGE_NETWORK: {
+                const knConfig = config as KnowledgeNetworkConfig;
+                if (knConfig.enabled && knConfig.knowledgeNetworkId) {
+                    setKnowledgeNetworkId(knConfig.knowledgeNetworkId);
+                    console.log(`[ApiConfigService] Synced runtime KN ID: ${knConfig.knowledgeNetworkId}`);
+                }
+                break;
+            }
+        }
     }
 
 
