@@ -124,21 +124,21 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
       {/* Sidebar */}
       <div
         className={`${isSidebarOpen ? 'w-64' : 'w-16'
-          } bg-slate-900 text-white transition-all duration-300 flex flex-col shadow-lg z-20`}
+          } bg-white text-slate-700 border-r border-slate-200 transition-all duration-300 flex flex-col shadow-sm z-20`}
       >
-        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-700">
+        <div className="h-16 flex items-center justify-between px-4 border-b border-slate-100">
           {isSidebarOpen && (
             <div className="flex items-center gap-2 font-bold text-lg">
-              <Layout className="text-indigo-400" size={24} />
-              <span>配置中心</span>
+              <Layout className="text-indigo-600" size={24} />
+              <span className="text-slate-800">配置中心</span>
             </div>
           )}
           <div className="flex items-center gap-1">
             <button
               onClick={() => setActiveView('global_settings')}
               className={`p-1.5 rounded-lg transition-colors ${activeView === 'global_settings'
-                ? 'bg-indigo-600 text-white'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                ? 'bg-indigo-50 text-indigo-600'
+                : 'text-slate-400 hover:text-slate-700 hover:bg-slate-100'
                 }`}
               title="全局设置"
             >
@@ -146,7 +146,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
             </button>
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"
             >
               <Menu size={20} />
             </button>
@@ -164,7 +164,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
                 <div key={group} className="space-y-1">
                   {isSidebarOpen && (
                     <div className="px-3 mb-2">
-                      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
                         {group}
                       </span>
                     </div>
@@ -180,20 +180,20 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
                         <button
                           onClick={() => setActiveView(item.id as ConfigViewType)}
                           className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${isActive
-                            ? 'bg-indigo-600 text-white shadow-md'
+                            ? 'bg-indigo-50 text-indigo-600 font-medium'
                             : isAnySubItemActive && isSidebarOpen
-                              ? 'text-white'
-                              : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                              ? 'text-indigo-600 font-medium'
+                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                             }`}
                           title={!isSidebarOpen ? item.label : undefined}
                         >
-                          <Icon size={18} />
-                          {isSidebarOpen && <span className="text-sm font-medium">{item.label}</span>}
+                          <Icon size={18} className={isActive ? 'text-indigo-600' : 'text-slate-400'} />
+                          {isSidebarOpen && <span className="text-sm">{item.label}</span>}
                         </button>
 
                         {/* Rendering Sub Items */}
                         {isSidebarOpen && hasSubItems && (
-                          <div className="ml-4 pl-4 border-l border-slate-700 space-y-1 mt-1">
+                          <div className="ml-4 pl-4 border-l border-slate-100 space-y-1 mt-1">
                             {item.subItems!.map(subItem => {
                               const SubIcon = subItem.icon;
                               const isSubActive = activeView === subItem.id;
@@ -202,11 +202,11 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
                                   key={subItem.id}
                                   onClick={() => setActiveView(subItem.id as ConfigViewType)}
                                   className={`w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors ${isSubActive
-                                    ? 'bg-slate-700 text-indigo-400'
-                                    : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                                    ? 'bg-indigo-50 text-indigo-600 font-medium'
+                                    : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
                                     }`}
                                 >
-                                  <SubIcon size={14} />
+                                  <SubIcon size={14} className={isSubActive ? 'text-indigo-600' : 'text-slate-400'} />
                                   <span>{subItem.label}</span>
                                 </button>
                               );
@@ -223,10 +223,10 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
         </div>
 
         {/* Footer actions */}
-        <div className="p-4 border-t border-slate-700">
+        <div className="p-4 border-t border-slate-100">
           <button
             onClick={onBack}
-            className={`w-full flex items-center gap-2 px-4 py-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors ${!isSidebarOpen ? 'justify-center' : ''
+            className={`w-full flex items-center gap-2 px-4 py-2 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition-colors ${!isSidebarOpen ? 'justify-center' : ''
               }`}
           >
             <ArrowLeft size={20} />

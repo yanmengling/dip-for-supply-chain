@@ -171,7 +171,7 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
   if (error) return null; // Skip if error
 
   // Identify columns from the first record or objectType properties
-  const columns = objectType.data_properties?.map(p => ({ key: p.name, label: p.description || p.name }))
+  const columns = objectType.data_properties?.map(p => ({ key: p.name, label: p.alias || p.name }))
     || (data.length > 0 ? Object.keys(data[0]).slice(0, 5).map(k => ({ key: k, label: k })) : []);
 
   // Filter out internal fields if using auto-discovery

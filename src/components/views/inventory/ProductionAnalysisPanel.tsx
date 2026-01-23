@@ -412,9 +412,9 @@ const TopMaterialsCard: React.FC<TopMaterialsCardProps> = ({ materials }) => {
                     >
                         <div className="flex items-center gap-3 min-w-0">
                             <span className={`w-6 h-6 flex items-center justify-center text-xs font-bold rounded-full ${index === 0 ? 'bg-amber-500 text-white' :
-                                    index === 1 ? 'bg-slate-400 text-white' :
-                                        index === 2 ? 'bg-amber-700 text-white' :
-                                            'bg-slate-200 text-slate-600'
+                                index === 1 ? 'bg-slate-400 text-white' :
+                                    index === 2 ? 'bg-amber-700 text-white' :
+                                        'bg-slate-200 text-slate-600'
                                 }`}>
                                 {index + 1}
                             </span>
@@ -487,7 +487,7 @@ const KeyMetrics: React.FC<KeyMetricsProps> = ({
             <div className="bg-white rounded-lg p-4 border border-slate-200 shadow-sm">
                 <div className="flex items-center gap-2 mb-1 text-slate-500">
                     <AlertTriangle size={16} className="text-amber-500" />
-                    <span className="text-xs font-medium">呆滞库存总值</span>
+                    <span className="text-xs font-medium">库存总值</span>
                 </div>
                 <div className="text-2xl font-bold text-slate-800">
                     ¥{formatCurrency(totalStagnantValue)}
