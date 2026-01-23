@@ -13,6 +13,18 @@
 
 import type { MicroAppProps, GetAccessToken, RefreshToken, TokenExpiredHandler, Logout } from '../micro-app';
 
+/** App version - bump this when releasing new .dip packages to clear stale caches */
+const DIP_APP_VERSION = '0.1.1';
+const DIP_VERSION_KEY = 'supply_chain_brain_dip_version';
+
+/** localStorage keys managed by this app */
+const APP_STORAGE_KEYS = [
+  'supply_chain_api_config_collection',
+  'supply_chain_global_settings',
+  'api_auth_token',
+  'api-environment',
+];
+
 interface DipTokenMethods {
   accessToken: GetAccessToken;
   refreshToken: RefreshToken;
@@ -34,6 +46,9 @@ class DipEnvironmentService {
       return;
     }
 
+    // Clear stale caches when app version changes
+    this.invalidateStaleCache();
+
     if (props.token) {
       this.tokenMethods = {
         accessToken: props.token.accessToken,
@@ -47,6 +62,30 @@ class DipEnvironmentService {
     if (props.logout) {
       this.logoutMethod = props.logout;
       console.log('[DIP Environment] Logout method available');
+    }
+  }
+
+  /**
+   * Clear stale localStorage caches when app version changes.
+   * This ensures a fresh state when a new .dip package is installed.
+   */
+  private invalidateStaleCache(): void {
+    try {
+      const storedVersion = localStorage.getItem(DIP_VERSION_KEY);
+      if (storedVersion === DIP_APP_VERSION) {
+        return; // Same version, no cache clearing needed
+      }
+
+      console.log(`[DIP Environment] Version changed: ${storedVersion || 'none'} → ${DIP_APP_VERSION}, clearing stale caches`);
+
+      APP_STORAGE_KEYS.forEach(key => {
+        localStorage.removeItem(key);
+      });
+
+      localStorage.setItem(DIP_VERSION_KEY, DIP_APP_VERSION);
+      console.log('[DIP Environment] Stale caches cleared, version updated');
+    } catch (error) {
+      console.error('[DIP Environment] Error invalidating cache:', error);
     }
   }
 
