@@ -39,6 +39,17 @@ const qiankunLifeCycle = {
     console.log('[SupplyChainBrain] mount', props);
     // Initialize DIP environment service with injected props
     dipEnvironmentService.initialize(props as MicroAppProps);
+
+    // Ensure micro-app container fills DIP's content area
+    if (props.container) {
+      const root = props.container.querySelector('#root');
+      if (root) {
+        root.style.height = '100%';
+        root.style.overflow = 'hidden';
+      }
+      props.container.style.height = '100%';
+    }
+
     render(props.container, props as MicroAppProps);
   },
   async unmount(props: any) {

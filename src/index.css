@@ -3,6 +3,12 @@
 /* Streamdown 样式源 - 为AI流式Markdown渲染提供样式支持 */
 @source "../node_modules/streamdown/dist/*.js";
 
+/* 确保根元素高度链完整，支持 h-full 在独立模式和DIP微应用模式下生效 */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
 /**
  * Tailwind v4 Semantic Color Variables
  * 
