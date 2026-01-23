@@ -182,7 +182,7 @@ class GlobalSettingsService {
 
             // Test with ontology endpoint (more reliable than metric health check)
             // Use proxy-manager which maps to /api/ontology-manager
-            const response = await fetch(`/proxy-manager/knowledge-networks/${knId}/object-types?limit=1`, {
+            const response = await fetch(`/api/ontology-manager/v1/knowledge-networks/${knId}/object-types?limit=1`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'

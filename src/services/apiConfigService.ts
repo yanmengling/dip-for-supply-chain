@@ -433,7 +433,7 @@ class ApiConfigService {
         config: WorkflowConfig,
         timestamp: number
     ): Promise<ConfigTestResult> {
-        const url = `/proxy-agent-service/automation/v2/dag/${config.dagId}/results?limit=1`;
+        const url = `/api/automation/v2/dag/${config.dagId}/results?limit=1`;
 
         const response = await fetch(url, {
             method: 'GET',

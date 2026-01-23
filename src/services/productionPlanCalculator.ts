@@ -64,7 +64,7 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
         // 使用用户指定的完整 API 路径 (通过 Proxy 转发)
         // 目标: https://dip.aishu.cn/api/mdl-uniquery/v1/data-views/2004376134633480194?include_view=true
         const viewId = '2004376134633480194';
-        const url = `/proxy-metric/v1/data-views/${viewId}?include_view=true`;
+        const url = `/api/mdl-uniquery/v1/data-views/${viewId}?include_view=true`;
 
         const requestBody = {
             limit: 1000,

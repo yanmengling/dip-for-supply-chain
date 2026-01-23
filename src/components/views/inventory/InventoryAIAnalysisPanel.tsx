@@ -61,7 +61,7 @@ const InventoryAIAnalysisPanel = () => {
                 const headers = await import('../../../config/apiConfig').then(m => m.getAuthHeaders());
 
                 // 2. Fetch latest successful execution
-                const listUrl = `/proxy-agent-service/automation/v2/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=20`;
+                const listUrl = `/api/automation/v2/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=20`;
                 console.log('[InventoryAIAnalysisPanel] Fetching DAG results from:', listUrl);
 
                 const listResponse = await fetch(listUrl, {
@@ -123,7 +123,7 @@ const InventoryAIAnalysisPanel = () => {
                     console.log('[InventoryAIAnalysisPanel] Using result ID:', resultId);
 
                     // 3. Fetch execution details
-                    const detailUrl = `/proxy-agent-service/automation/v2/dag/${DAG_ID}/result/${resultId}`;
+                    const detailUrl = `/api/automation/v2/dag/${DAG_ID}/result/${resultId}`;
                     console.log('[InventoryAIAnalysisPanel] Fetching execution details from:', detailUrl);
 
                     const detailResponse = await fetch(detailUrl, {
@@ -242,7 +242,7 @@ const InventoryAIAnalysisPanel = () => {
             // 1. Trigger workflow
             console.log('[InventoryAIAnalysisPanel] Triggering workflow...');
             const triggerResponse = await fetch(
-                `/proxy-agent-service/automation/v1/run-instance/${DAG_ID}`,
+                `/api/automation/v1/run-instance/${DAG_ID}`,
                 {
                     method: 'POST',
                     headers: {
@@ -272,7 +272,7 @@ const InventoryAIAnalysisPanel = () => {
                 console.log(`[InventoryAIAnalysisPanel] Checking status (attempt ${attempts}/${maxAttempts})...`);
 
                 const statusResponse = await fetch(
-                    `/proxy-agent-service/automation/v2/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=1`,
+                    `/api/automation/v2/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=1`,
                     { headers }
                 );
 
