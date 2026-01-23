@@ -18,7 +18,7 @@ on:
 
 env:
   APP_NAME: supply-chain-brain
-  APP_VERSION: 0.1.0
+  APP_VERSION: 0.1.1
   REGISTRY: registry.aishu.cn:15000
 
 jobs:
