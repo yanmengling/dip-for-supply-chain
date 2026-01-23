@@ -311,8 +311,8 @@ const KnowledgeGraphView = () => {
       const knowledgeNetworkId = globalSettingsService.getKnowledgeNetworkId();
 
       const [objectTypesData, relationTypesData] = await Promise.all([
-        httpClient.get(`/proxy-ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/object-types?limit=-1`),
-        httpClient.get(`/proxy-ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/relation-types?limit=-1`)
+        httpClient.get(`/api/ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/object-types?limit=-1`),
+        httpClient.get(`/api/ontology-manager/v1/knowledge-networks/${knowledgeNetworkId}/relation-types?limit=-1`)
       ]);
 
       // Extract arrays from response

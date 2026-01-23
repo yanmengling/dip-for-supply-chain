@@ -147,7 +147,29 @@ class ApiConfigService {
         }
 
         this.storage.saveConfig(all);
+
+        // Sync runtime state for configs that affect global runtime behavior
+        this.syncRuntimeState(config);
+
         console.log(`[ApiConfigService] Saved configuration: ${config.id} (${config.name})`);
+    }
+
+    /**
+     * Sync saved configuration to runtime state.
+     * Ensures that changes in config center take effect immediately
+     * without requiring a page refresh.
+     */
+    private syncRuntimeState(config: AnyApiConfig): void {
+        switch (config.type) {
+            case ApiConfigType.KNOWLEDGE_NETWORK: {
+                const knConfig = config as KnowledgeNetworkConfig;
+                if (knConfig.enabled && knConfig.knowledgeNetworkId) {
+                    setKnowledgeNetworkId(knConfig.knowledgeNetworkId);
+                    console.log(`[ApiConfigService] Synced runtime KN ID: ${knConfig.knowledgeNetworkId}`);
+                }
+                break;
+            }
+        }
     }
 
 
@@ -433,7 +455,7 @@ class ApiConfigService {
         config: WorkflowConfig,
         timestamp: number
     ): Promise<ConfigTestResult> {
-        const url = `/proxy-agent-service/automation/v2/dag/${config.dagId}/results?limit=1`;
+        const url = `/api/automation/v2/dag/${config.dagId}/results?limit=1`;
 
         const response = await fetch(url, {
             method: 'GET',

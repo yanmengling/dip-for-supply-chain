@@ -1,10 +1,12 @@
 /**
  * Global Settings Service
- * 
+ *
  * Manages global application settings using localStorage.
+ * In DIP mode, token is managed by the platform.
  */
 
 import type { GlobalSettings, GlobalSettingsValidationError } from '../types/globalSettings';
+import { dipEnvironmentService } from './dipEnvironmentService';
 
 const STORAGE_KEY = 'supply_chain_global_settings';
 const DEFAULT_TOKEN = 'ory_at_eUV5LdKEBbhNINlTSLTlnVlApKMQo3zpYF4zzoK5vWk.hU03-W389ctdeEPcUC-DcbnwoTp6fZkni-vE7V88-Es';
@@ -49,16 +51,27 @@ class GlobalSettingsService {
 
     /**
      * Get API Token
-     * Prioritizes localStorage.api_auth_token for consistency with apiConfig.ts
+     * Priority: DIP injected token > localStorage > settings
      */
     getApiToken(): string {
-        // Priority 1: Read from api_auth_token (same key as apiConfig.getAuthToken())
+        // Priority 1: DIP injected token (when running in DIP container)
+        if (dipEnvironmentService.isDipMode()) {
+            const dipToken = dipEnvironmentService.getToken();
+            if (dipToken) {
+                console.log('[GlobalSettings] Using DIP injected token');
+                return dipToken;
+            }
+            // DIP mode but token unavailable, log warning and continue to fallback
+            console.warn('[GlobalSettings] DIP mode active but token unavailable, using fallback');
+        }
+
+        // Priority 2: Read from api_auth_token (same key as apiConfig.getAuthToken())
         const apiToken = localStorage.getItem('api_auth_token');
         if (apiToken) {
             return apiToken;
         }
 
-        // Priority 2: Fallback to settings
+        // Priority 3: Fallback to settings
         const settings = this.loadSettings();
         return settings.apiToken;
     }
@@ -169,7 +182,7 @@ class GlobalSettingsService {
 
             // Test with ontology endpoint (more reliable than metric health check)
             // Use proxy-manager which maps to /api/ontology-manager
-            const response = await fetch(`/proxy-manager/knowledge-networks/${knId}/object-types?limit=1`, {
+            const response = await fetch(`/api/ontology-manager/v1/knowledge-networks/${knId}/object-types?limit=1`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'

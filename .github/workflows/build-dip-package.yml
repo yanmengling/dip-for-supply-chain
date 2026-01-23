@@ -1,0 +1,121 @@
+name: Build DIP Package
+
+on:
+  push:
+    branches: [main, agentsadjust]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Target architecture'
+        required: true
+        default: 'amd64'
+        type: choice
+        options:
+          - amd64
+          - arm64
+
+env:
+  APP_NAME: supply-chain-brain
+  APP_VERSION: 0.1.1
+  REGISTRY: registry.aishu.cn:15000
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install pyyaml jinja2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'v3.14.0'
+
+      - name: Set architecture
+        id: arch
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "ARCH=${{ inputs.arch }}" >> $GITHUB_OUTPUT
+          else
+            echo "ARCH=amd64" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run build package script
+        run: |
+          cd buildkit
+          python scripts/build_package.py --arch ${{ steps.arch.outputs.ARCH }} --skip-build
+
+      - name: Find built package
+        id: find-package
+        run: |
+          PACKAGE_PATH=$(find buildkit/.cache -name "*.dip" -type f | head -1)
+          echo "PACKAGE_PATH=$PACKAGE_PATH" >> $GITHUB_OUTPUT
+          echo "PACKAGE_NAME=$(basename $PACKAGE_PATH)" >> $GITHUB_OUTPUT
+
+      - name: Upload DIP package
+        uses: actions/upload-artifact@v4
+        with:
+          name: dip-package-${{ steps.arch.outputs.ARCH }}
+          path: ${{ steps.find-package.outputs.PACKAGE_PATH }}
+          retention-days: 30
+
+      - name: Upload build cache (for debugging)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-cache-debug
+          path: buildkit/.cache/
+          retention-days: 7
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dip-package-amd64
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ env.APP_VERSION }}
+          name: Release v${{ env.APP_VERSION }}
+          files: "*.dip"
+          draft: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -15,6 +15,7 @@ import { ApiConfigListView } from './ApiConfigListView';
 import { ApiConfigEditor } from './ApiConfigEditor';
 import KnowledgeGraphView from './KnowledgeGraphView';
 import GlobalSettingsView from './GlobalSettingsView';
+import { dipEnvironmentService } from '../../services/dipEnvironmentService';
 
 interface ConfigBackendLayoutProps {
   onBack: () => void;
@@ -67,6 +68,7 @@ const MENU_ITEMS = [
 export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps) {
   const [activeView, setActiveView] = useState<ConfigViewType>('visual_graph');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const isDipMode = dipEnvironmentService.isDipMode();
 
   // Editor State
   const [editingConfig, setEditingConfig] = useState<AnyApiConfig | null>(null);
@@ -134,6 +136,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
             </div>
           )}
           <div className="flex items-center gap-1">
+            {!isDipMode && (
             <button
               onClick={() => setActiveView('global_settings')}
               className={`p-1.5 rounded-lg transition-colors ${activeView === 'global_settings'
@@ -144,6 +147,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
             >
               <Key size={18} />
             </button>
+            )}
             <button
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
               className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 transition-colors"

@@ -9,7 +9,7 @@ function App(props: Partial<MicroAppProps>) {
 
   return (
     <I18nProvider>
-      <div className="w-full h-screen">
+      <div className="w-full h-full overflow-y-auto">
         <SupplyChainApp {...props} />
       </div>
     </I18nProvider>

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { renderWithQiankun, qiankunWindow } from 'vite-plugin-qiankun/dist/helper'
+import { dipEnvironmentService } from './services/dipEnvironmentService'
 
 // Debug configuration in development
 if (import.meta.env.DEV) {
@@ -36,10 +37,25 @@ const qiankunLifeCycle = {
   },
   async mount(props: any) {
     console.log('[SupplyChainBrain] mount', props);
+    // Initialize DIP environment service with injected props
+    dipEnvironmentService.initialize(props as MicroAppProps);
+
+    // Ensure micro-app container fills DIP's content area
+    if (props.container) {
+      const root = props.container.querySelector('#root');
+      if (root) {
+        root.style.height = '100%';
+        root.style.overflow = 'hidden';
+      }
+      props.container.style.height = '100%';
+    }
+
     render(props.container, props as MicroAppProps);
   },
   async unmount(props: any) {
     console.log('[SupplyChainBrain] unmount', props);
+    // Cleanup DIP environment service
+    dipEnvironmentService.cleanup();
     if (root) {
       root.unmount();
       root = null;
@@ -47,6 +63,8 @@ const qiankunLifeCycle = {
   },
   async update(props: any) {
     console.log('[SupplyChainBrain] update', props);
+    // Re-initialize DIP environment in case props changed (e.g., token refresh)
+    dipEnvironmentService.initialize(props as MicroAppProps);
   },
 };
 

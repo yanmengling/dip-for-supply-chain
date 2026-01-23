@@ -13,6 +13,7 @@ import {
   getEnvironmentConfig,
   type ApiEnvironment
 } from '../config/apiConfig';
+import { dipEnvironmentService } from '../services/dipEnvironmentService';
 
 // ============================================================================
 // 类型定义
@@ -64,6 +65,15 @@ class HttpClient {
   private defaultTimeout = 60000;
   private defaultRetries = 0;
   private defaultRetryDelay = 1000;
+
+  // Token refresh concurrency control
+  private isRefreshing: boolean = false;
+  private refreshQueue: Array<{
+    resolve: (response: Response | null) => void;
+    url: string;
+    options: RequestInit;
+    config?: RequestConfig;
+  }> = [];
 
   /**
    * 构建完整的请求头
@@ -209,19 +219,126 @@ class HttpClient {
   }
 
   /**
+   * Handle 401 response - attempt token refresh and retry (DIP mode only)
+   * Returns the retry response on success, null on failure
+   */
+  private async handle401Response(
+    url: string,
+    options: RequestInit,
+    config?: RequestConfig
+  ): Promise<Response | null> {
+    // Only handle 401 in DIP mode
+    if (!dipEnvironmentService.isDipMode()) {
+      console.log('[HTTP Client] 401 received but not in DIP mode, skipping refresh');
+      return null;
+    }
+
+    console.log('[HTTP Client] 401 Unauthorized detected, attempting token refresh');
+
+    // If already refreshing, queue this request
+    if (this.isRefreshing) {
+      console.log('[HTTP Client] Token refresh in progress, queuing request');
+      return new Promise((resolve) => {
+        this.refreshQueue.push({ resolve, url, options, config });
+      });
+    }
+
+    // Start refresh process
+    this.isRefreshing = true;
+
+    try {
+      const newToken = await dipEnvironmentService.refreshToken();
+
+      if (newToken) {
+        console.log('[HTTP Client] Token refresh successful, retrying request');
+
+        // Update headers with new token
+        const newHeaders = {
+          ...options.headers,
+          Authorization: `Bearer ${newToken}`,
+        } as Record<string, string>;
+
+        // Process queued requests with new token
+        this.refreshQueue.forEach(({ resolve, url: qUrl, options: qOptions, config: qConfig }) => {
+          const qNewHeaders = {
+            ...qOptions.headers,
+            Authorization: `Bearer ${newToken}`,
+          } as Record<string, string>;
+
+          this.fetchWithTimeout(
+            qUrl,
+            { ...qOptions, headers: qNewHeaders },
+            qConfig?.timeout || this.defaultTimeout,
+            qConfig?.signal
+          ).then(resolve).catch(() => resolve(null));
+        });
+        this.refreshQueue = [];
+
+        // Retry the original request
+        return await this.fetchWithTimeout(
+          url,
+          { ...options, headers: newHeaders },
+          config?.timeout || this.defaultTimeout,
+          config?.signal
+        );
+      } else {
+        console.error('[HTTP Client] Token refresh failed');
+
+        // Notify queued requests of failure
+        this.refreshQueue.forEach(({ resolve }) => resolve(null));
+        this.refreshQueue = [];
+
+        // Trigger logout
+        dipEnvironmentService.logout();
+        return null;
+      }
+    } catch (error) {
+      console.error('[HTTP Client] Token refresh error:', error);
+
+      // Notify queued requests of failure
+      this.refreshQueue.forEach(({ resolve }) => resolve(null));
+      this.refreshQueue = [];
+
+      // Trigger logout
+      dipEnvironmentService.logout();
+      return null;
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * Check if response is 401 and attempt refresh+retry
+   * Returns the response to use (original or retried)
+   */
+  private async handleResponseWith401Check(
+    response: Response,
+    url: string,
+    options: RequestInit,
+    config?: RequestConfig
+  ): Promise<Response> {
+    if (response.status === 401) {
+      const retryResponse = await this.handle401Response(url, options, config);
+      if (retryResponse && retryResponse.ok) {
+        return retryResponse;
+      }
+      // If retry failed or returned another error, return original 401 response
+      // to let the caller handle it normally
+    }
+    return response;
+  }
+
+  /**
    * GET 请求
    */
   async get<T>(url: string, config?: RequestConfig): Promise<ApiResponse<T>> {
     const headers = this.buildHeaders(config);
+    const options: RequestInit = { method: 'GET', headers };
 
-    const response = await this.fetchWithRetry(
-      url,
-      {
-        method: 'GET',
-        headers,
-      },
-      config
-    );
+    let response = await this.fetchWithRetry(url, options, config);
+
+    // Handle 401 with token refresh (DIP mode only)
+    response = await this.handleResponseWith401Check(response, url, options, config);
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -236,16 +353,16 @@ class HttpClient {
    */
   async post<T>(url: string, body?: any, config?: RequestConfig): Promise<ApiResponse<T>> {
     const headers = this.buildHeaders(config);
+    const options: RequestInit = {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    };
 
-    const response = await this.fetchWithRetry(
-      url,
-      {
-        method: 'POST',
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      },
-      config
-    );
+    let response = await this.fetchWithRetry(url, options, config);
+
+    // Handle 401 with token refresh (DIP mode only)
+    response = await this.handleResponseWith401Check(response, url, options, config);
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -264,16 +381,16 @@ class HttpClient {
       ...this.buildHeaders(config),
       'X-HTTP-Method-Override': 'GET',
     };
+    const options: RequestInit = {
+      method: 'POST',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    };
 
-    const response = await this.fetchWithRetry(
-      url,
-      {
-        method: 'POST',
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      },
-      config
-    );
+    let response = await this.fetchWithRetry(url, options, config);
+
+    // Handle 401 with token refresh (DIP mode only)
+    response = await this.handleResponseWith401Check(response, url, options, config);
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -288,16 +405,16 @@ class HttpClient {
    */
   async put<T>(url: string, body?: any, config?: RequestConfig): Promise<ApiResponse<T>> {
     const headers = this.buildHeaders(config);
+    const options: RequestInit = {
+      method: 'PUT',
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    };
 
-    const response = await this.fetchWithRetry(
-      url,
-      {
-        method: 'PUT',
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-      },
-      config
-    );
+    let response = await this.fetchWithRetry(url, options, config);
+
+    // Handle 401 with token refresh (DIP mode only)
+    response = await this.handleResponseWith401Check(response, url, options, config);
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -312,15 +429,12 @@ class HttpClient {
    */
   async delete<T>(url: string, config?: RequestConfig): Promise<ApiResponse<T>> {
     const headers = this.buildHeaders(config);
+    const options: RequestInit = { method: 'DELETE', headers };
 
-    const response = await this.fetchWithRetry(
-      url,
-      {
-        method: 'DELETE',
-        headers,
-      },
-      config
-    );
+    let response = await this.fetchWithRetry(url, options, config);
+
+    // Handle 401 with token refresh (DIP mode only)
+    response = await this.handleResponseWith401Check(response, url, options, config);
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -341,17 +455,21 @@ class HttpClient {
   ): Promise<void> {
     const headers = this.buildHeaders(config);
     const timeout = config?.timeout || 300000; // 流式请求默认 5 分钟超时
+    const options: RequestInit = {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    };
 
-    const response = await this.fetchWithTimeout(
-      url,
-      {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      },
-      timeout,
-      config?.signal
-    );
+    let response = await this.fetchWithTimeout(url, options, timeout, config?.signal);
+
+    // Handle 401 with token refresh (DIP mode only)
+    if (response.status === 401) {
+      const retryResponse = await this.handle401Response(url, options, config);
+      if (retryResponse && retryResponse.ok) {
+        response = retryResponse;
+      }
+    }
 
     if (!response.ok) {
       await this.handleErrorResponse(response);

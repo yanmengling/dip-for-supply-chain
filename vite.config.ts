@@ -17,49 +17,41 @@ export default defineConfig({
     port: 5173,
     host: '127.0.0.1',
     proxy: {
-      // 转发 ontology 到云端环境 (Mock模式)
-      '/proxy-ontology': {
+      // DIP API 代理 - ontology-manager
+      '/api/ontology-manager': {
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-ontology/, '/api/ontology'),
       },
-      // 转发 ontology-manager 到云端环境 (Brain模式)
-      '/proxy-manager': {
-        target: 'https://dip.aishu.cn',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-manager/, '/api/ontology-manager'),
-      },
-      // 转发 metricModel 到云端环境
-      '/proxy-metric': {
-        target: 'https://dip.aishu.cn',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-metric/, '/api/mdl-uniquery'),
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, _req, _res) => {
-            proxyReq.setHeader('Origin', 'https://dip.aishu.cn');
-          });
-        },
-      },
-      // 转发 Agent 服务
-      '/proxy-agent-service': {
-        target: 'https://dip.aishu.cn',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-agent-service/, '/api'),
-      },
-      // 转发 ontology-query 到云端环境 (用于DemandPlanningService)
+      // DIP API 代理 - ontology-query
       '/api/ontology-query': {
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, _req, _res) => {
-            proxyReq.setHeader('Origin', 'https://dip.aishu.cn');
-          });
-        },
+      },
+      // DIP API 代理 - agent-app
+      '/api/agent-app': {
+        target: 'https://dip.aishu.cn',
+        changeOrigin: true,
+        secure: false,
+      },
+      // DIP API 代理 - automation (workflow)
+      '/api/automation': {
+        target: 'https://dip.aishu.cn',
+        changeOrigin: true,
+        secure: false,
+      },
+      // DIP API 代理 - mdl-uniquery (metric model)
+      '/api/mdl-uniquery': {
+        target: 'https://dip.aishu.cn',
+        changeOrigin: true,
+        secure: false,
+      },
+      // DIP API 代理 - mdl-data-model
+      '/api/mdl-data-model': {
+        target: 'https://dip.aishu.cn',
+        changeOrigin: true,
+        secure: false,
       },
       // 转发 forecast 到本地 Prophet 预测服务
       '/proxy-forecast': {
@@ -68,30 +60,7 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/proxy-forecast/, ''),
       },
-      // 转发 metricModel 到云端环境
-      '/proxy-metric-data-model': {
-        target: 'https://dip.aishu.cn',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path.replace(/^\/proxy-metric/, '/api/mdl-uniquery'),
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, _req, _res) => {
-            proxyReq.setHeader('Origin', 'https://dip.aishu.cn');
-          });
-        },
-      },
-
-      '/api/mdl-data-model': {
-        target: 'https://dip.aishu.cn',
-        changeOrigin: true,
-        secure: false,
-        configure: (proxy, _options) => {
-          proxy.on('proxyReq', (proxyReq, _req, _res) => {
-            proxyReq.setHeader('Origin', 'https://dip.aishu.cn');
-          });
-        },
-      },
-      // 本地服务代理
+      // 本地服务代理 (catch-all, must be last)
       '/api': {
         target: 'http://127.0.0.1:30777',
         changeOrigin: true,

@@ -207,13 +207,10 @@ export const ENVIRONMENTS: Record<ApiEnvironment, EnvironmentConfig> = {
     baseUrl: '',
     token: GLOBAL_API_TOKEN,
     services: {
-      // Proxy agent via generic proxy service to handle path rewrites
-      agent: '/proxy-agent-service/agent-app/v1',
-      // Proxy metric model to cloud (local 500 error)
-      metricModel: '/proxy-metric/v1',  // 使用正确的指标查询API路径
-      // Proxy via /proxy-manager to avoid collision with local /api proxy
-      ontology: '/proxy-manager/v1',
-      // Forecast API
+      // DIP-native API paths (vite proxy handles these in dev mode)
+      agent: '/api/agent-app/v1',
+      metricModel: '/api/mdl-uniquery/v1',
+      ontology: '/api/ontology-manager/v1',
       forecast: '/proxy-forecast/v1',
     }
   }
@@ -318,7 +315,7 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
   services: {
     agent: {
       name: 'Agent API',
-      baseUrl: envConfig.agentBaseUrl || '/api/agent-app/v1',
+      baseUrl: envConfig.agentBaseUrl || '/api/agent-app/v1',  // DIP-native path
       // Force use of new supply chain cockpit appKey (ignore env variable to avoid stale cache)
       appKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
       timeout: 120000,
@@ -328,13 +325,13 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
     },
     metricModel: {
       name: 'Metric Model API',
-      baseUrl: '/proxy-metric/v1',  // Use proxy path that vite.config.ts rewrites to /api/mdl-uniquery
+      baseUrl: '/api/mdl-uniquery/v1',
       timeout: 60000,
       enabled: true,
     },
     ontology: {
       name: 'Ontology API',
-      baseUrl: '/proxy-manager/v1',  // Use proxy path that vite.config.ts rewrites to /api/ontology-manager
+      baseUrl: '/api/ontology-manager/v1',
       timeout: 60000,
       enabled: true,
     },

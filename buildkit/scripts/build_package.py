@@ -135,6 +135,11 @@ def main() -> None:
         choices=["amd64", "arm64"],
         help="Target architecture.",
     )
+    parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="Skip npm build step (use existing dist folder).",
+    )
 
     args = parser.parse_args()
 
@@ -151,7 +156,10 @@ def main() -> None:
 
     task_dir = create_task_dir(base_dir / ".cache")
 
-    run_command(["npm", "run", "build"], cwd=project_root)
+    if not args.skip_build:
+        run_command(["npm", "run", "build"], cwd=project_root)
+    else:
+        print("Skipping npm build (--skip-build flag set)")
 
     copy_dist(project_root / "dist", task_dir / "dist")
 
