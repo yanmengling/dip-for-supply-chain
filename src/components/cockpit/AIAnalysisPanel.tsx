@@ -8,6 +8,7 @@ import remarkGfm from 'remark-gfm';
 import { apiConfigService } from '../../services/apiConfigService';
 import { ApiConfigType, type WorkflowConfig } from '../../types/apiConfig';
 import { dipEnvironmentService } from '../../services/dipEnvironmentService';
+import { fetchWithAuth } from '../../api/httpClient';
 
 // AI Analysis Panel - 显示来自自动化工作流的AI分析报告
 
@@ -57,18 +58,14 @@ const AIAnalysisPanel = () => {
             try {
                 setBrainModeLoading(true);
 
-                // 1. Get Authentication Headers
-                const headers = await import('../../config/apiConfig').then(m => m.getAuthHeaders());
-
                 // 2. Fetch latest successful execution
                 const DAG_ID = getWorkflowDagId();
                 const automationBase = dipEnvironmentService.getAutomationApiBase();
                 const listUrl = `${automationBase}/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=20`;
                 console.log('[AIAnalysisPanel] Fetching DAG results from:', listUrl);
 
-                const listResponse = await fetch(listUrl, {
-                    headers,
-                    signal: abortController.signal  // 添加取消信号
+                const listResponse = await fetchWithAuth(listUrl, {
+                    signal: abortController.signal
                 });
 
                 // 检查组件是否仍然挂载
@@ -128,9 +125,8 @@ const AIAnalysisPanel = () => {
                     const detailUrl = `${automationBase}/dag/${DAG_ID}/result/${resultId}`;
                     console.log('[AIAnalysisPanel] Fetching execution details from:', detailUrl);
 
-                    const detailResponse = await fetch(detailUrl, {
-                        headers,
-                        signal: abortController.signal  // 添加取消信号
+                    const detailResponse = await fetchWithAuth(detailUrl, {
+                        signal: abortController.signal
                     });
 
                     if (!isActive) return;  // 检查组件状态
@@ -241,18 +237,14 @@ const AIAnalysisPanel = () => {
             setIsTriggering(true);
             setBrainModeMarkdown('');
             setBrainModeAnalysis([]);
-            const headers = await import('../../config/apiConfig').then(m => m.getAuthHeaders());
 
             // 1. Trigger workflow
             console.log('[AIAnalysisPanel] Triggering workflow...');
-            const triggerResponse = await fetch(
+            const triggerResponse = await fetchWithAuth(
                 `/api/automation/v1/run-instance/${DAG_ID}`,
                 {
                     method: 'POST',
-                    headers: {
-                        ...headers,
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
                 }
             );
@@ -276,9 +268,8 @@ const AIAnalysisPanel = () => {
                 console.log(`[AIAnalysisPanel] Checking status (attempt ${attempts}/${maxAttempts})...`);
 
                 const statusBase = dipEnvironmentService.getAutomationApiBase();
-                const statusResponse = await fetch(
-                    `${statusBase}/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=1`,
-                    { headers }
+                const statusResponse = await fetchWithAuth(
+                    `${statusBase}/dag/${DAG_ID}/results?sortBy=started_at&order=desc&limit=1`
                 );
 
                 if (statusResponse.ok) {

@@ -366,6 +366,28 @@ class AgentApiClient {
   }
 
   /**
+   * Handle 401 by refreshing token and retrying (DIP mode only)
+   * Returns the retry response or null if refresh failed
+   */
+  private async handle401AndRetry(
+    url: string,
+    options: RequestInit
+  ): Promise<Response | null> {
+    if (!dipEnvironmentService.isDipMode()) return null;
+
+    console.log('[AgentApiClient] 401 detected, refreshing token...');
+    const newToken = await dipEnvironmentService.refreshToken();
+    if (!newToken) return null;
+
+    console.log('[AgentApiClient] Token refreshed, retrying request');
+    const retryHeaders = {
+      ...(options.headers as Record<string, string>),
+      Authorization: `Bearer ${newToken}`,
+    };
+    return fetch(url, { ...options, headers: retryHeaders });
+  }
+
+  /**
    * Handle API errors
    */
   private async handleApiError(response: Response): Promise<never> {
@@ -445,12 +467,22 @@ class AgentApiClient {
           },
         });
 
-        const response = await fetch(url, {
+        const fetchOptions: RequestInit = {
           method: 'POST',
           headers: this.getHeaders(),
           body: JSON.stringify(normalizedRequest),
           signal: this.abortController.signal,
-        });
+        };
+
+        let response = await fetch(url, fetchOptions);
+
+        // Retry on 401 with refreshed token
+        if (response.status === 401) {
+          const retryResponse = await this.handle401AndRetry(url, fetchOptions);
+          if (retryResponse) {
+            response = retryResponse;
+          }
+        }
 
         clearTimeout(timeoutId);
 
@@ -515,12 +547,22 @@ class AgentApiClient {
           },
         });
 
-        response = await fetch(url, {
+        const fetchOptions: RequestInit = {
           method: 'POST',
           headers: this.getHeaders(),
           body: JSON.stringify(normalizedRequest),
           signal: this.abortController.signal,
-        });
+        };
+
+        response = await fetch(url, fetchOptions);
+
+        // Retry on 401 with refreshed token
+        if (response.status === 401) {
+          const retryResponse = await this.handle401AndRetry(url, fetchOptions);
+          if (retryResponse) {
+            response = retryResponse;
+          }
+        }
 
         clearTimeout(timeoutId);
 

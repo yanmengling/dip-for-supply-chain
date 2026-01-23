@@ -503,3 +503,46 @@ class HttpClient {
 export const httpClient = new HttpClient();
 export default httpClient;
 
+// ============================================================================
+// fetchWithAuth: Raw fetch with automatic token refresh + retry
+// ============================================================================
+
+/**
+ * Wrapper around native fetch() that adds:
+ * 1. Automatic auth headers from apiConfig
+ * 2. On 401 in DIP mode: refresh token and retry once
+ *
+ * Use this instead of raw fetch() for API calls that need DIP token handling.
+ */
+export async function fetchWithAuth(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  const { getAuthHeaders } = await import('../config/apiConfig');
+
+  // Add auth headers
+  const headers = {
+    ...getAuthHeaders(),
+    ...(options.headers as Record<string, string> || {}),
+  };
+
+  const response = await fetch(url, { ...options, headers });
+
+  // If 401 and in DIP mode, try refresh + retry
+  if (response.status === 401 && dipEnvironmentService.isDipMode()) {
+    console.log('[fetchWithAuth] 401 detected, refreshing token...');
+    const newToken = await dipEnvironmentService.refreshToken();
+
+    if (newToken) {
+      console.log('[fetchWithAuth] Token refreshed, retrying request');
+      const retryHeaders = {
+        ...headers,
+        Authorization: `Bearer ${newToken}`,
+      };
+      return fetch(url, { ...options, headers: retryHeaders });
+    }
+  }
+
+  return response;
+}
+
