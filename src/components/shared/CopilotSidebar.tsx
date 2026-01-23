@@ -278,9 +278,11 @@ export const CopilotSidebar = ({
     setIsLoading(false);
   };
 
+  if (!isOpen) return null;
+
   return (
     <div
-      className={`fixed right-0 w-[33rem] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-l border-slate-100 shadow-xl rounded-l-2xl transform transition-transform duration-300 z-50 flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+      className="fixed right-0 w-[33rem] bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 border-l border-slate-100 shadow-xl rounded-l-2xl z-50 flex flex-col"
       style={{ top: topOffset, height: `calc(100vh - ${topOffset}px)` }}
     >
       <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-indigo-50/80 to-purple-50/80">
