@@ -173,6 +173,7 @@ def main() -> None:
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(manifest_rendered, encoding="utf-8")
 
+    application_key_path = task_dir / "package" / args.arch / "application.key"
     application_key_path.write_text(str(app_key), encoding="utf-8")
 
     # Copy logo
