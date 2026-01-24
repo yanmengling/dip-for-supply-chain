@@ -1,7 +1,7 @@
 namespace: anyshare # Kubernetes 命名空间，如果你不知道这是什么就别去动。
 name: supply-chain-brain # 应用名称
 alias: KWeaver 供应链大脑 # 应用别名，会显示在 DIP 平台的界面上。
-version: 0.1.6 # 符合语义版本规范的版本号。
+version: 0.1.7 # 符合语义版本规范的版本号。
 category: DIP for Supply Chain # 应用分类，会显示在 DIP 平台的界面上。
 port: 8891 # 应用对外暴露的端口号。
 description: KWeaver 供应链大脑应用 # 应用描述，会显示在 DIP 应用卡片的介绍上。

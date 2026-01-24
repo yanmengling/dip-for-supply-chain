@@ -5,6 +5,7 @@
  */
 
 import { httpClient } from './httpClient';
+import { dipEnvironmentService } from '../services/dipEnvironmentService';
 import {
   getKnowledgeNetworkId,
   setKnowledgeNetworkId as setConfigKnowledgeNetworkId,
@@ -621,10 +622,13 @@ class OntologyApiClient {
     console.log(`[OntologyAPI] 请求体 (POST body):`, JSON.stringify(requestBody, null, 2));
     console.log(`[OntologyAPI] 发送请求...`);
 
-    // 使用 POST + X-HTTP-Method-Override: GET（ADP Ontology Query API 规范要求）
+    // DIP 模式使用普通 POST（DIP 平台不需要 Override 头）
+    // 开发模式使用 POST + X-HTTP-Method-Override: GET（dip.aishu.cn 需要此头）
     let response: any;
     try {
-      response = await httpClient.postAsGet<ObjectInstancesResponse>(url, requestBody);
+      response = dipEnvironmentService.isDipMode()
+        ? await httpClient.post<ObjectInstancesResponse>(url, requestBody)
+        : await httpClient.postAsGet<ObjectInstancesResponse>(url, requestBody);
 
       // Log full response for debugging
       console.log(`[OntologyAPI] ========== queryObjectInstances 响应 ==========`);
