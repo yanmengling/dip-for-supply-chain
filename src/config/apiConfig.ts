@@ -7,6 +7,7 @@
 
 import { type KnowledgeNetworkConfig, type KnowledgeNetworkPreset, ApiConfigType } from '../types/apiConfig';
 import { globalSettingsService } from '../services/globalSettingsService';
+import { dipEnvironmentService } from '../services/dipEnvironmentService';
 
 // ============================================================================
 // 类型定义
@@ -439,7 +440,15 @@ export function getApiConfig(): GlobalApiConfig {
  * 获取认证 Token
  */
 export function getAuthToken(): string {
-  // 1. 优先从 sessionStorage 获取（DIP 容器通常会注入或通过 URL 传递后存储在这里）
+  // 1. DIP 模式下优先从 DIP 平台获取实时 token（确保始终使用最新未过期的 token）
+  if (dipEnvironmentService.isDipMode()) {
+    const dipToken = dipEnvironmentService.getToken();
+    if (dipToken) {
+      return dipToken;
+    }
+  }
+
+  // 2. 从 sessionStorage 获取（URL 传递后存储在这里）
   if (typeof window !== 'undefined' && window.sessionStorage) {
     const sessionToken = window.sessionStorage.getItem('api_auth_token');
     if (sessionToken) {
@@ -447,7 +456,7 @@ export function getAuthToken(): string {
     }
   }
 
-  // 2. 其次从 localStorage 获取（如果实现了持久化登录）
+  // 3. 从 localStorage 获取（持久化登录）
   if (typeof window !== 'undefined' && window.localStorage) {
     const localToken = window.localStorage.getItem('api_auth_token');
     if (localToken) {
@@ -455,7 +464,7 @@ export function getAuthToken(): string {
     }
   }
 
-  // 3. 最后使用配置中的 Token (主要用于本地开发或 fallback)
+  // 4. 最后使用配置中的 Token (主要用于本地开发或 fallback)
   if (currentConfig.auth.token) {
     return currentConfig.auth.token;
   }
