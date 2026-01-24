@@ -55,6 +55,5 @@ __pycache__/
 *.so
 .Python
 src/services/productSupplyCalculator.ts
+# Scripts
 scripts/
-!scripts/
-scripts/*.log
