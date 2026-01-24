@@ -14,7 +14,7 @@
 import type { MicroAppProps, GetAccessToken, RefreshToken, TokenExpiredHandler, Logout } from '../micro-app';
 
 /** App version - bump this when releasing new .dip packages to clear stale caches */
-const DIP_APP_VERSION = '0.1.5';
+const DIP_APP_VERSION = '0.1.6';
 const DIP_VERSION_KEY = 'supply_chain_brain_dip_version';
 
 /** localStorage keys managed by this app */

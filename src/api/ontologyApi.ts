@@ -621,11 +621,10 @@ class OntologyApiClient {
     console.log(`[OntologyAPI] 请求体 (POST body):`, JSON.stringify(requestBody, null, 2));
     console.log(`[OntologyAPI] 发送请求...`);
 
-    // According to ADP Ontology Query spec, use POST with X-HTTP-Method-Override: GET header
-    // The httpClient.postAsGet method handles this automatically
+    // 使用普通 POST 请求（与 DIP 平台自身调用方式一致）
     let response: any;
     try {
-      response = await httpClient.postAsGet<ObjectInstancesResponse>(url, requestBody);
+      response = await httpClient.post<ObjectInstancesResponse>(url, requestBody);
 
       // Log full response for debugging
       console.log(`[OntologyAPI] ========== queryObjectInstances 响应 ==========`);
