@@ -2,12 +2,22 @@ node_modules/
 dist/
 build/
 .env
+.env.local
 .DS_Store
 coverage/
 .vscode/
 .idea/
 .cursor/
 *.log
+*.txt
+*.json
+
+# Exceptions for json files we want to keep (if any)
+!package.json
+!tsconfig.json
+!tsconfig.*.json
+!version.json
+!version.en.json
 
 # Build logs and errors
 build_*
@@ -32,3 +42,6 @@ __pycache__/
 *.so
 .Python
 src/services/productSupplyCalculator.ts
+scripts/
+!scripts/
+scripts/*.log
