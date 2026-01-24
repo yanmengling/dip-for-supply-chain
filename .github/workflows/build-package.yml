@@ -1,0 +1,45 @@
+name: Build DIP Package
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install system dependencies (Skopeo)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y skopeo
+
+    - name: Install Python dependencies
+      run: |
+        pip install pyyaml jinja2
+
+    - name: Install frontend dependencies
+      run: npm install
+
+    - name: Build DIP Package
+      run: |
+        python buildkit/scripts/build_package.py --arch amd64
+
+    - name: Upload DIP Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: dip-package
+        path: buildkit/.cache/*/package/*.dip
