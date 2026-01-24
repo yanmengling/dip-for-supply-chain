@@ -13,8 +13,8 @@
 - 🎯 [功能模块](#功能模块)
 - 🔧 [开发指南](#开发指南)
 - 📄 [许可证](LICENSE) - Apache 2.0 许可证
-- 🐛 [报告问题](https://github.com/your-org/supply-chain-brain/issues) - 报告错误或问题
-- 💡 [功能建议](https://github.com/your-org/supply-chain-brain/issues) - 建议新功能
+- 🐛 [报告问题](https://github.com/kweaver-ai/dip-for-supply-chain/issues) - 报告错误或问题
+- 💡 [功能建议](https://github.com/kweaver-ai/dip-for-supply-chain/issues) - 建议新功能
 
 ## 快速开始
 
