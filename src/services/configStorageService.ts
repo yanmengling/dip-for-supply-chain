@@ -718,9 +718,9 @@ class ConfigStorageService {
                     type: ApiConfigType.AGENT,
                     name: '供应链智能助手',
                     description: '供应链大脑 AI 助手',
-                    agentKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
-                    appKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
-                    agentVersion: 'v2',
+                    agentKey: '01KFT0E68A1RES94ZV6DA131X4',
+                    appKey: '01KFT0E68A1RES94ZV6DA131X4',
+                    agentVersion: '',  // 留空让服务器使用默认版本
                     enabled: true,
                     enableStreaming: true,
                     enableHistory: true,

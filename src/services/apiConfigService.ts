@@ -188,16 +188,15 @@ class ApiConfigService {
      */
     private syncAgentAppKey(appKey: string): void {
         try {
-            const currentConfig = getApiConfig();
+            // updateApiConfig 现在支持深度合并，只需传入要更新的服务属性
             updateApiConfig({
                 services: {
-                    ...currentConfig.services,
                     agent: {
-                        ...currentConfig.services.agent,
                         appKey: appKey
                     }
-                }
+                } as any
             });
+            console.log(`[ApiConfigService] Successfully synced agent appKey to runtime: ${appKey}`);
         } catch (err) {
             console.error('[ApiConfigService] Failed to sync agent appKey:', err);
         }
@@ -455,28 +454,128 @@ class ApiConfigService {
 
     /**
      * Test Agent API connection
+     * 实际调用 Agent API 验证配置是否有效
      */
     private async testAgentConnection(
         config: AgentConfig,
         timestamp: number
     ): Promise<ConfigTestResult> {
-        // For now, just validate the configuration structure
-        // TODO: Implement actual Agent API health check when available
-
+        // 验证必填字段
         if (!config.agentKey || !config.appKey) {
             throw new Error('Agent Key 和 App Key 不能为空');
         }
 
-        return {
-            success: true,
-            message: 'Agent 配置有效',
-            details: {
-                agentKey: config.agentKey,
-                appKey: config.appKey,
-                agentVersion: config.agentVersion || 'latest'
-            },
-            timestamp
-        };
+        // 获取 API 配置
+        const apiConfig = getApiConfig();
+        const baseUrl = apiConfig.services.agent.baseUrl;
+        const token = getAuthHeaders()['Authorization'];
+
+        // 构建测试请求 URL - 使用配置的 appKey
+        const testUrl = `${baseUrl}/app/${config.appKey}/api/chat/completion`;
+
+        console.log(`[ApiConfigService] Testing Agent connection:`, {
+            url: testUrl,
+            agentKey: config.agentKey,
+            appKey: config.appKey
+        });
+
+        try {
+            // 发送一个简单的测试请求
+            // 不发送 agent_version，让服务器使用默认版本
+            const testRequest: any = {
+                agent_key: config.agentKey,
+                query: '测试连接',  // 简单测试消息
+                stream: false,
+                history: []
+            };
+
+            // 只有当明确指定了版本且不是 'v2' 时才添加
+            if (config.agentVersion && config.agentVersion !== 'v2') {
+                testRequest.agent_version = config.agentVersion;
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000); // 15秒超时
+
+            const response = await fetch(testUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(token ? { 'Authorization': token } : {})
+                },
+                body: JSON.stringify(testRequest),
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                // 尝试解析响应获取更多信息
+                let responseInfo = '';
+                try {
+                    const data = await response.json();
+                    if (data.conversation_id) {
+                        responseInfo = `，会话ID: ${data.conversation_id.substring(0, 8)}...`;
+                    }
+                } catch {
+                    // 忽略解析错误
+                }
+
+                return {
+                    success: true,
+                    message: `Agent API 连接成功${responseInfo}`,
+                    details: {
+                        agentKey: config.agentKey,
+                        appKey: config.appKey,
+                        agentVersion: config.agentVersion || 'latest',
+                        endpoint: testUrl,
+                        httpStatus: response.status
+                    },
+                    timestamp
+                };
+            } else {
+                // 尝试获取错误信息
+                let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.message) {
+                        errorMessage = errorData.message;
+                    } else if (errorData.error) {
+                        errorMessage = errorData.error;
+                    }
+                } catch {
+                    // 忽略解析错误
+                }
+
+                return {
+                    success: false,
+                    message: `Agent API 连接失败: ${errorMessage}`,
+                    details: {
+                        agentKey: config.agentKey,
+                        appKey: config.appKey,
+                        endpoint: testUrl,
+                        httpStatus: response.status
+                    },
+                    timestamp
+                };
+            }
+        } catch (error) {
+            const errorMessage = error instanceof Error
+                ? (error.name === 'AbortError' ? '请求超时' : error.message)
+                : '未知错误';
+
+            return {
+                success: false,
+                message: `Agent API 连接失败: ${errorMessage}`,
+                details: {
+                    agentKey: config.agentKey,
+                    appKey: config.appKey,
+                    endpoint: testUrl,
+                    error: errorMessage
+                },
+                timestamp
+            };
+        }
     }
 
     /**

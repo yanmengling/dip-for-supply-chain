@@ -221,21 +221,22 @@ class AgentApiClient {
   private get appKey(): string {
     // 1. 优先使用配置中心的值（通过 apiConfigService 同步到 runtime config）
     const configAppKey = getServiceConfig('agent').appKey;
-
-    // 2. 如果配置中心有值且不是默认硬编码值，使用配置值
-    const DEFAULT_APP_KEY = '01KEX8BP0GR6TMXQR7GE3XN16A';
-    if (configAppKey && configAppKey !== DEFAULT_APP_KEY) {
+    if (configAppKey) {
+      console.log('[AgentApiClient] Using appKey from config center:', configAppKey);
       return configAppKey;
     }
 
-    // 3. DIP 模式下使用 DIP 特定的 key 作为 fallback
+    // 2. DIP 模式下使用 DIP 特定的 key 作为 fallback
     const dipKey = dipEnvironmentService.getAgentAppKey();
     if (dipKey) {
+      console.log('[AgentApiClient] Using appKey from DIP environment:', dipKey);
       return dipKey;
     }
 
-    // 4. 最终 fallback 到配置值或默认值
-    return configAppKey || DEFAULT_APP_KEY;
+    // 3. 最终 fallback（理论上不应该到这里，因为配置中心应该总有值）
+    const fallbackKey = '01KFT0E68A1RES94ZV6DA131X4';
+    console.warn('[AgentApiClient] No appKey found, using fallback:', fallbackKey);
+    return fallbackKey;
   }
 
   /**
@@ -323,6 +324,12 @@ class AgentApiClient {
       delete normalized.executor_version;
     }
 
+    // Handle agent_version: 如果未指定或无效，删除该字段让服务器使用默认版本
+    // 某些 Agent 可能没有 v2 版本，让服务器自动选择最新发布的版本
+    if (!normalized.agent_version || normalized.agent_version === 'v2') {
+      delete normalized.agent_version;
+    }
+
     // Set default history to empty array if not provided (as shown in official example)
     if (!normalized.history) {
       normalized.history = [];
@@ -408,24 +415,43 @@ class AgentApiClient {
   private async handleApiError(response: Response): Promise<never> {
     let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
     let errorCode = 'UNKNOWN_ERROR';
+    let errorDetails: any = null;
 
     try {
-      const errorData = await response.json();
-      if (errorData.message) {
-        errorMessage = errorData.message;
-      }
-      if (errorData.code) {
-        errorCode = errorData.code;
+      const text = await response.text();
+      console.error('[AgentApiClient] API Error Response:', text);
+
+      try {
+        const errorData = JSON.parse(text);
+        errorDetails = errorData;
+        if (errorData.message) {
+          errorMessage = errorData.message;
+        } else if (errorData.error) {
+          errorMessage = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error);
+        } else if (errorData.detail) {
+          errorMessage = errorData.detail;
+        }
+        if (errorData.code) {
+          errorCode = errorData.code;
+        }
+      } catch {
+        // 响应不是 JSON，使用原始文本
+        if (text) {
+          errorMessage = `HTTP ${response.status}: ${text.substring(0, 200)}`;
+        }
       }
     } catch {
-      // Ignore JSON parse errors
+      // Ignore read errors
     }
+
+    console.error('[AgentApiClient] API Error:', { status: response.status, code: errorCode, message: errorMessage, details: errorDetails });
 
     // Create custom error with additional context
     const error = new Error(errorMessage) as any;
     error.code = errorCode;
     error.status = response.status;
     error.isNetworkError = false;
+    error.details = errorDetails;
 
     throw error;
   }
@@ -534,6 +560,8 @@ class AgentApiClient {
     onMessage: (message: StreamMessage) => void
   ): Promise<void> {
     const url = `${this.baseUrl}/app/${this.appKey}/api/chat/completion`;
+    console.log('[AgentApiClient] chatCompletionStream URL:', url);
+    console.log('[AgentApiClient] Using appKey:', this.appKey);
 
     let response: Response;
 
@@ -561,6 +589,8 @@ class AgentApiClient {
             is_need_progress: true
           },
         });
+
+        console.log('[AgentApiClient] Request payload:', JSON.stringify(normalizedRequest, null, 2));
 
         const fetchOptions: RequestInit = {
           method: 'POST',
@@ -591,6 +621,12 @@ class AgentApiClient {
     } catch (error) {
       if ((error as any).name === 'AbortError') {
         onMessage({ type: 'error', error: '请求已取消或超时' });
+        return;
+      }
+      // 检查是否是 API 错误（有 status 属性）
+      if ((error as any).status) {
+        // API 错误，直接传递给回调
+        onMessage({ type: 'error', error: (error as Error).message });
         return;
       }
       this.handleNetworkError(error);

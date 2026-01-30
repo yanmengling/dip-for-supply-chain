@@ -317,8 +317,8 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
     agent: {
       name: 'Agent API',
       baseUrl: envConfig.agentBaseUrl || '/api/agent-app/v1',  // DIP-native path
-      // Force use of new supply chain cockpit appKey (ignore env variable to avoid stale cache)
-      appKey: '01KEX8BP0GR6TMXQR7GE3XN16A',
+      // 默认 appKey，可通过配置中心覆盖
+      appKey: '01KFT0E68A1RES94ZV6DA131X4',
       timeout: 120000,
       streamTimeout: 300000,
       maxRetries: 3,
@@ -527,8 +527,23 @@ export function clearAuthToken(): void {
 
 /**
  * 更新 API 配置
+ * 支持深度合并 services 对象，确保单个服务的属性更新能正确生效
  */
 export function updateApiConfig(updates: Partial<GlobalApiConfig>): void {
+  // 深度合并 services 对象
+  const mergedServices = { ...currentConfig.services };
+  if (updates.services) {
+    // 逐个服务进行深度合并
+    for (const key of Object.keys(updates.services) as Array<keyof typeof currentConfig.services>) {
+      if (updates.services[key]) {
+        mergedServices[key] = {
+          ...currentConfig.services[key],
+          ...updates.services[key],
+        } as any;
+      }
+    }
+  }
+
   currentConfig = {
     ...currentConfig,
     ...updates,
@@ -536,10 +551,7 @@ export function updateApiConfig(updates: Partial<GlobalApiConfig>): void {
       ...currentConfig.auth,
       ...updates.auth,
     },
-    services: {
-      ...currentConfig.services,
-      ...updates.services,
-    },
+    services: mergedServices,
   };
 
   if (currentConfig.debug) {

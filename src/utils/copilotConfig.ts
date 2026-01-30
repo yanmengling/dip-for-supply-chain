@@ -6,9 +6,11 @@
 
 import type { CopilotSidebarProps } from '../components/shared/CopilotSidebar';
 import type { CopilotRichContent, StreamMessage } from '../types/ontology';
+import { ApiConfigType } from '../types/apiConfig';
 import { agentApiClient } from '../services/agentApi';
 import { apiConfigService } from '../services/apiConfigService';
 import { dipEnvironmentService } from '../services/dipEnvironmentService';
+import { getServiceConfig } from '../config/apiConfig';
 
 // Agent configuration mapping for different views
 // Maps view names to agent config IDs in the configuration center
@@ -35,56 +37,52 @@ const FALLBACK_AGENT_NAMES: Record<string, { name: string; description: string }
 
 /**
  * Get agent configuration from configuration center
+ * 直接从配置中心读取第一个启用的 agent 配置
  */
-async function getAgentConfig(viewId: string): Promise<{ agent_key: string; agent_version: string; name: string; description: string } | null> {
-  try {
-    const agentConfigId = VIEW_AGENT_MAP[viewId];
-    if (!agentConfigId) {
-      console.warn(`[CopilotConfig] No agent mapping found for view: ${viewId}`);
-      return null;
-    }
+function getAgentConfig(viewId: string): { agent_key: string; agent_version: string; name: string; description: string } {
+  // 从配置中心获取所有启用的 agent
+  const allAgents = apiConfigService.getEnabledConfigsByType(ApiConfigType.AGENT);
 
-    const agentKey = await apiConfigService.getAgentKey(agentConfigId);
-    if (!agentKey) {
-      console.warn(`[CopilotConfig] No agent key found for config ID: ${agentConfigId}`);
-      return null;
-    }
-
-    // Get agent version from config (default to 'v1')
-    const agentVersion = await apiConfigService.getAgentVersion(agentConfigId) || 'v1';
-
-    // Get agent name and description from config
-    const agentName = await apiConfigService.getAgentName(agentConfigId) || FALLBACK_AGENT_NAMES[viewId]?.name || '智能助手';
-    const agentDescription = await apiConfigService.getAgentDescription(agentConfigId) || FALLBACK_AGENT_NAMES[viewId]?.description || '智能分析助手';
-
-    return {
-      agent_key: agentKey,
-      agent_version: agentVersion,
-      name: agentName,
-      description: agentDescription
-    };
-  } catch (error) {
-    console.error('[CopilotConfig] Failed to load agent config:', error);
-    return null;
+  if (allAgents.length === 0) {
+    console.error('[CopilotConfig] 配置中心没有启用的 Agent 配置！');
+    throw new Error('No enabled agent config found in config center');
   }
+
+  const primaryAgent = allAgents[0] as any;
+  const fallbackNames = FALLBACK_AGENT_NAMES[viewId] || FALLBACK_AGENT_NAMES.cockpit;
+
+  console.log(`[CopilotConfig] 从配置中心读取 Agent 配置:`, {
+    id: primaryAgent.id,
+    name: primaryAgent.name,
+    agentKey: primaryAgent.agentKey,
+    appKey: primaryAgent.appKey,
+    agentVersion: primaryAgent.agentVersion
+  });
+
+  return {
+    agent_key: primaryAgent.agentKey,
+    agent_version: primaryAgent.agentVersion || '',  // 留空让服务器使用默认版本
+    name: fallbackNames.name || primaryAgent.name,
+    description: fallbackNames.description || primaryAgent.description
+  };
 }
 
 export const getCopilotConfig = async (
   currentView: string,
   conversationId?: string
 ): Promise<Omit<CopilotSidebarProps, 'isOpen' | 'onClose'>> => {
-  // Load agent config from configuration center
-  const agentConfig = await getAgentConfig(currentView);
+  // 直接从配置中心读取 agent 配置
+  const agentConfig = getAgentConfig(currentView);
 
-  // Fallback to default if config not found
-  const fallback = FALLBACK_AGENT_NAMES[currentView] || FALLBACK_AGENT_NAMES.cockpit;
-  const dipKey = dipEnvironmentService.getAgentAppKey();
-  const finalConfig = agentConfig || {
-    agent_key: dipKey || '01KEX8BP0GR6TMXQR7GE3XN16A', // DIP-specific or dev fallback
-    agent_version: 'v1',
-    name: fallback.name,
-    description: fallback.description
-  };
+  // 同时打印运行时配置的 appKey，用于对比
+  const runtimeAppKey = getServiceConfig('agent').appKey;
+  console.log('[CopilotConfig] 运行时配置 appKey (用于URL):', runtimeAppKey);
+  console.log('[CopilotConfig] 配置中心 agentKey (用于请求体):', agentConfig.agent_key);
+
+  // 检查两者是否一致
+  if (runtimeAppKey !== agentConfig.agent_key) {
+    console.warn('[CopilotConfig] ⚠️ 运行时 appKey 与配置中心 agentKey 不一致！');
+  }
 
   const handleQuery = async (
     query: string,
@@ -92,22 +90,30 @@ export const getCopilotConfig = async (
     onStream?: (message: StreamMessage) => void
   ): Promise<string | { text: string; richContent?: CopilotRichContent }> => {
     try {
-      // Authentication token is automatically handled by agentConfig
-      // You can set it via:
-      // 1. Environment variable: VITE_AGENT_API_TOKEN
-      // 2. Call setAuthToken() from agentConfig after user login
-      // 3. Token stored in sessionStorage/localStorage
+      // 每次请求时重新读取最新的 agent 配置，确保使用用户配置的值
+      // 这样可以避免闭包捕获旧值的问题
+      const freshAgentConfig = getAgentConfig(currentView);
+
+      // 打印调试信息
+      console.log('[CopilotConfig] handleQuery 使用最新配置:', {
+        agent_key: freshAgentConfig.agent_key,
+        agent_version: freshAgentConfig.agent_version
+      });
 
       // Build request matching OFFICIAL API schema and Agent 开发指南
       // 首次对话: 不提供 conversation_id,系统会自动创建会话
       // 继续对话: 使用返回的 conversation_id 维护多轮对话上下文
       const requestData: any = {
-        agent_key: finalConfig.agent_key,
-        agent_version: finalConfig.agent_version,
+        agent_key: freshAgentConfig.agent_key,
         query: query,
         stream: !!onStream,
         history: []  // Required field as per official example
       };
+
+      // 只有当明确指定了版本时才添加 agent_version
+      if (freshAgentConfig.agent_version) {
+        requestData.agent_version = freshAgentConfig.agent_version;
+      }
 
       // Add inc_stream only when streaming
       if (onStream) {
@@ -312,11 +318,11 @@ export const getCopilotConfig = async (
   };
 
   return {
-    title: finalConfig.name,
+    title: agentConfig.name,
     initialMessages: [
       {
         type: 'bot',
-        text: `您好！我是${finalConfig.description}。请告诉我您需要什么帮助，我会尽力为您提供专业的分析和建议。`
+        text: `您好！我是${agentConfig.description}。请告诉我您需要什么帮助，我会尽力为您提供专业的分析和建议。`
       }
     ],
     suggestions: getSuggestions(currentView),

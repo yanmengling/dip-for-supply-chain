@@ -116,7 +116,7 @@ function validateConfig(config: Partial<AnyApiConfig>): ConfigValidationError[] 
 
     // Base validation
     if (!config.name?.trim()) {
-        errors.push({ field: 'name', message: '配置名称不能为空' });
+        errors.push({ field: 'name', message: '名称不能为空' });
     }
 
     // Type-specific validation
@@ -351,7 +351,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={agent.agentKey || ''}
                                 onChange={(e) => handleChange('agentKey', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: 01KEX8BP0GR6TMXQR7GE3XN16A"
+                                placeholder="例如: 01KFT0E68A1RES94ZV6DA131X4"
                             />
                         </FormField>
                         <FormField label="App Key" required error={getFieldError('appKey')}>
@@ -360,7 +360,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={agent.appKey || ''}
                                 onChange={(e) => handleChange('appKey', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: 01KEX8BP0GR6TMXQR7GE3XN16A"
+                                placeholder="例如: 01KFT0E68A1RES94ZV6DA131X4"
                             />
                         </FormField>
                         <FormField label="Agent 版本">
@@ -439,7 +439,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                 {/* Header */}
                 <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
                     <h2 className="text-xl font-semibold text-slate-800">
-                        {isEditMode ? '编辑配置' : '新建配置'}
+                        {isEditMode ? '编辑' : '新建'}
                     </h2>
                     <button
                         onClick={onCancel}
@@ -453,13 +453,13 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                 <div className="p-6 space-y-6">
                     {/* Base Fields */}
                     <div className="space-y-4">
-                        <FormField label="配置名称" required error={getFieldError('name')}>
+                        <FormField label="名称" required error={getFieldError('name')}>
                             <input
                                 type="text"
                                 value={formData.name || ''}
                                 onChange={(e) => handleChange('name', e.target.value)}
                                 className="form-input"
-                                placeholder="输入配置名称"
+                                placeholder="输入名称"
                             />
                         </FormField>
 
@@ -469,7 +469,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 onChange={(e) => handleChange('description', e.target.value)}
                                 className="form-input"
                                 rows={3}
-                                placeholder="输入配置描述（可选）"
+                                placeholder="输入描述（可选）"
                             />
                         </FormField>
 
@@ -520,14 +520,14 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                     onChange={(e) => handleChange('enabled', e.target.checked)}
                                     className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
                                 />
-                                <span className="text-sm text-slate-700">启用此配置</span>
+                                <span className="text-sm text-slate-700">启用此</span>
                             </label>
                         </FormField>
                     </div>
 
                     {/* Type-Specific Fields */}
                     <div className="pt-4 border-t border-slate-200 space-y-4">
-                        <h3 className="text-lg font-medium text-slate-800">配置详情</h3>
+                        <h3 className="text-lg font-medium text-slate-800">详情</h3>
                         {renderTypeSpecificFields()}
                     </div>
 
@@ -582,7 +582,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                         className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                     >
                         <Save size={18} />
-                        保存配置
+                        保存
                     </button>
                     <button
                         onClick={handleTest}
