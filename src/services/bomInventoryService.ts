@@ -1,21 +1,19 @@
 /**
  * BOM库存分析服务
- * 
- * 负责加载产品、BOM、库存数据，构建BOM树，解析替代料关系
- * 
- * 数据源:
- * - 产品信息: /proxy-metric/v1/data-views/2004376134620897282
- * - 产品BOM信息: /proxy-metric/v1/data-views/2004376134629285892
- * - 库存信息: /proxy-metric/v1/data-views/2004376134625091585
+ *
+ * 负责加载产品、BOM、库存、物料数据，构建BOM树，解析替代料关系
+ *
+ * 数据源: 通过 Ontology API 动态加载，对象类型 ID 从配置服务获取
+ * - 产品信息 (product)
+ * - 产品BOM信息 (bom)
+ * - 库存信息 (inventory)
+ * - 物料信息 (material)
  */
 
 
 // ============================================================================
 // 类型定义
 // ============================================================================
-
-/** 目标产品列表 */
-export const TARGET_PRODUCTS = ['T01-000055', 'T01-000167', 'T01-000173'];
 
 import { ontologyApi } from '../api/ontologyApi';
 import { apiConfigService } from './apiConfigService';
@@ -60,12 +58,12 @@ const getObjectTypeId = (entityType: string, defaultId: string) => {
     return defaultId;
 };
 
-// 默认ID作为后备 (仍保留作为最后的FallBack)
+// 默认ID作为后备（更新为新的有效 ID）
 const DEFAULT_IDS = {
-    products: 'd56v4ue9olk4bpa66v00',
-    bom: 'd56vqtm9olk4bpa66vfg',
-    inventory: 'd56vcuu9olk4bpa66v3g',
-    materials: 'd56voju9olk4bpa66vcg',
+    products: 'supplychain_hd0202_product',
+    bom: 'supplychain_hd0202_bom',
+    inventory: 'supplychain_hd0202_inventory',
+    materials: 'supplychain_hd0202_material',
 };
 
 // ============================================================================
@@ -77,15 +75,19 @@ const DEFAULT_IDS = {
  */
 export async function loadProductData(): Promise<ProductRaw[]> {
     try {
-        console.log('[BOM服务] 加载产品信息...');
+        console.log('[BOM服务] 📦 开始加载产品信息...');
+        const startTime = Date.now();
         const objectTypeId = getObjectTypeId('product', DEFAULT_IDS.products);
+        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
 
         // 使用 Ontology API
+        console.log('[BOM服务] 正在请求产品数据...');
         const response = await ontologyApi.queryObjectInstances(objectTypeId, {
             limit: 100,
             include_type_info: true,
             include_logic_params: false
         });
+        console.log('[BOM服务] 产品数据请求完成');
 
         const rawData = response.entries || [];
 
@@ -103,10 +105,11 @@ export async function loadProductData(): Promise<ProductRaw[]> {
             amount: parseFloat(item.amount) || 0,
         }));
 
-        console.log('[BOM服务] 加载产品:', products.length, '个');
+        const elapsed = Date.now() - startTime;
+        console.log(`[BOM服务] ✅ 加载产品完成: ${products.length} 个 (耗时 ${elapsed}ms)`);
         return products;
     } catch (error) {
-        console.error('[BOM服务] 加载产品信息失败:', error);
+        console.error('[BOM服务] ❌ 加载产品信息失败:', error);
         return [];
     }
 }
@@ -116,23 +119,29 @@ export async function loadProductData(): Promise<ProductRaw[]> {
  */
 export async function loadBOMData(): Promise<BOMRaw[]> {
     try {
-        console.log('[BOM服务] 加载BOM数据...');
+        console.log('[BOM服务] 📋 开始加载BOM数据...');
+        const startTime = Date.now();
         const objectTypeId = getObjectTypeId('bom', DEFAULT_IDS.bom);
+        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
+
         // 使用 Ontology API
         let response;
         try {
+            console.log('[BOM服务] 正在请求BOM数据 (limit=5000)...');
             response = await ontologyApi.queryObjectInstances(objectTypeId, {
                 limit: 5000,
                 include_type_info: true,
                 include_logic_params: false
             });
+            console.log('[BOM服务] BOM数据请求完成');
         } catch (firstError) {
-            console.warn('[BOM服务] BOM数据加载失败，尝试缩减规模回退...', firstError);
+            console.warn('[BOM服务] ⚠️ BOM数据加载失败，尝试缩减规模回退 (limit=1000)...', firstError);
             response = await ontologyApi.queryObjectInstances(objectTypeId, {
                 limit: 1000,
                 include_type_info: false,
                 include_logic_params: false
             });
+            console.log('[BOM服务] BOM数据回退请求完成');
         }
 
         const rawData = response.entries || [];
@@ -142,6 +151,7 @@ export async function loadBOMData(): Promise<BOMRaw[]> {
             return [];
         }
 
+        console.log('[BOM服务] 正在转换BOM数据格式...');
         const boms = rawData.map((item: any) => ({
             bom_number: item.bom_number || '',
             parent_code: String(item.parent_code || '').trim(),
@@ -155,10 +165,11 @@ export async function loadBOMData(): Promise<BOMRaw[]> {
             alternative_part: String(item.alternative_part ?? ''),
         }));
 
-        console.log('[BOM服务] 加载BOM:', boms.length, '条');
+        const elapsed = Date.now() - startTime;
+        console.log(`[BOM服务] ✅ 加载BOM完成: ${boms.length} 条 (耗时 ${elapsed}ms)`);
         return boms;
     } catch (error) {
-        console.error('[BOM服务] 加载BOM数据失败:', error);
+        console.error('[BOM服务] ❌ 加载BOM数据失败:', error);
         return [];
     }
 }
@@ -168,27 +179,68 @@ export async function loadBOMData(): Promise<BOMRaw[]> {
  */
 export async function loadMaterialData(): Promise<Map<string, { name: string; unitPrice: number }>> {
     try {
-        console.log('[BOM服务] 加载物料信息...');
+        console.log('[BOM服务] 🔧 开始加载物料信息...');
+        const startTime = Date.now();
         const materialMap = new Map<string, { name: string; unitPrice: number }>();
         const objectTypeId = getObjectTypeId('material', DEFAULT_IDS.materials);
+        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
 
         // 分页获取所有物料，使用 search_after
         const limit = 1000;
         let searchAfter: any[] | undefined = undefined;
         let count = 0;
 
+        const maxRetries = 3;
+        const pageTimeout = 120000; // 2分钟每页
+
         while (true) {
-            console.log(`[BOM服务] 加载物料分页: count=${count}, limit=${limit}`);
-            const response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                limit,
-                search_after: searchAfter,
-                include_type_info: true,
-                include_logic_params: false
-            });
+            const pageNum = Math.floor(count / limit) + 1;
+            console.log(`[BOM服务] 📄 加载物料分页 ${pageNum}: 已加载=${count}, 本次limit=${limit}`);
+            const pageStartTime = Date.now();
+
+            let response;
+            let retryCount = 0;
+
+            // 添加重试机制
+            while (retryCount < maxRetries) {
+                try {
+                    // 创建超时控制
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), pageTimeout);
+
+                    response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                        limit,
+                        search_after: searchAfter,
+                        include_type_info: true,
+                        include_logic_params: false
+                    });
+
+                    clearTimeout(timeoutId);
+                    break; // 成功则跳出重试循环
+                } catch (error) {
+                    retryCount++;
+                    console.warn(`[BOM服务] 分页 ${pageNum} 请求失败 (尝试 ${retryCount}/${maxRetries}):`, error);
+
+                    if (retryCount >= maxRetries) {
+                        throw new Error(`物料数据加载失败（分页 ${pageNum}），已重试 ${maxRetries} 次: ${error}`);
+                    }
+
+                    // 等待后重试（指数退避）
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
+            }
+
+            if (!response) {
+                throw new Error(`物料数据加载失败（分页 ${pageNum}）`);
+            }
+
+            const pageElapsed = Date.now() - pageStartTime;
+            console.log(`[BOM服务] 分页 ${pageNum} 请求完成 (耗时 ${pageElapsed}ms)`);
 
             const rawData = response.entries || [];
 
             if (!Array.isArray(rawData) || rawData.length === 0) {
+                console.log('[BOM服务] 物料分页加载结束（无更多数据）');
                 break;
             }
 
@@ -210,17 +262,20 @@ export async function loadMaterialData(): Promise<Map<string, { name: string; un
             });
 
             count += rawData.length;
+            console.log(`[BOM服务] 分页 ${pageNum} 处理完成，累计: ${count} 条，物料表: ${materialMap.size} 条`);
 
             if (rawData.length < limit || !response.search_after) {
+                console.log('[BOM服务] 物料分页加载结束（达到最后一页）');
                 break;
             }
             searchAfter = response.search_after;
         }
 
-        console.log('[BOM服务] 加载物料信息完成, 共:', materialMap.size, '条');
+        const elapsed = Date.now() - startTime;
+        console.log(`[BOM服务] ✅ 加载物料信息完成: ${materialMap.size} 条 (总记录 ${count} 条, 耗时 ${elapsed}ms)`);
         return materialMap;
     } catch (error) {
-        console.error('[BOM服务] 加载物料信息失败:', error);
+        console.error('[BOM服务] ❌ 加载物料信息失败:', error);
         return new Map();
     }
 }
@@ -230,22 +285,61 @@ export async function loadMaterialData(): Promise<Map<string, { name: string; un
  */
 export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
     try {
-        console.log('[BOM服务] 加载库存数据...');
+        console.log('[BOM服务] 📦 开始加载库存数据...');
+        const startTime = Date.now();
         const objectTypeId = getObjectTypeId('inventory', DEFAULT_IDS.inventory);
+        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
 
         const limit = 2000;
         let searchAfter: any[] | undefined = undefined;
         const rawDataAll: any[] = [];
         let count = 0;
+        const maxRetries = 3;
+        const pageTimeout = 120000; // 2分钟每页
 
         while (true) {
-            console.log(`[BOM服务] 加载库存分页: count=${count}, limit=${limit}`);
-            const response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                limit,
-                search_after: searchAfter,
-                include_type_info: true,
-                include_logic_params: false
-            });
+            const pageNum = Math.floor(count / limit) + 1;
+            console.log(`[BOM服务] 📄 加载库存分页 ${pageNum}: 已加载=${count}, 本次limit=${limit}`);
+            const pageStartTime = Date.now();
+
+            let response;
+            let retryCount = 0;
+
+            // 添加重试机制
+            while (retryCount < maxRetries) {
+                try {
+                    // 创建超时控制
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), pageTimeout);
+
+                    response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                        limit,
+                        search_after: searchAfter,
+                        include_type_info: true,
+                        include_logic_params: false
+                    });
+
+                    clearTimeout(timeoutId);
+                    break; // 成功则跳出重试循环
+                } catch (error) {
+                    retryCount++;
+                    console.warn(`[BOM服务] 分页 ${pageNum} 请求失败 (尝试 ${retryCount}/${maxRetries}):`, error);
+
+                    if (retryCount >= maxRetries) {
+                        throw new Error(`库存数据加载失败（分页 ${pageNum}），已重试 ${maxRetries} 次: ${error}`);
+                    }
+
+                    // 等待后重试（指数退避）
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+                }
+            }
+
+            if (!response) {
+                throw new Error(`库存数据加载失败（分页 ${pageNum}）`);
+            }
+
+            const pageElapsed = Date.now() - pageStartTime;
+            console.log(`[BOM服务] 分页 ${pageNum} 请求完成 (耗时 ${pageElapsed}ms)`);
 
             const pageData = response.entries || [];
 
@@ -255,13 +349,16 @@ export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
 
             rawDataAll.push(...pageData);
             count += pageData.length;
+            console.log(`[BOM服务] 分页 ${pageNum} 数据添加完成，累计: ${count} 条`);
 
             if (pageData.length < limit || !response.search_after) {
+                console.log('[BOM服务] 库存分页加载结束');
                 break;
             }
             searchAfter = response.search_after;
         }
 
+        console.log('[BOM服务] 开始处理库存数据...');
         const rawData = rawDataAll;
 
         if (!Array.isArray(rawData)) {
@@ -277,6 +374,7 @@ export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
             }
         }
 
+        console.log('[BOM服务] 正在转换库存数据格式...');
         const inventoryMap = new Map<string, InventoryRaw>();
 
         rawData.forEach((item: any) => {
@@ -313,7 +411,8 @@ export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
             }
         });
 
-        console.log('[BOM服务] 加载库存:', inventoryMap.size, '条');
+        const elapsed = Date.now() - startTime;
+        console.log(`[BOM服务] ✅ 加载库存完成: ${inventoryMap.size} 条唯一物料 (总记录 ${count} 条, 耗时 ${elapsed}ms)`);
 
         // 打印几条样例数据验证
         let sampleCount = 0;
@@ -326,7 +425,7 @@ export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
 
         return inventoryMap;
     } catch (error) {
-        console.error('[BOM服务] 加载库存数据失败:', error);
+        console.error('[BOM服务] ❌ 加载库存数据失败:', error);
         return new Map();
     }
 }
@@ -608,7 +707,8 @@ export function buildProductBOMTree(
     inventoryMap: Map<string, InventoryRaw>,
     substitutionRelations: Map<string, SubstitutionRelation>
 ): ProductBOMTree {
-    console.log(`[BOM服务] 构建产品BOM树: ${productCode}`);
+    const startTime = Date.now();
+    console.log(`[BOM服务] 🌲 构建产品BOM树: ${productCode} - ${productName}`);
 
     // 构建根节点
     const children = buildBOMTreeRecursive(
@@ -666,11 +766,13 @@ export function buildProductBOMTree(
 
     children.forEach(countStats);
 
-    console.log(`[BOM服务] 产品 ${productCode} BOM统计:`, {
+    const elapsed = Date.now() - startTime;
+    console.log(`[BOM服务] ✅ 产品 ${productCode} BOM统计:`, {
         totalMaterials,
         totalInventoryValue: totalInventoryValue.toFixed(2),
         stagnantCount,
         insufficientCount,
+        耗时: `${elapsed}ms`
     });
 
     return {
@@ -693,28 +795,31 @@ export function buildProductBOMTree(
  * 加载所有数据并构建BOM树
  */
 export async function loadAllBOMTrees(): Promise<ProductBOMTree[]> {
-    console.log('[BOM服务] 开始加载所有BOM树...');
+    console.log('='.repeat(60));
+    console.log('[BOM服务] 🚀 开始加载所有BOM树...');
+    console.log('='.repeat(60));
+    const totalStartTime = Date.now();
 
     // 串行加载数据,避免同时发起多个请求导致服务器500错误
-    console.log('[BOM服务] 1/4 加载产品数据...');
+    console.log('[BOM服务] 📋 步骤 1/4: 加载产品数据...');
     const products = await loadProductData();
 
-    console.log('[BOM服务] 2/4 加载BOM数据...');
+    console.log('[BOM服务] 📋 步骤 2/4: 加载BOM数据...');
     const bomData = await loadBOMData();
 
-    console.log('[BOM服务] 3/4 加载库存数据...');
+    console.log('[BOM服务] 📋 步骤 3/4: 加载库存数据...');
     const inventoryMap = await loadInventoryData();
 
-    console.log('[BOM服务] 4/4 加载物料数据...');
+    console.log('[BOM服务] 📋 步骤 4/4: 加载物料数据...');
     const materialMap = await loadMaterialData();
 
     if (products.length === 0 || bomData.length === 0) {
-        console.error('[BOM服务] 数据加载失败，无法构建BOM树');
+        console.error('[BOM服务] ❌ 数据加载失败，无法构建BOM树');
         return [];
     }
 
     // 将物料单价合并到库存数据中，并确保所有物料都在inventoryMap中（即使库存为0）
-    console.log('[BOM服务] 合并物料单价到库存数据...');
+    console.log('[BOM服务] 🔄 合并物料单价到库存数据...');
     let priceMatchCount = 0;
 
     // 1. 先更新已有的库存记录
@@ -757,19 +862,21 @@ export async function loadAllBOMTrees(): Promise<ProductBOMTree[]> {
     }
 
     // 解析替代料关系
+    console.log('[BOM服务] 🔍 解析替代料关系...');
     const substitutionRelations = parseSubstitutionRelations(bomData);
 
-    // 过滤目标产品
-    const targetProducts = products.filter(p =>
-        TARGET_PRODUCTS.includes(p.product_code)
-    );
+    // 使用所有产品
+    const targetProducts = products;
 
-    console.log('[BOM服务] 目标产品:', targetProducts.map(p => p.product_code));
+    console.log('[BOM服务] 🎯 加载所有产品:', targetProducts.length, '个');
 
     // 构建每个产品的BOM树
+    console.log('[BOM服务] 🌳 开始构建产品BOM树...');
     const bomTrees: ProductBOMTree[] = [];
 
-    for (const product of targetProducts) {
+    for (let i = 0; i < targetProducts.length; i++) {
+        const product = targetProducts[i];
+        console.log(`[BOM服务] 构建进度 (${i + 1}/${targetProducts.length}): ${product.product_code}`);
         const tree = buildProductBOMTree(
             product.product_code,
             product.product_name,
@@ -781,14 +888,14 @@ export async function loadAllBOMTrees(): Promise<ProductBOMTree[]> {
         bomTrees.push(tree);
     }
 
-    // 按产品编码顺序排序
-    bomTrees.sort((a, b) => {
-        const indexA = TARGET_PRODUCTS.indexOf(a.productCode);
-        const indexB = TARGET_PRODUCTS.indexOf(b.productCode);
-        return indexA - indexB;
-    });
+    // 按产品编码字母顺序排序
+    console.log('[BOM服务] 📊 排序BOM树...');
+    bomTrees.sort((a, b) => a.productCode.localeCompare(b.productCode));
 
-    console.log('[BOM服务] 完成加载:', bomTrees.length, '个产品BOM树');
+    const totalElapsed = Date.now() - totalStartTime;
+    console.log('='.repeat(60));
+    console.log(`[BOM服务] ✅ 完成加载: ${bomTrees.length} 个产品BOM树 (总耗时 ${(totalElapsed / 1000).toFixed(2)}s)`);
+    console.log('='.repeat(60));
     return bomTrees;
 }
 
@@ -1091,7 +1198,8 @@ function generateAnalysisConclusions(
  * 计算产品的生产分析
  */
 export function calculateProductionAnalysis(productBOM: ProductBOMTree): ProductionAnalysisResult {
-    console.log(`[生产分析] 开始分析产品: ${productBOM.productCode}`);
+    const startTime = Date.now();
+    console.log(`[生产分析] 📊 开始分析产品: ${productBOM.productCode} - ${productBOM.productName}`);
 
     // 0. 我们需要原始的 InventoryMap 来进行计算
     // 由于 buildProductBOMTree 已经把 inventory 嵌入到 node 中了，
@@ -1148,6 +1256,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
     }
 
     // 3. 计算各点成本
+    console.log(`[生产分析] 计算成本曲线 (${productionQuantities.length} 个数据点)...`);
     const replenishmentCosts: number[] = [];
     const newProcurementCosts: number[] = [];
     const newStagnantValues: number[] = []; // 新增
@@ -1156,7 +1265,12 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
     const newProcurementCostsWithMOQ: number[] = [];
     const newStagnantValuesWithMOQ: number[] = []; // 新增
 
-    for (const qty of productionQuantities) {
+    for (let i = 0; i < productionQuantities.length; i++) {
+        const qty = productionQuantities[i];
+        if (i % 5 === 0) {
+            console.log(`[生产分析] 计算进度: ${i + 1}/${productionQuantities.length} (数量=${qty})`);
+        }
+
         const resNoMOQ = calculateMRPCosts(productBOM.productCode, productBOM, qty, inventoryMap, false);
         replenishmentCosts.push(resNoMOQ.replenishmentCost);
         newProcurementCosts.push(resNoMOQ.newProcurementCost);
@@ -1167,6 +1281,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         newProcurementCostsWithMOQ.push(resWithMOQ.newProcurementCost);
         newStagnantValuesWithMOQ.push(resWithMOQ.newStagnantCost);
     }
+    console.log('[生产分析] 成本曲线计算完成');
 
     // 4. 找交叉点 (无MOQ情况)
     let crossPointQuantity = 0;
@@ -1206,6 +1321,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         .reduce((sum, m) => sum + m.stockValue, 0);
 
     // 7. 结论 - 包含斜率和极差分析
+    console.log('[生产分析] 生成分析结论...');
     const conclusions = generateAnalysisConclusions(
         maxProducible,
         crossPointQuantity,
@@ -1215,6 +1331,9 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         newProcurementCosts,
         productionQuantities
     );
+
+    const elapsed = Date.now() - startTime;
+    console.log(`[生产分析] ✅ 分析完成 (耗时 ${(elapsed / 1000).toFixed(2)}s)`);
 
     return {
         productCode: productBOM.productCode,

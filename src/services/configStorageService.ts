@@ -9,7 +9,7 @@ import {
     ApiConfigType,
     type ApiConfigCollection,
     type KnowledgeNetworkConfig,
-    type DataViewConfig,
+    type OntologyObjectConfig,
     type MetricModelConfig,
     type AgentConfig,
     type WorkflowConfig,
@@ -40,15 +40,21 @@ class ConfigStorageService {
             const stored = localStorage.getItem(this.storageKey);
 
             if (!stored) {
-                console.log('[ConfigStorage] No stored configuration found, using defaults');
-                return this.getDefaultConfig();
+                console.log('[ConfigStorage] No stored configuration found, initializing with defaults');
+                const defaultConfig = this.getDefaultConfig();
+                this.saveConfig(defaultConfig);
+                return defaultConfig;
             }
 
             const parsed = JSON.parse(stored) as ApiConfigCollection;
+            let needsSave = false;
 
             // Validate version compatibility & Migrate
             if (parsed.version !== this.version) {
                 console.warn(`[ConfigStorage] Version mismatch: stored=${parsed.version}, current=${this.version}`);
+
+                // Cache default config to avoid multiple calls
+                const defaults = this.getDefaultConfig();
 
                 // MIGRATION 1.0.1: Remove legacy 'Default Supply Chain Network'
                 if (parsed.knowledgeNetworks) {
@@ -61,12 +67,12 @@ class ConfigStorageService {
 
                     if (beforeCount > afterCount) {
                         console.log('[ConfigStorage] Migration: Removed legacy knowledge networks');
+                        needsSave = true;
                     }
                 }
 
                 // MIGRATION 1.0.2: Add missing workflow configurations
                 if (parsed.version === '1.0.1' || !parsed.version) {
-                    const defaults = this.getDefaultConfig();
                     const existingWorkflowIds = new Set(parsed.workflows?.map(wf => wf.id) || []);
 
                     // Add missing workflows from defaults
@@ -74,9 +80,11 @@ class ConfigStorageService {
                     if (missingWorkflows.length > 0) {
                         parsed.workflows = [...(parsed.workflows || []), ...missingWorkflows];
                         console.log(`[ConfigStorage] Migration: Added ${missingWorkflows.length} missing workflow(s):`, missingWorkflows.map(wf => wf.name));
+                        needsSave = true;
                     }
                 }
 
+                // MIGRATION: Remove mock metric models
                 if (parsed.metricModels) {
                     const beforeCount = parsed.metricModels.length;
                     parsed.metricModels = parsed.metricModels.filter(mm =>
@@ -86,20 +94,22 @@ class ConfigStorageService {
 
                     if (beforeCount > afterCount) {
                         console.log(`[ConfigStorage] Migration: Removed ${beforeCount - afterCount} mock metric model(s)`);
+                        needsSave = true;
                     }
                 }
 
+                // MIGRATION: Add new metric models if missing
+                if (!parsed.metricModels) {
+                    parsed.metricModels = [];
+                }
 
-                // MIGRATION 1.0.9: Add new metric models and remove DIP/Huida references
-                if (!parsed.metricModels) parsed.metricModels = [];
-                const defaults = this.getDefaultConfig();
                 const newMetricIds = [
-                    'mm_product_inventory_optimization_dip',
-                    'mm_material_inventory_optimization_dip',
-                    'mm_order_demand_dip',
-                    'mm_product_count_dip',
-                    'mm_material_count_dip',
-                    'mm_supplier_count_dip'
+                    'mm_product_inventory_optimization',
+                    'mm_material_inventory_optimization',
+                    'mm_order_demand',
+                    'mm_product_count',
+                    'mm_material_count',
+                    'mm_supplier_count'
                 ];
 
                 let addedMetrics = 0;
@@ -116,73 +126,30 @@ class ConfigStorageService {
 
                 if (addedMetrics > 0) {
                     console.log(`[ConfigStorage] Migration: Added ${addedMetrics} new metric models`);
+                    needsSave = true;
                 }
 
-                // Remove legacy Huida/DIP references from IDs
-                const idMappings: Record<string, string> = {
-                    // Knowledge Networks
-                    'kn_huida': 'kn_supply_chain_brain',
-                    'kn_dip': 'kn_supply_chain_brain',
-                    // Ontology Objects
-                    'oo_supplier_huida': 'oo_supplier',
-                    'oo_supplier_dip': 'oo_supplier',
-                    'oo_supplier_evaluation_huida': 'oo_supplier_evaluation',
-                    'oo_supplier_evaluation_dip': 'oo_supplier_evaluation',
-                    'oo_material_huida': 'oo_material',
-                    'oo_material_dip': 'oo_material',
-                    'oo_product_huida': 'oo_product',
-                    'oo_product_dip': 'oo_product',
-                    'oo_bom_huida': 'oo_bom',
-                    'oo_bom_dip': 'oo_bom',
-                    'oo_inventory_huida': 'oo_inventory',
-                    'oo_inventory_dip': 'oo_inventory',
-                    'oo_sales_order_huida': 'oo_sales_order',
-                    'oo_sales_order_dip': 'oo_sales_order',
-                    'oo_customer_huida': 'oo_customer',
-                    'oo_customer_dip': 'oo_customer',
-                    'oo_production_plan_huida': 'oo_production_plan',
-                    'oo_production_plan_dip': 'oo_production_plan',
-                    // Metric Models
-                    'mm_order_demand_huida': 'mm_order_demand',
-                    'mm_order_demand_dip': 'mm_order_demand',
-                    'mm_product_count_huida': 'mm_product_count',
-                    'mm_product_count_dip': 'mm_product_count',
-                    'mm_material_count_huida': 'mm_material_count',
-                    'mm_material_count_dip': 'mm_material_count',
-                    'mm_supplier_count_huida': 'mm_supplier_count',
-                    'mm_supplier_count_dip': 'mm_supplier_count',
-                    'mm_product_inventory_optimization_huida': 'mm_product_inventory_optimization',
-                    'mm_product_inventory_optimization_dip': 'mm_product_inventory_optimization',
-                    'mm_material_inventory_optimization_huida': 'mm_material_inventory_optimization',
-                    'mm_material_inventory_optimization_dip': 'mm_material_inventory_optimization'
-                };
-
-                let migratedCount = 0;
-                (['knowledgeNetworks', 'ontologyObjects', 'metricModels'] as const).forEach(key => {
-                    if (parsed[key]) {
-                        parsed[key]!.forEach((item: any) => {
-                            if (idMappings[item.id]) {
-                                item.id = idMappings[item.id];
-                                migratedCount++;
-                            }
-                        });
-                    }
-                });
-
-                if (migratedCount > 0) {
-                    console.log(`[ConfigStorage] Migration 1.0.9: Removed DIP/Huida references from ${migratedCount} configuration IDs`);
+                // Ensure ontologyObjects exists
+                if (!parsed.ontologyObjects) {
+                    parsed.ontologyObjects = defaults.ontologyObjects;
+                    needsSave = true;
                 }
 
-                // Update version and save immediately
+                // Update version
                 parsed.version = this.version;
+                needsSave = true;
+            }
+
+            // Save migrated configuration if needed
+            if (needsSave) {
                 this.saveConfig(parsed);
+                console.log('[ConfigStorage] Migrated configuration saved');
             }
 
             console.log('[ConfigStorage] Loaded configuration:', {
                 version: parsed.version,
                 knowledgeNetworks: parsed.knowledgeNetworks.length,
                 ontologyObjects: parsed.ontologyObjects?.length || 0,
-                dataViews: parsed.dataViews?.length || 0,
                 metricModels: parsed.metricModels.length,
                 agents: parsed.agents.length,
                 workflows: parsed.workflows.length
@@ -208,6 +175,10 @@ class ConfigStorageService {
 
             console.log('[ConfigStorage] Configuration saved successfully');
         } catch (error) {
+            if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+                console.error('[ConfigStorage] Storage quota exceeded');
+                throw new Error('Storage quota exceeded. Please free up space or reduce configuration size.');
+            }
             console.error('[ConfigStorage] Failed to save configuration:', error);
             throw new Error('Failed to save configuration to localStorage');
         }
@@ -228,7 +199,7 @@ class ConfigStorageService {
                 exportData.knowledgeNetworks = [];
             }
             if (!types.has(ApiConfigType.ONTOLOGY_OBJECT)) {
-                exportData.dataViews = [];
+                exportData.ontologyObjects = [];
             }
             if (!types.has(ApiConfigType.METRIC_MODEL)) {
                 exportData.metricModels = [];
@@ -244,7 +215,7 @@ class ConfigStorageService {
         // Filter by enabled status
         if (!options?.includeDisabled) {
             exportData.knowledgeNetworks = exportData.knowledgeNetworks?.filter(c => c.enabled) || [];
-            exportData.dataViews = exportData.dataViews?.filter(c => c.enabled) || [];
+            exportData.ontologyObjects = exportData.ontologyObjects?.filter(c => c.enabled) || [];
             exportData.metricModels = exportData.metricModels?.filter(c => c.enabled) || [];
             exportData.agents = exportData.agents?.filter(c => c.enabled) || [];
             exportData.workflows = exportData.workflows?.filter(c => c.enabled) || [];
@@ -257,7 +228,7 @@ class ConfigStorageService {
                 config.tags?.some(tag => tagSet.has(tag)) || false;
 
             exportData.knowledgeNetworks = exportData.knowledgeNetworks?.filter(hasMatchingTag) || [];
-            exportData.dataViews = exportData.dataViews?.filter(hasMatchingTag) || [];
+            exportData.ontologyObjects = exportData.ontologyObjects?.filter(hasMatchingTag) || [];
             exportData.metricModels = exportData.metricModels?.filter(hasMatchingTag) || [];
             exportData.agents = exportData.agents?.filter(hasMatchingTag) || [];
             exportData.workflows = exportData.workflows?.filter(hasMatchingTag) || [];
@@ -285,7 +256,7 @@ class ConfigStorageService {
                 const existing = this.loadConfig();
                 const merged: ApiConfigCollection = {
                     knowledgeNetworks: this.mergeConfigs(existing.knowledgeNetworks, imported.knowledgeNetworks || []),
-                    dataViews: this.mergeConfigs(existing.dataViews || [], imported.dataViews || []),
+                    ontologyObjects: this.mergeConfigs(existing.ontologyObjects, imported.ontologyObjects || []),
                     metricModels: this.mergeConfigs(existing.metricModels, imported.metricModels || []),
                     agents: this.mergeConfigs(existing.agents, imported.agents || []),
                     workflows: this.mergeConfigs(existing.workflows, imported.workflows || []),
@@ -297,7 +268,7 @@ class ConfigStorageService {
                 // Replace entire configuration
                 const newConfig: ApiConfigCollection = {
                     knowledgeNetworks: imported.knowledgeNetworks || [],
-                    dataViews: imported.dataViews || [],
+                    ontologyObjects: imported.ontologyObjects || [],
                     metricModels: imported.metricModels || [],
                     agents: imported.agents || [],
                     workflows: imported.workflows || [],
@@ -337,14 +308,7 @@ class ConfigStorageService {
     validateConfig(config: Partial<ApiConfigCollection>): ConfigValidationError[] {
         const errors: ConfigValidationError[] = [];
 
-        // Check version
-        if (config.version && config.version !== this.version) {
-            errors.push({
-                field: 'version',
-                message: `Version mismatch: expected ${this.version}, got ${config.version}`,
-                code: 'VERSION_MISMATCH'
-            });
-        }
+        // Note: Version checking removed as loadConfig handles migration automatically
 
         // Validate each configuration array
         if (config.knowledgeNetworks) {
@@ -359,11 +323,11 @@ class ConfigStorageService {
             });
         }
 
-        if (config.dataViews) {
-            config.dataViews.forEach((dv, index) => {
-                if (!dv.id || !dv.name || !dv.objectTypeId || !dv.entityType) {
+        if (config.ontologyObjects) {
+            config.ontologyObjects.forEach((oo, index) => {
+                if (!oo.id || !oo.name || !oo.objectTypeId || !oo.entityType) {
                     errors.push({
-                        field: `dataViews[${index}]`,
+                        field: `ontologyObjects[${index}]`,
                         message: 'Missing required fields: id, name, objectTypeId, or entityType',
                         code: 'MISSING_REQUIRED_FIELD'
                     });
@@ -446,7 +410,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '供应商对象',
                     description: '供应链大脑 - 供应商对象类型',
-                    objectTypeId: 'd5700je9olk4bpa66vkg',
+                    objectTypeId: 'supplychain_hd0202_supplier',
                     entityType: 'supplier',
                     enabled: true,
                     tags: ['supplier'],
@@ -470,7 +434,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '物料对象',
                     description: '供应链大脑 - 物料对象类型',
-                    objectTypeId: 'd56voju9olk4bpa66vcg', // Updated to new ID
+                    objectTypeId: 'supplychain_hd0202_material',
                     entityType: 'material',
                     enabled: true,
                     tags: ['material'],
@@ -482,7 +446,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '产品对象',
                     description: '供应链大脑 - 产品对象类型',
-                    objectTypeId: 'd56v4ue9olk4bpa66v00', // Updated to new ID
+                    objectTypeId: 'supplychain_hd0202_product',
                     entityType: 'product',
                     enabled: true,
                     tags: ['product'],
@@ -494,7 +458,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: 'BOM对象',
                     description: '供应链大脑 - BOM对象类型',
-                    objectTypeId: 'd56vqtm9olk4bpa66vfg', // Updated to new ID
+                    objectTypeId: 'supplychain_hd0202_bom',
                     entityType: 'bom',
                     enabled: true,
                     tags: ['bom'],
@@ -506,7 +470,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '库存对象',
                     description: '供应链大脑 - 库存对象类型',
-                    objectTypeId: 'd56vcuu9olk4bpa66v3g', // Updated to new ID
+                    objectTypeId: 'supplychain_hd0202_inventory',
                     entityType: 'inventory',
                     enabled: true,
                     tags: ['inventory'],
@@ -518,8 +482,8 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '销售订单对象',
                     description: '供应链大脑 - 销售订单对象类型',
-                    objectTypeId: 'd56vh169olk4bpa66v80',
-                    entityType: 'sales_order',
+                    objectTypeId: 'supplychain_hd0202_salesorder',
+                    entityType: 'order',  // 修改为 'order' 以匹配用户配置
                     enabled: true,
                     tags: ['order', 'sales', 'cockpit'],
                     createdAt: now,
@@ -530,7 +494,7 @@ class ConfigStorageService {
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '客户对象',
                     description: '供应链大脑 - 客户对象类型',
-                    objectTypeId: '2004376134633480194',
+                    objectTypeId: 'supplychain_hd0202_customer',
                     entityType: 'customer',
                     enabled: true,
                     tags: ['customer'],
@@ -541,11 +505,11 @@ class ConfigStorageService {
                     id: 'oo_production_plan',
                     type: ApiConfigType.ONTOLOGY_OBJECT,
                     name: '工厂生产计划',
-                    description: '供应链大脑 - 生产计划对象类型',
-                    objectTypeId: 'd5704qm9olk4bpa66vp0',
-                    entityType: 'production_plan',
+                    description: '供应链大脑 - 生产计划对象类型 (MPS)',
+                    objectTypeId: 'supplychain_hd0202_mps',
+                    entityType: 'salesorder',  // 修改为 'salesorder' 以匹配用户配置
                     enabled: true,
-                    tags: ['production', 'plan'],
+                    tags: ['production', 'plan', 'mps'],
                     createdAt: now,
                     updatedAt: now
                 }

@@ -7,23 +7,39 @@
 
 import { ontologyApi } from '../api';
 import type { QueryCondition } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
 
 // ============================================================================
-// Object Type ID Constants (from mpsDataService.ts)
+// Object Type ID Getters (从配置中心动态获取)
 // ============================================================================
 
-// Object Type IDs (from mpsDataService.ts)
-// ============================================================================
+/**
+ * 从配置中心获取对象类型 ID
+ * @param entityType - 实体类型（如 'product', 'supplier', 等）
+ * @param entityName - 实体名称（用于错误提示）
+ */
+function getObjectTypeId(entityType: string, entityName: string): string {
+    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+    if (!config || !config.enabled) {
+        console.error(`[OntologyDataService] 未找到启用的${entityName}对象配置 (entity_type: ${entityType})`);
+        throw new Error(`${entityName}对象未配置，请在配置中心添加 ${entityType} 类型的业务对象配置`);
+    }
+    console.log(`[OntologyDataService] 使用配置的${entityName}对象类型ID: ${config.objectTypeId}`);
+    return config.objectTypeId;
+}
 
-const OBJECT_TYPE_IDS = {
-    PRODUCT: 'd56v4ue9olk4bpa66v00',           // 产品对象类型
-    SUPPLIER: 'd5700je9olk4bpa66vkg',          // 供应商对象类型 (Confirmed)
-    MATERIAL: 'd56voju9olk4bpa66vcg',          // 物料对象类型
-    BOM: 'd56vqtm9olk4bpa66vfg',              // 产品BOM对象类型
-    INVENTORY: 'd56vcuu9olk4bpa66v3g',         // 库存对象类型
-    SALES_ORDER: 'd56vh169olk4bpa66v80',       // 销售订单对象类型
-    // Note: Supplier performance and procurement events are not available in current knowledge network
-} as const;
+/**
+ * 动态获取对象类型 ID
+ * 注意：entityType 必须与配置中心的配置匹配
+ */
+const getObjectTypeIds = () => ({
+    PRODUCT: getObjectTypeId('product', '产品'),           // supplychain_hd0202_product
+    SUPPLIER: getObjectTypeId('supplier', '供应商'),       // supplychain_hd0202_supplier
+    MATERIAL: getObjectTypeId('material', '物料'),         // supplychain_hd0202_material
+    BOM: getObjectTypeId('bom', 'BOM'),                    // supplychain_hd0202_bom
+    INVENTORY: getObjectTypeId('inventory', '库存'),       // supplychain_hd0202_inventory
+    SALES_ORDER: getObjectTypeId('order', '销售订单'),     // supplychain_hd0202_salesorder (注意：entityType 是 'order')
+});
 
 // ============================================================================
 // In-memory cache
@@ -79,7 +95,7 @@ export async function loadProductEntities(forceReload: boolean = false): Promise
     console.log('[OntologyDataService] Loading product entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().PRODUCT, {
             limit: 10000,
             need_total: false,
         });
@@ -123,7 +139,7 @@ export async function loadBOMEvents(forceReload: boolean = false): Promise<any[]
     console.log('[OntologyDataService] Loading BOM events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().BOM, {
             limit: 10000,
             need_total: false,
         });
@@ -168,7 +184,7 @@ export async function loadInventoryEvents(forceReload: boolean = false): Promise
     console.log('[OntologyDataService] Loading inventory events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().INVENTORY, {
             limit: 10000,
             need_total: false,
         });
@@ -216,7 +232,7 @@ export async function loadSupplierEntities(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading supplier entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.SUPPLIER, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().SUPPLIER, {
             limit: 10000,
             need_total: false,
         });
@@ -287,7 +303,7 @@ export async function loadSalesOrderEvents(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading sales order events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.SALES_ORDER, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().SALES_ORDER, {
             limit: 10000,
             need_total: false,
         });
@@ -334,7 +350,7 @@ export async function loadMaterialEntities(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading material entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MATERIAL, {
+        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().MATERIAL, {
             limit: 10000,
             need_total: false,
         });

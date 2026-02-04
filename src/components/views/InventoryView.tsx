@@ -11,7 +11,7 @@ import { calculateAllProductInventory } from '../../services/productInventoryCal
 // Sub-components
 import { ProductInventoryPanel } from './inventory/ProductInventoryPanel';
 import { MaterialInventoryPanel } from './inventory/MaterialInventoryPanel';
-import { FunctionCardSection } from './inventory/FunctionCardSection';
+
 import { BOMInventoryTree } from './inventory/BOMInventoryTree';
 import InventoryAIAnalysisPanel from './inventory/InventoryAIAnalysisPanel';
 
@@ -42,7 +42,7 @@ interface Props {
 
 const InventoryView = ({ toggleCopilot }: Props) => {
   // Modal state for BOM Inventory Tree
-  const [showBOMInventoryTree, setShowBOMInventoryTree] = useState(false);
+
 
 
 
@@ -177,9 +177,7 @@ const InventoryView = ({ toggleCopilot }: Props) => {
 
   const isActuallyLoading = loading || materialInventoryLoading;
 
-  const handleOpenReverseCalculator = () => {
-    setShowBOMInventoryTree(true);
-  };
+
 
   return (
     <div className="space-y-6">
@@ -187,9 +185,10 @@ const InventoryView = ({ toggleCopilot }: Props) => {
         <h1 className="text-2xl font-bold text-slate-800">库存优化</h1>
       </div>
 
-      <FunctionCardSection
-        onOpenReverseCalculator={handleOpenReverseCalculator}
-      />
+      {/* Inverse Calculator - Embedded directly */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-100 h-[700px] overflow-hidden">
+        <BOMInventoryTree isEmbedded={true} />
+      </div>
 
       {/* AI Analysis Panel - Full Width */}
       <InventoryAIAnalysisPanel />
@@ -207,14 +206,7 @@ const InventoryView = ({ toggleCopilot }: Props) => {
         </div>
       </div>
 
-      {/* Modals */}
-      {showBOMInventoryTree && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[85vh] overflow-hidden animate-in fade-in zoom-in duration-200">
-            <BOMInventoryTree onClose={() => setShowBOMInventoryTree(false)} />
-          </div>
-        </div>
-      )}
+
 
       {toggleCopilot && (
         <button

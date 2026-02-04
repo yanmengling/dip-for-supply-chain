@@ -191,9 +191,6 @@ export interface OntologyObjectConfig extends BaseApiConfig {
     sortDirection?: 'asc' | 'desc';
 }
 
-/** Legacy alias for backward compatibility */
-export type DataViewConfig = OntologyObjectConfig;
-
 // ============================================================================
 // Metric Model Configuration
 // ============================================================================
@@ -311,11 +308,8 @@ export interface ApiConfigCollection {
     /** Knowledge Network configurations */
     knowledgeNetworks: KnowledgeNetworkConfig[];
 
-    /** Ontology Object configurations (Primary) */
-    ontologyObjects?: OntologyObjectConfig[];
-
-    /** Data View configurations (Legacy) */
-    dataViews?: DataViewConfig[];
+    /** Ontology Object configurations */
+    ontologyObjects: OntologyObjectConfig[];
 
     /** Metric Model configurations */
     metricModels: MetricModelConfig[];
@@ -342,7 +336,7 @@ export interface ApiConfigCollection {
  */
 export type AnyApiConfig =
     | KnowledgeNetworkConfig
-    | DataViewConfig
+    | OntologyObjectConfig
     | MetricModelConfig
     | AgentConfig
     | WorkflowConfig;

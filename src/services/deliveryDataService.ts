@@ -11,24 +11,22 @@ import { ApiConfigType, type OntologyObjectConfig } from '../types/apiConfig';
 import type { DeliveryOrder } from '../types/ontology';
 
 // Default Object type ID for delivery orders (sales orders) - used as fallback
-const DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID = 'd56vh169olk4bpa66v80'; // Sales Order object type
+const DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID = 'supplychain_hd0202_salesorder'; // 更新为新的有效 ID
 
 /**
  * Get delivery order object type ID from configuration
  * @returns Object type ID for sales orders
  */
 function getDeliveryOrderObjectTypeId(): string {
-  const configs = apiConfigService.getConfigsByType(ApiConfigType.ONTOLOGY_OBJECT) as OntologyObjectConfig[];
-  const salesOrderConfig = configs.find(c =>
-    c.enabled && c.tags?.some(tag => tag === 'sales' || tag === 'order' || tag === 'cockpit')
-  );
+  // 优先使用 entityType 查找（更精确）
+  const config = apiConfigService.getOntologyObjectByEntityType('order');
 
-  if (salesOrderConfig) {
-    console.log(`[DeliveryDataService] Using configured object type ID: ${salesOrderConfig.objectTypeId} (${salesOrderConfig.name})`);
-    return salesOrderConfig.objectTypeId;
+  if (config && config.enabled) {
+    console.log(`[DeliveryDataService] Using configured object type ID: ${config.objectTypeId} (${config.name})`);
+    return config.objectTypeId;
   }
 
-  console.warn(`[DeliveryDataService] No sales order configuration found, using default: ${DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID}`);
+  console.warn(`[DeliveryDataService] No sales order configuration found (entityType: 'order'), using default: ${DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID}`);
   return DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID;
 }
 

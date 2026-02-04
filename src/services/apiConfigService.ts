@@ -12,7 +12,6 @@ import {
     type AnyApiConfig,
     type KnowledgeNetworkConfig,
     type OntologyObjectConfig,
-    type DataViewConfig,
     type MetricModelConfig,
     type AgentConfig,
     type WorkflowConfig,
@@ -20,7 +19,6 @@ import {
 } from '../types/apiConfig';
 import { configStorageService } from './configStorageService';
 import { ontologyApi } from '../api/ontologyApi';
-import { dataViewApi } from '../api/dataViewApi';
 import { metricModelApi } from '../api/metricModelApi';
 import { getKnowledgeNetworkId, setKnowledgeNetworkId, getAuthHeaders, getApiConfig, updateApiConfig } from '../config/apiConfig';
 import { dipEnvironmentService } from './dipEnvironmentService';
@@ -53,7 +51,7 @@ class ApiConfigService {
             case ApiConfigType.KNOWLEDGE_NETWORK:
                 return all.knowledgeNetworks as unknown as T[];
             case ApiConfigType.ONTOLOGY_OBJECT:
-                return (all.ontologyObjects || all.dataViews || []) as unknown as T[];
+                return all.ontologyObjects as unknown as T[];
             case ApiConfigType.METRIC_MODEL:
                 return all.metricModels as unknown as T[];
             case ApiConfigType.AGENT:
@@ -79,21 +77,12 @@ class ApiConfigService {
         const all = this.getAllConfigs();
         const allConfigs: AnyApiConfig[] = [
             ...all.knowledgeNetworks,
-            ...(all.ontologyObjects || []),
-            ...(all.dataViews || []),
+            ...all.ontologyObjects,
             ...all.metricModels,
             ...all.agents,
             ...all.workflows
         ];
         return allConfigs.find(c => c.id === id) || null;
-    }
-
-    /**
-     * Get configuration by entity type (for Data Views)
-     * @deprecated Use getOntologyObjectByEntityType instead
-     */
-    getDataViewByEntityType(entityType: string): DataViewConfig | null {
-        return this.getOntologyObjectByEntityType(entityType);
     }
 
     /**
@@ -131,9 +120,6 @@ class ApiConfigService {
                 this.updateConfigArray(all.knowledgeNetworks, config as KnowledgeNetworkConfig);
                 break;
             case ApiConfigType.ONTOLOGY_OBJECT:
-                if (!all.ontologyObjects) {
-                    all.ontologyObjects = [];
-                }
                 this.updateConfigArray(all.ontologyObjects, config as OntologyObjectConfig);
                 break;
             case ApiConfigType.METRIC_MODEL:
@@ -233,12 +219,7 @@ class ApiConfigService {
         const initialCount = this.getTotalConfigCount(all);
 
         all.knowledgeNetworks = all.knowledgeNetworks.filter(c => c.id !== id);
-        if (all.ontologyObjects) {
-            all.ontologyObjects = all.ontologyObjects.filter(c => c.id !== id);
-        }
-        if (all.dataViews) {
-            all.dataViews = all.dataViews.filter(c => c.id !== id);
-        }
+        all.ontologyObjects = all.ontologyObjects.filter(c => c.id !== id);
         all.metricModels = all.metricModels.filter(c => c.id !== id);
         all.agents = all.agents.filter(c => c.id !== id);
         all.workflows = all.workflows.filter(c => c.id !== id);
@@ -633,8 +614,7 @@ class ApiConfigService {
     private getTotalConfigCount(collection: ApiConfigCollection): number {
         return (
             collection.knowledgeNetworks.length +
-            (collection.ontologyObjects?.length || 0) +
-            (collection.dataViews?.length || 0) +
+            collection.ontologyObjects.length +
             collection.metricModels.length +
             collection.agents.length +
             collection.workflows.length
@@ -653,8 +633,7 @@ class ApiConfigService {
         } else {
             configs = [
                 ...all.knowledgeNetworks,
-                ...(all.ontologyObjects || []),
-                ...(all.dataViews || []),
+                ...all.ontologyObjects,
                 ...all.metricModels,
                 ...all.agents,
                 ...all.workflows
@@ -680,8 +659,7 @@ class ApiConfigService {
         const all = this.getAllConfigs();
         const allConfigs: AnyApiConfig[] = [
             ...all.knowledgeNetworks,
-            ...(all.ontologyObjects || []),
-            ...(all.dataViews || []),
+            ...all.ontologyObjects,
             ...all.metricModels,
             ...all.agents,
             ...all.workflows

@@ -49,12 +49,35 @@ export interface ProductionStats {
 
 import { ontologyApi } from '../api/ontologyApi';
 import type { QueryCondition } from '../api/ontologyApi';
+import { apiConfigService } from './apiConfigService';
 
-// 生产计划对象类型 ID
-const PRODUCTION_PLAN_OBJECT_TYPE_ID = 'd5704qm9olk4bpa66vp0';
+/**
+ * 获取生产计划对象类型 ID（从配置中心获取）
+ * 注意：使用 entityType: 'salesorder' 对应工厂生产计划 (supplychain_hd0202_mps)
+ */
+function getProductionPlanObjectTypeId(): string {
+    const config = apiConfigService.getOntologyObjectByEntityType('salesorder');
+    if (!config || !config.enabled) {
+        console.error('[ProductionPlanCalculator] 未找到启用的生产计划对象配置 (entity_type: salesorder)');
+        throw new Error('生产计划对象未配置，请在配置中心添加 salesorder 类型的业务对象配置');
+    }
+    console.log(`[ProductionPlanCalculator] 使用配置的生产计划对象类型ID: ${config.objectTypeId}`);
+    return config.objectTypeId;
+}
 
-// 销售订单对象类型 ID
-const SALES_ORDER_OBJECT_TYPE_ID = 'd56vh169olk4bpa66v80';
+/**
+ * 获取销售订单对象类型 ID（从配置中心获取）
+ * 注意：使用 entityType: 'order' 对应销售订单 (supplychain_hd0202_salesorder)
+ */
+function getSalesOrderObjectTypeId(): string {
+    const config = apiConfigService.getOntologyObjectByEntityType('order');
+    if (!config || !config.enabled) {
+        console.error('[ProductionPlanCalculator] 未找到启用的销售订单对象配置 (entity_type: order)');
+        throw new Error('销售订单对象未配置，请在配置中心添加 order 类型的业务对象配置');
+    }
+    console.log(`[ProductionPlanCalculator] 使用配置的销售订单对象类型ID: ${config.objectTypeId}`);
+    return config.objectTypeId;
+}
 
 /**
  * 加载生产计划数据 (通过 Ontology API)
@@ -63,7 +86,10 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
     try {
         console.log('[ProductionPlanCalculator] 通过 Ontology API 加载生产计划数据...');
 
-        const response = await ontologyApi.queryObjectInstances(PRODUCTION_PLAN_OBJECT_TYPE_ID, {
+        // 从配置中心获取生产计划对象类型 ID
+        const productionPlanObjectTypeId = getProductionPlanObjectTypeId();
+
+        const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
             limit: 1000,
         });
 
@@ -168,6 +194,9 @@ export function groupByPriority(plans: ProductionPlan[]): PriorityAnalysis[] {
  */
 export async function getPendingOrderQuantity(productCode: string): Promise<number> {
     try {
+        // 从配置中心获取销售订单对象类型 ID
+        const salesOrderObjectTypeId = getSalesOrderObjectTypeId();
+
         const condition: QueryCondition = {
             operation: '==',
             field: 'product_code',
@@ -175,7 +204,7 @@ export async function getPendingOrderQuantity(productCode: string): Promise<numb
             value_from: 'const',
         };
 
-        const response = await ontologyApi.queryObjectInstances(SALES_ORDER_OBJECT_TYPE_ID, {
+        const response = await ontologyApi.queryObjectInstances(salesOrderObjectTypeId, {
             condition,
             limit: 1000,
         });

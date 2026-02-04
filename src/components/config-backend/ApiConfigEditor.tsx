@@ -12,7 +12,6 @@ import type {
     ApiConfigType,
     KnowledgeNetworkConfig,
     OntologyObjectConfig,
-    DataViewConfig,
     MetricModelConfig,
     AgentConfig,
     WorkflowConfig,
@@ -298,8 +297,12 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 <option value="bom">BOM</option>
                                 <option value="inventory">库存</option>
                                 <option value="order">订单</option>
-                                <option value="customer">客户</option>
-                                <option value="warehouse">仓库</option>
+                                <option value="productdemand">产品需求计划</option>
+                                <option value="materialdemand">物料需求计划</option>
+                                <option value="factoryproductionplan">工厂生产计划</option>
+                                <option value="purchaserequest">采购申请单</option>
+                                <option value="purchaseorder">采购订单</option>
+                                <option value="demandforecast">需求预测</option>
                             </select>
                         </FormField>
                     </>

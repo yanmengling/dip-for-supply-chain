@@ -21,7 +21,7 @@ import {
     Calculator
 } from 'lucide-react';
 import type { BOMNode, ProductBOMTree, ProductionAnalysisResult } from '../../../services/bomInventoryService';
-import { loadAllBOMTrees, TARGET_PRODUCTS, calculateProductionAnalysis } from '../../../services/bomInventoryService';
+import { loadAllBOMTrees, calculateProductionAnalysis } from '../../../services/bomInventoryService';
 import { ProductionAnalysisPanel } from './ProductionAnalysisPanel';
 import { GlobalOptimizationPanel } from './GlobalOptimizationPanel';
 import { Globe } from 'lucide-react';
@@ -31,7 +31,8 @@ import { Globe } from 'lucide-react';
 // ============================================================================
 
 interface BOMInventoryTreeProps {
-    onClose: () => void;
+    onClose?: () => void;
+    isEmbedded?: boolean;
 }
 
 interface TreeNodeProps {
@@ -259,11 +260,11 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 // 主组件
 // ============================================================================
 
-export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose }) => {
+export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isEmbedded = false }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [bomTrees, setBomTrees] = useState<ProductBOMTree[]>([]);
-    const [selectedProduct, setSelectedProduct] = useState<string>(TARGET_PRODUCTS[0]);
+    const [selectedProduct, setSelectedProduct] = useState<string>('');
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
 
     // 阶段二：Tab切换和生产分析状态
@@ -276,16 +277,41 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose }) =
             try {
                 setLoading(true);
                 setError(null);
+                console.log('[BOMInventoryTree] 开始加载数据...');
+
                 const trees = await loadAllBOMTrees();
+
+                if (!trees || trees.length === 0) {
+                    console.warn('[BOMInventoryTree] 未加载到任何BOM树数据');
+                    setError('未找到产品数据，请检查API配置');
+                    return;
+                }
+
+                console.log('[BOMInventoryTree] 成功加载', trees.length, '个产品BOM树');
                 setBomTrees(trees);
 
-                // 默认展开根节点
+                // 默认展开根节点并选中第一个产品
                 if (trees.length > 0) {
                     setExpandedNodes(new Set([trees[0].rootNode.code]));
+                    setSelectedProduct(trees[0].productCode);
                 }
             } catch (err) {
                 console.error('[BOMInventoryTree] 加载失败:', err);
-                setError('加载数据失败，请稍后重试');
+
+                // 根据错误类型提供更详细的提示
+                let errorMsg = '加载数据失败';
+                if (err instanceof Error) {
+                    if (err.message.includes('timeout') || err.message.includes('ETIMEDOUT')) {
+                        errorMsg = '网络请求超时，请检查网络连接或稍后重试';
+                    } else if (err.message.includes('ECONNRESET')) {
+                        errorMsg = '网络连接被重置，请检查网络配置或稍后重试';
+                    } else if (err.message.includes('401') || err.message.includes('403')) {
+                        errorMsg = 'API认证失败，请检查Token配置';
+                    } else {
+                        errorMsg = `加载失败: ${err.message}`;
+                    }
+                }
+                setError(errorMsg);
             } finally {
                 setLoading(false);
             }
@@ -377,22 +403,24 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose }) =
                         <p className="text-sm text-slate-500 font-medium">BOM库存分析</p>
                     </div>
                 </div>
-                <button
-                    onClick={onClose}
-                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
-                >
-                    <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                </button>
+                {!isEmbedded && onClose && (
+                    <button
+                        onClick={onClose}
+                        className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+                    >
+                        <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                )}
             </div>
 
 
             {/* 产品选择 Tab - 只在非全局模式显示 */}
             {activeTab !== 'global' && (
                 <div className="flex-shrink-0 flex items-center gap-2 px-6 py-3 border-b border-slate-200 bg-white">
-                    {TARGET_PRODUCTS.map(code => {
-                        const tree = bomTrees.find(t => t.productCode === code);
+                    {bomTrees.map(tree => {
+                        const code = tree.productCode;
                         const isSelected = selectedProduct === code;
 
                         return (
@@ -556,8 +584,12 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose }) =
                     <div className="flex-1 overflow-auto">
                         {loading ? (
                             <div className="flex flex-col items-center justify-center h-64 gap-4">
-                                <Loader2 size={32} className="text-indigo-500 animate-spin" />
-                                <p className="text-slate-500">正在加载BOM数据...</p>
+                                <Loader2 size={40} className="text-indigo-500 animate-spin" />
+                                <div className="text-center">
+                                    <p className="text-lg font-medium text-slate-700">正在加载BOM数据...</p>
+                                    <p className="text-sm text-slate-500 mt-2">这可能需要1-2分钟，请耐心等待</p>
+                                    <p className="text-xs text-slate-400 mt-1">提示: 打开浏览器控制台 (F12) 查看详细进度</p>
+                                </div>
                             </div>
                         ) : error ? (
                             <div className="flex flex-col items-center justify-center h-64 gap-4">

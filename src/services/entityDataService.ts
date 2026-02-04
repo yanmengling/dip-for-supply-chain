@@ -11,23 +11,21 @@ import { getCurrentEnvironment } from '../config/apiConfig';
 import type { EntityType } from '../types/ontology';
 
 /**
- * 默认ID后备 (与智能计算和BOM服务保持一致)
+ * 默认ID后备（更新为新的有效 ID）
  */
 const DEFAULT_IDS: Record<string, string> = {
-  supplier: 'd5700je9olk4bpa66vkg',
-  material: 'd56voju9olk4bpa66vcg',
-  product: 'd56v4ue9olk4bpa66v00',
-  // Default if not configured
-  order: 'd56vh169olk4bpa66v80',
-
+  supplier: 'supplychain_hd0202_supplier',
+  material: 'supplychain_hd0202_material',
+  product: 'supplychain_hd0202_product',
+  order: 'supplychain_hd0202_salesorder',
 };
 
 /**
  * 获取对象类型ID
  */
 const getObjectTypeId = (type: string): string => {
-  const entityType = type === 'order' ? 'sales_order' : type;
-  const config = apiConfigService.getOntologyObjectByEntityType(entityType);
+  // 直接使用传入的 type 作为 entityType（不再转换 order -> sales_order）
+  const config = apiConfigService.getOntologyObjectByEntityType(type);
   if (config?.objectTypeId) {
     return config.objectTypeId;
   }

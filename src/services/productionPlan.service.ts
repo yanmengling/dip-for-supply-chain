@@ -25,8 +25,26 @@ export const productionPlanKeys = {
   detail: (orderNumber: string) => [...productionPlanKeys.details(), orderNumber] as const,
 };
 
-// Object Type ID for Production Plan (from original file)
-const PRODUCT_PLAN_OT_ID = 'd5704qm9olk4bpa66vp0';
+import { apiConfigService } from './apiConfigService';
+
+// Default Object Type ID for Production Plan - used as fallback
+const DEFAULT_PRODUCTION_PLAN_OT_ID = 'supplychain_hd0202_mps';
+
+/**
+ * 获取生产计划对象类型 ID（从配置中心获取）
+ */
+function getProductionPlanObjectTypeId(): string {
+  // 注意：使用 'salesorder' 作为 entityType，匹配用户配置（工厂生产计划）
+  const config = apiConfigService.getOntologyObjectByEntityType('salesorder');
+
+  if (config && config.enabled) {
+    console.log(`[ProductionPlanService] Using configured object type ID: ${config.objectTypeId}`);
+    return config.objectTypeId;
+  }
+
+  console.warn(`[ProductionPlanService] No production plan configuration found (entityType: 'salesorder'), using default: ${DEFAULT_PRODUCTION_PLAN_OT_ID}`);
+  return DEFAULT_PRODUCTION_PLAN_OT_ID;
+}
 
 // ===================================
 // React Query Hooks
@@ -45,7 +63,7 @@ export function useProductionPlans(
       // Using ontologyApi to query object instances
       // Maps ProductionPlan type properties manually if needed, or assumes matches.
       const response = await ontologyApi.queryObjectInstances(
-        PRODUCT_PLAN_OT_ID,
+        getProductionPlanObjectTypeId(),
         {
           condition: conditions ? { operation: 'and', sub_conditions: conditions } : undefined,
           limit: 1000
@@ -77,7 +95,7 @@ export function useProductionPlan(
       if (!orderNumber) return null;
 
       const response = await ontologyApi.queryObjectInstances(
-        PRODUCT_PLAN_OT_ID,
+        getProductionPlanObjectTypeId(),
         {
           condition: { field: 'order_number', operation: '==', value: orderNumber },
           limit: 1

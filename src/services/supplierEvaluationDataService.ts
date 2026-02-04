@@ -11,24 +11,28 @@ import { ApiConfigType, type OntologyObjectConfig } from '../types/apiConfig';
 import type { Supplier360Scorecard } from '../types/ontology';
 
 // Default Object type ID for supplier evaluations - used as fallback
-const DEFAULT_SUPPLIER_EVALUATION_OBJECT_TYPE_ID = 'd5700je9olk4bpa66vkg';
+const DEFAULT_SUPPLIER_EVALUATION_OBJECT_TYPE_ID = 'supplychain_hd0202_supplier'; // 更新为新的有效 ID
 
 /**
  * Get supplier evaluation object type ID from configuration
  * @returns Object type ID for supplier evaluations
  */
 function getSupplierEvaluationObjectTypeId(): string {
-    const configs = apiConfigService.getConfigsByType(ApiConfigType.ONTOLOGY_OBJECT) as OntologyObjectConfig[];
-    const supplierEvalConfig = configs.find(c =>
-        c.enabled && c.entityType === 'supplier_evaluation'
-    );
+    // 首先尝试查找 supplier_evaluation 配置
+    let config = apiConfigService.getOntologyObjectByEntityType('supplier_evaluation');
 
-    if (supplierEvalConfig) {
-        console.log(`[SupplierEvaluationDataService] Using configured object type ID: ${supplierEvalConfig.objectTypeId} (${supplierEvalConfig.name})`);
-        return supplierEvalConfig.objectTypeId;
+    // 如果找不到，回退到 supplier 配置
+    if (!config || !config.enabled) {
+        console.log(`[SupplierEvaluationDataService] No supplier_evaluation config found, trying 'supplier'...`);
+        config = apiConfigService.getOntologyObjectByEntityType('supplier');
     }
 
-    console.warn(`[SupplierEvaluationDataService] No supplier evaluation configuration found, using default: ${DEFAULT_SUPPLIER_EVALUATION_OBJECT_TYPE_ID}`);
+    if (config && config.enabled) {
+        console.log(`[SupplierEvaluationDataService] Using configured object type ID: ${config.objectTypeId} (${config.name})`);
+        return config.objectTypeId;
+    }
+
+    console.warn(`[SupplierEvaluationDataService] No supplier configuration found, using default: ${DEFAULT_SUPPLIER_EVALUATION_OBJECT_TYPE_ID}`);
     return DEFAULT_SUPPLIER_EVALUATION_OBJECT_TYPE_ID;
 }
 

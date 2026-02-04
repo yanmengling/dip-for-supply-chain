@@ -28,6 +28,19 @@ export default defineConfig({
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
+        timeout: 180000, // 3分钟超时
+        proxyTimeout: 180000, // 代理超时3分钟
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.error('[Vite Proxy] Ontology Query 代理错误:', err.message);
+          });
+          proxy.on('proxyReq', (_proxyReq, req, _res) => {
+            console.log('[Vite Proxy] Ontology Query 请求:', req.url);
+          });
+          proxy.on('proxyRes', (proxyRes, _req, _res) => {
+            console.log('[Vite Proxy] Ontology Query 响应:', proxyRes.statusCode);
+          });
+        },
       },
       // DIP API 代理 - agent-app
       '/api/agent-app': {

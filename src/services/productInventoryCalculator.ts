@@ -103,12 +103,12 @@ function parseCSV<T>(csvText: string): T[] {
 }
 
 /**
- * 默认ID后备 (与智能计算和BOM服务保持一致)
+ * 默认ID后备（更新为新的有效 ID）
  */
 const DEFAULT_IDS: Record<string, string> = {
-    bom: 'd56vqtm9olk4bpa66vfg',
-    inventory: 'd56vcuu9olk4bpa66v3g',
-    product: 'd56v4ue9olk4bpa66v00'
+    bom: 'supplychain_hd0202_bom',
+    inventory: 'supplychain_hd0202_inventory',
+    product: 'supplychain_hd0202_product'
 };
 
 /**

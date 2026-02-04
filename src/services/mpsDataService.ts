@@ -27,11 +27,11 @@ import { apiConfigService } from './apiConfigService';
 // ============================================================================
 
 const getObjectTypeIds = () => ({
-  PRODUCT: apiConfigService.getOntologyObjectId('oo_product') || '',           // 产品对象类型
-  PRODUCTION_PLAN: apiConfigService.getOntologyObjectId('oo_production_plan') || 'd5704qm9olk4bpa66vp0',   // 工厂生产计划对象类型
-  INVENTORY: apiConfigService.getOntologyObjectId('oo_inventory') || '',         // 库存对象类型
-  SALES_ORDER: apiConfigService.getOntologyObjectId('oo_sales_order') || '',       // 销售订单对象类型
-  BOM: apiConfigService.getOntologyObjectId('oo_bom') || '',              // 产品BOM对象类型
+  PRODUCT: apiConfigService.getOntologyObjectId('oo_product') || 'supplychain_hd0202_product',           // 产品对象类型
+  PRODUCTION_PLAN: apiConfigService.getOntologyObjectId('oo_production_plan') || 'supplychain_hd0202_mps',   // 工厂生产计划对象类型
+  INVENTORY: apiConfigService.getOntologyObjectId('oo_inventory') || 'supplychain_hd0202_inventory',         // 库存对象类型
+  SALES_ORDER: apiConfigService.getOntologyObjectId('oo_sales_order') || 'supplychain_hd0202_salesorder',       // 销售订单对象类型
+  BOM: apiConfigService.getOntologyObjectId('oo_bom') || 'supplychain_hd0202_bom',              // 产品BOM对象类型
 });
 
 // Note: DataSourceResponse type removed - all functions now return direct data from API

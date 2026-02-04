@@ -245,7 +245,6 @@ export interface ProductSupplyAnalysis {
 // ============================================================================
 
 import { ontologyApi } from '../api/ontologyApi';
-import { dataViewApi } from '../api/dataViewApi';
 import { apiConfigService } from './apiConfigService';
 
 /**
@@ -261,7 +260,6 @@ const getObjectTypeId = (entityType: string, defaultId: string) => {
     return defaultId;
 };
 
-const isNumericId = (id: string) => /^\d+$/.test(id);
 const normalizeCode = (value: unknown): string => {
     if (value === null || value === undefined) return '';
     return String(value)
@@ -276,15 +274,14 @@ const isAlternativeBomRow = (bom: BOMInfo): boolean => {
     return alt.includes('替代');
 };
 
-// 默认ID作为后备
+// 默认ID作为后备（更新为新的有效 ID）
 const DEFAULT_IDS = {
-    product: 'd56v4ue9olk4bpa66v00',
-    sales_order: 'd56vh169olk4bpa66v80',
-    // Supplier ObjectTypeId from HD供应链业务知识网络.json
-    supplier: 'd5700je9olk4bpa66vkg',
-    bom: 'd56vqtm9olk4bpa66vfg',
-    inventory: 'd56vcuu9olk4bpa66v3g',
-    material: 'd56voju9olk4bpa66vcg',
+    product: 'supplychain_hd0202_product',
+    order: 'supplychain_hd0202_salesorder',  // 注意：key 改为 order，与 entityType 保持一致
+    supplier: 'supplychain_hd0202_supplier',
+    bom: 'supplychain_hd0202_bom',
+    inventory: 'supplychain_hd0202_inventory',
+    material: 'supplychain_hd0202_material',
 };
 
 /**
@@ -304,30 +301,13 @@ async function loadDataFromOntology<T>(entityType: string, defaultId: string, ma
                 include_logic_params: false
             });
         } catch (firstError) {
-            if (isNumericId(objectTypeId)) {
-                console.warn(`[API] ${name} Ontology对象查询失败，检测到数字ID，尝试以数据视图(DataView)方式回退...`, firstError);
-                try {
-                    const dv = await dataViewApi.queryDataView(objectTypeId, { limit: 5000 });
-                    response = { entries: dv.entries || [] };
-                    console.log(`[API] ${name} DataView 回退加载成功`);
-                } catch (dvError) {
-                    console.warn(`[API] ${name} DataView 回退也失败，尝试简化Ontology请求回退...`, dvError);
-                    response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                        limit: 500,
-                        include_type_info: false,
-                        include_logic_params: false
-                    });
-                    console.log(`[API] ${name} 简化Ontology 回退加载成功`);
-                }
-            } else {
-                console.warn(`[API] ${name} 加载失败，尝试简化请求回退...`, firstError);
-                response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                    limit: 500,
-                    include_type_info: false,
-                    include_logic_params: false
-                });
-                console.log(`[API] ${name} 回退加载成功`);
-            }
+            console.warn(`[API] ${name} 加载失败，尝试简化请求回退...`, firstError);
+            response = await ontologyApi.queryObjectInstances(objectTypeId, {
+                limit: 500,
+                include_type_info: false,
+                include_logic_params: false
+            });
+            console.log(`[API] ${name} 回退加载成功`);
         }
 
         const rawData = response.entries || [];
@@ -371,10 +351,10 @@ export async function loadProductInfo(): Promise<ProductInfo[]> {
  */
 /**
  * 加载订单信息 (API)
- * ID: 2004376134629285890
+ * ObjectTypeId: supplychain_hd0202_salesorder
  */
 export async function loadOrderInfo(): Promise<OrderInfo[]> {
-    return loadDataFromOntology('sales_order', DEFAULT_IDS.sales_order, (item) => ({
+    return loadDataFromOntology('order', DEFAULT_IDS.order, (item) => ({
         id: parseInt(item.id) || 0,
         signing_date: item.signing_date || '',
         contract_number: item.contract_number || '',

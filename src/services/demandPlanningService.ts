@@ -6,7 +6,6 @@
  */
 
 import { ontologyApi, type ObjectType, type LogicProperty } from '../api/ontologyApi';
-import { dataViewApi } from '../api/dataViewApi';
 import { metricModelApi, type MetricQueryRequest, type MetricFilter } from '../api/metricModelApi';
 import { httpClient } from '../api/httpClient';
 import { getEnvironmentConfig } from '../config/apiConfig';
@@ -300,10 +299,10 @@ export class DemandPlanningService {
    * @returns Array of ProductSalesHistory sorted by month
    */
   async fetchProductSalesHistory(productId: string): Promise<ProductSalesHistory[]> {
-    console.log(`[DemandPlanningService] fetchProductSalesHistory for product: ${productId} (using Orders Data View)`);
+    console.log(`[DemandPlanningService] fetchProductSalesHistory for product: ${productId} (using Ontology API)`);
 
     try {
-      // Use dataViewApi.getOrders directly to fetch sales history
+      // Use Ontology API to fetch sales order history
       // This bypasses the logic_property mechanism which is currently failing on the server
       // Fields used: product_code, signing_date, signing_quantity
 
@@ -314,8 +313,9 @@ export class DemandPlanningService {
 
 
       // Fetch all orders from Ontology Object API
-      const orderConfig = apiConfigService.getOntologyObjectByEntityType('sales_order');
-      const objectTypeId = orderConfig?.objectTypeId || 'd56vh169olk4bpa66v80';
+      // 注意：使用 'order' 作为 entityType，匹配用户配置
+      const orderConfig = apiConfigService.getOntologyObjectByEntityType('order');
+      const objectTypeId = orderConfig?.objectTypeId || 'supplychain_hd0202_salesorder';
 
       console.log(`[DemandPlanningService] Fetching orders via Ontology Object: ${objectTypeId}`);
 
@@ -698,71 +698,6 @@ export class DemandPlanningService {
         return salesHistory.sort((a, b) => a.month.localeCompare(b.month));
       }
 
-      case 'data-view': {
-        // Use data view API
-        const dataViewId = data_source.id;
-
-        // Build filters from parameters
-        // Build filters from parameters
-        const filters: any[] = [];
-        const ignoredKeys = ['start', 'end', 'step', 'instant', 'start_time', 'end_time'];
-
-        for (const [key, value] of Object.entries(paramMap)) {
-          if (!ignoredKeys.includes(key) && value !== null && value !== undefined && value !== '') {
-            filters.push({
-              field: key,
-              operation: '=',
-              value: value,
-            });
-          }
-        }
-
-        // Query data view
-        const result = await dataViewApi.queryDataView<any>(dataViewId, {
-          offset: 0,
-          limit: 10000, // Get all records
-          filters: filters.length > 0 ? filters : undefined,
-        });
-
-        // Convert data view entries to ProductSalesHistory[]
-        const salesHistory: ProductSalesHistory[] = [];
-        for (const entry of result.entries) {
-          // Try to find month and quantity fields
-          // Common field names: month, date, time, quantity, amount, value, sales
-          const monthField = entry.month || entry.date || entry.time || entry.month_str;
-          const quantityField = entry.quantity || entry.amount || entry.value || entry.sales || entry.qty;
-
-          if (monthField && quantityField !== undefined) {
-            // Normalize month to YYYY-MM format
-            let month: string;
-            if (typeof monthField === 'string') {
-              // If already in YYYY-MM format
-              if (/^\d{4}-\d{2}$/.test(monthField)) {
-                month = monthField;
-              } else {
-                // Try to parse date string
-                const date = new Date(monthField);
-                if (!isNaN(date.getTime())) {
-                  month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-                } else {
-                  continue; // Skip invalid dates
-                }
-              }
-            } else {
-              continue; // Skip if month is not a string
-            }
-
-            salesHistory.push({
-              productId,
-              month,
-              quantity: typeof quantityField === 'number' ? quantityField : parseFloat(quantityField) || 0,
-            });
-          }
-        }
-
-        return salesHistory.sort((a, b) => a.month.localeCompare(b.month));
-      }
-
       case 'operator': {
         // Operator API not yet available
         // For now, throw error with helpful message
@@ -860,8 +795,14 @@ export class DemandPlanningService {
       return {};
     }
 
-    // Get orders from data view API
-    const ordersResponse = await dataViewApi.getOrders();
+    // Get order object type ID from configuration
+    const orderConfig = apiConfigService.getOntologyObjectByEntityType('order');
+    const orderObjectTypeId = orderConfig?.objectTypeId || 'supplychain_hd0202_salesorder';
+
+    // Get orders from Ontology API
+    const ordersResponse = await ontologyApi.queryObjectInstances(orderObjectTypeId, {
+      limit: 5000
+    });
 
     // Filter orders by productIds and past months
     const filteredOrders = ordersResponse.entries.filter((order: any) => {
@@ -911,8 +852,14 @@ export class DemandPlanningService {
       return {};
     }
 
-    // Get orders from data view API
-    const ordersResponse = await dataViewApi.getOrders();
+    // Get order object type ID from configuration
+    const orderConfig = apiConfigService.getOntologyObjectByEntityType('order');
+    const orderObjectTypeId = orderConfig?.objectTypeId || 'supplychain_hd0202_salesorder';
+
+    // Get orders from Ontology API
+    const ordersResponse = await ontologyApi.queryObjectInstances(orderObjectTypeId, {
+      limit: 5000
+    });
 
     // Filter orders by productIds, future months, and confirmed status
     const filteredOrders = ordersResponse.entries.filter((order: any) => {
