@@ -121,6 +121,16 @@ class HttpClient {
         errorCode = errorData.error_code || errorData.code;
       }
       errorDetails = errorData;
+
+      // 🔍 添加详细错误日志以便调试
+      console.error('[HTTP Client] ❌ API 错误详情:', {
+        url: response.url,
+        status: response.status,
+        statusText: response.statusText,
+        errorCode,
+        errorMessage,
+        errorDetails: JSON.stringify(errorDetails).substring(0, 500)
+      });
     } catch {
       // JSON 解析失败，使用默认错误信息
     }

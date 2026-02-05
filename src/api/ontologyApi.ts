@@ -370,7 +370,7 @@ class OntologyApiClient {
   /**
    * 获取当前知识网络ID（动态从配置获取）
    */
-  private getKnowledgeNetworkId(): string {
+  public getKnowledgeNetworkId(): string {
     return getKnowledgeNetworkId();
   }
 
@@ -738,8 +738,9 @@ class OntologyApiClient {
     console.log(`[OntologyAPI] queryObjectPropertyValues - Requesting URL: ${url}`);
     console.log(`[OntologyAPI] queryObjectPropertyValues - Request Payload:`, JSON.stringify(options, null, 2));
 
-    // Use standard post method
-    const response = await httpClient.post<ObjectPropertyValuesResponse>(url, options);
+    // 🔑 关键修复：使用 postAsGet 方法以添加 X-HTTP-Method-Override: GET 请求头
+    // 根据 ADP API 文档，/properties 端点需要此请求头（"重载方法"）
+    const response = await httpClient.postAsGet<ObjectPropertyValuesResponse>(url, options);
 
     console.log(`[OntologyAPI] queryObjectPropertyValues - Response Data:`, JSON.stringify(response.data, null, 2));
 

@@ -39,7 +39,7 @@ interface TreeNodeProps {
     node: BOMNode;
     level: number;
     expandedNodes: Set<string>;
-    onToggleExpand: (nodeCode: string) => void;
+    onToggleExpand: (nodeId: string) => void;
 }
 
 // ============================================================================
@@ -123,7 +123,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     expandedNodes,
     onToggleExpand,
 }) => {
-    const isExpanded = expandedNodes.has(node.code);
+    const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children.length > 0 || node.substitutes.length > 0;
     const statusConfig = getStockStatusConfig(node.stockStatus);
     const StatusIcon = statusConfig.icon;
@@ -140,7 +140,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
                 >
                     {/* 展开/折叠按钮 */}
                     <button
-                        onClick={() => hasChildren && onToggleExpand(node.code)}
+                        onClick={() => hasChildren && onToggleExpand(node.id)}
                         className={`flex-shrink-0 w-5 h-5 flex items-center justify-center rounded ${hasChildren ? 'hover:bg-slate-200 cursor-pointer' : ''
                             }`}
                     >
@@ -234,7 +234,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
             {/* 子节点 */}
             {isExpanded && node.children.map((child) => (
                 <TreeNode
-                    key={child.code}
+                    key={child.id}
                     node={child}
                     level={level + 1}
                     expandedNodes={expandedNodes}
@@ -245,7 +245,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
             {/* 替代料节点 */}
             {isExpanded && node.substitutes.map((sub) => (
                 <TreeNode
-                    key={`sub-${sub.code}`}
+                    key={`sub-${sub.id}`}
                     node={sub}
                     level={level + 1}
                     expandedNodes={expandedNodes}
@@ -292,7 +292,7 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
 
                 // 默认展开根节点并选中第一个产品
                 if (trees.length > 0) {
-                    setExpandedNodes(new Set([trees[0].rootNode.code]));
+                    setExpandedNodes(new Set([trees[0].rootNode.id]));
                     setSelectedProduct(trees[0].productCode);
                 }
             } catch (err) {
@@ -330,7 +330,7 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
         setSelectedProduct(productCode);
         const tree = bomTrees.find(t => t.productCode === productCode);
         if (tree) {
-            setExpandedNodes(new Set([tree.rootNode.code]));
+            setExpandedNodes(new Set([tree.rootNode.id]));
         }
 
         // 如果当前在全局模式，切换回BOM分析模式
@@ -340,13 +340,13 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
     };
 
     // 展开/折叠节点
-    const handleToggleExpand = (nodeCode: string) => {
+    const handleToggleExpand = (nodeId: string) => {
         setExpandedNodes(prev => {
             const newSet = new Set(prev);
-            if (newSet.has(nodeCode)) {
-                newSet.delete(nodeCode);
+            if (newSet.has(nodeId)) {
+                newSet.delete(nodeId);
             } else {
-                newSet.add(nodeCode);
+                newSet.add(nodeId);
             }
             return newSet;
         });
@@ -358,7 +358,7 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
 
         const allCodes = new Set<string>();
         const collectCodes = (node: BOMNode) => {
-            allCodes.add(node.code);
+            allCodes.add(node.id);
             node.children.forEach(collectCodes);
         };
         collectCodes(currentTree.rootNode);
@@ -368,7 +368,7 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
     // 折叠全部
     const handleCollapseAll = () => {
         if (!currentTree) return;
-        setExpandedNodes(new Set([currentTree.rootNode.code]));
+        setExpandedNodes(new Set([currentTree.rootNode.id]));
     };
 
     // 切换Tab

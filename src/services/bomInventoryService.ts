@@ -1,9 +1,9 @@
 /**
  * BOM库存分析服务
  *
- * 负责加载产品、BOM、库存、物料数据，构建BOM树，解析替代料关系
+ * 负责加载产品、BOM、库存、物料数据，构建BOM树，解析替代料关??
  *
- * 数据源: 通过 Ontology API 动态加载，对象类型 ID 从配置服务获取
+ * 数据?? 通过 Ontology API 动态加载，对象类型 ID 从配置服务获??
  * - 产品信息 (product)
  * - 产品BOM信息 (bom)
  * - 库存信息 (inventory)
@@ -17,30 +17,17 @@
 
 import { ontologyApi } from '../api/ontologyApi';
 import { apiConfigService } from './apiConfigService';
+import { loadBOMDataViaLogicProperty, initHelpers } from './bomInventoryHelpers';
 
 /**
  * 获取对象类型ID配置
  */
-/**
- * 获取对象类型ID配置
- */
-const getObjectTypeId = (entityType: string, defaultId: string) => {
+export const getObjectTypeId = (entityType: string, defaultId: string) => {
     // 优先尝试从配置服务获取
     let configuredId = '';
 
-    switch (entityType) {
-        case 'product':
-            configuredId = apiConfigService.getOntologyObjectId('oo_product') || '';
-            break;
-        case 'bom':
-            configuredId = apiConfigService.getOntologyObjectId('oo_bom') || '';
-            break;
-        case 'inventory':
-            configuredId = apiConfigService.getOntologyObjectId('oo_inventory') || '';
-            break;
-        case 'material':
-            configuredId = apiConfigService.getOntologyObjectId('oo_material') || '';
-            break;
+    if (entityType === 'product') {
+        configuredId = apiConfigService.getOntologyObjectId('oo_product') || '';
     }
 
     if (configuredId) {
@@ -54,381 +41,24 @@ const getObjectTypeId = (entityType: string, defaultId: string) => {
         return config.objectTypeId;
     }
 
-    console.warn(`[BOM服务] 未找到配置的对象ID，使用默认值: ${entityType} -> ${defaultId}`);
+    console.warn(`[BOM服务] 未找到配置的对象ID，使用默认值 ${entityType} -> ${defaultId}`);
     return defaultId;
 };
 
 // 默认ID作为后备（更新为新的有效 ID）
-const DEFAULT_IDS = {
+export const DEFAULT_IDS = {
     products: 'supplychain_hd0202_product',
-    bom: 'supplychain_hd0202_bom',
-    inventory: 'supplychain_hd0202_inventory',
-    materials: 'supplychain_hd0202_material',
 };
+
+// 初始化帮助函数
+initHelpers({
+    getObjectTypeId,
+    DEFAULT_IDS
+});
 
 // ============================================================================
 // 数据加载
 // ============================================================================
-
-/**
- * 加载产品信息
- */
-export async function loadProductData(): Promise<ProductRaw[]> {
-    try {
-        console.log('[BOM服务] 📦 开始加载产品信息...');
-        const startTime = Date.now();
-        const objectTypeId = getObjectTypeId('product', DEFAULT_IDS.products);
-        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
-
-        // 使用 Ontology API
-        console.log('[BOM服务] 正在请求产品数据...');
-        const response = await ontologyApi.queryObjectInstances(objectTypeId, {
-            limit: 100,
-            include_type_info: true,
-            include_logic_params: false
-        });
-        console.log('[BOM服务] 产品数据请求完成');
-
-        const rawData = response.entries || [];
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] 产品数据格式异常');
-            return [];
-        }
-
-        const products = rawData.map((item: any) => ({
-            product_code: String(item.product_code || '').trim(),
-            product_name: item.product_name || '',
-            product_model: item.product_model || '',
-            product_series: item.product_series || '',
-            product_type: item.product_type || '',
-            amount: parseFloat(item.amount) || 0,
-        }));
-
-        const elapsed = Date.now() - startTime;
-        console.log(`[BOM服务] ✅ 加载产品完成: ${products.length} 个 (耗时 ${elapsed}ms)`);
-        return products;
-    } catch (error) {
-        console.error('[BOM服务] ❌ 加载产品信息失败:', error);
-        return [];
-    }
-}
-
-/**
- * 加载BOM数据
- */
-export async function loadBOMData(): Promise<BOMRaw[]> {
-    try {
-        console.log('[BOM服务] 📋 开始加载BOM数据...');
-        const startTime = Date.now();
-        const objectTypeId = getObjectTypeId('bom', DEFAULT_IDS.bom);
-        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
-
-        // 使用 Ontology API
-        let response;
-        try {
-            console.log('[BOM服务] 正在请求BOM数据 (limit=5000)...');
-            response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                limit: 5000,
-                include_type_info: true,
-                include_logic_params: false
-            });
-            console.log('[BOM服务] BOM数据请求完成');
-        } catch (firstError) {
-            console.warn('[BOM服务] ⚠️ BOM数据加载失败，尝试缩减规模回退 (limit=1000)...', firstError);
-            response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                limit: 1000,
-                include_type_info: false,
-                include_logic_params: false
-            });
-            console.log('[BOM服务] BOM数据回退请求完成');
-        }
-
-        const rawData = response.entries || [];
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] BOM数据格式异常');
-            return [];
-        }
-
-        console.log('[BOM服务] 正在转换BOM数据格式...');
-        const boms = rawData.map((item: any) => ({
-            bom_number: item.bom_number || '',
-            parent_code: String(item.parent_code || '').trim(),
-            parent_name: item.parent_name || '',
-            child_code: String(item.child_code || '').trim(),
-            child_name: item.child_name || '',
-            child_quantity: parseFloat(item.quantity || item.child_quantity) || 0,
-            unit: item.unit || '个',
-            loss_rate: parseFloat(item.loss_rate) || 0,
-            alternative_group: String(item.alternative_group ?? ''),
-            alternative_part: String(item.alternative_part ?? ''),
-        }));
-
-        const elapsed = Date.now() - startTime;
-        console.log(`[BOM服务] ✅ 加载BOM完成: ${boms.length} 条 (耗时 ${elapsed}ms)`);
-        return boms;
-    } catch (error) {
-        console.error('[BOM服务] ❌ 加载BOM数据失败:', error);
-        return [];
-    }
-}
-
-/**
- * 加载物料信息（含单价）
- */
-export async function loadMaterialData(): Promise<Map<string, { name: string; unitPrice: number }>> {
-    try {
-        console.log('[BOM服务] 🔧 开始加载物料信息...');
-        const startTime = Date.now();
-        const materialMap = new Map<string, { name: string; unitPrice: number }>();
-        const objectTypeId = getObjectTypeId('material', DEFAULT_IDS.materials);
-        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
-
-        // 分页获取所有物料，使用 search_after
-        const limit = 1000;
-        let searchAfter: any[] | undefined = undefined;
-        let count = 0;
-
-        const maxRetries = 3;
-        const pageTimeout = 120000; // 2分钟每页
-
-        while (true) {
-            const pageNum = Math.floor(count / limit) + 1;
-            console.log(`[BOM服务] 📄 加载物料分页 ${pageNum}: 已加载=${count}, 本次limit=${limit}`);
-            const pageStartTime = Date.now();
-
-            let response;
-            let retryCount = 0;
-
-            // 添加重试机制
-            while (retryCount < maxRetries) {
-                try {
-                    // 创建超时控制
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), pageTimeout);
-
-                    response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                        limit,
-                        search_after: searchAfter,
-                        include_type_info: true,
-                        include_logic_params: false
-                    });
-
-                    clearTimeout(timeoutId);
-                    break; // 成功则跳出重试循环
-                } catch (error) {
-                    retryCount++;
-                    console.warn(`[BOM服务] 分页 ${pageNum} 请求失败 (尝试 ${retryCount}/${maxRetries}):`, error);
-
-                    if (retryCount >= maxRetries) {
-                        throw new Error(`物料数据加载失败（分页 ${pageNum}），已重试 ${maxRetries} 次: ${error}`);
-                    }
-
-                    // 等待后重试（指数退避）
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
-            }
-
-            if (!response) {
-                throw new Error(`物料数据加载失败（分页 ${pageNum}）`);
-            }
-
-            const pageElapsed = Date.now() - pageStartTime;
-            console.log(`[BOM服务] 分页 ${pageNum} 请求完成 (耗时 ${pageElapsed}ms)`);
-
-            const rawData = response.entries || [];
-
-            if (!Array.isArray(rawData) || rawData.length === 0) {
-                console.log('[BOM服务] 物料分页加载结束（无更多数据）');
-                break;
-            }
-
-            rawData.forEach((item: any) => {
-                const rawCode = item.material_code || item.item_code || item.code || item['物料编码'] || '';
-                const materialCode = String(rawCode).trim();
-
-                if (materialCode && !materialMap.has(materialCode)) {
-                    const unitPrice = parseFloat(item.unit_price) ||
-                        parseFloat(item.price) ||
-                        parseFloat(item['单价']) ||
-                        parseFloat(item.standard_price) || 0;
-
-                    materialMap.set(materialCode, {
-                        name: item.material_name || item.item_name || item['物料名称'] || '',
-                        unitPrice: unitPrice,
-                    });
-                }
-            });
-
-            count += rawData.length;
-            console.log(`[BOM服务] 分页 ${pageNum} 处理完成，累计: ${count} 条，物料表: ${materialMap.size} 条`);
-
-            if (rawData.length < limit || !response.search_after) {
-                console.log('[BOM服务] 物料分页加载结束（达到最后一页）');
-                break;
-            }
-            searchAfter = response.search_after;
-        }
-
-        const elapsed = Date.now() - startTime;
-        console.log(`[BOM服务] ✅ 加载物料信息完成: ${materialMap.size} 条 (总记录 ${count} 条, 耗时 ${elapsed}ms)`);
-        return materialMap;
-    } catch (error) {
-        console.error('[BOM服务] ❌ 加载物料信息失败:', error);
-        return new Map();
-    }
-}
-
-/**
- * 加载库存数据
- */
-export async function loadInventoryData(): Promise<Map<string, InventoryRaw>> {
-    try {
-        console.log('[BOM服务] 📦 开始加载库存数据...');
-        const startTime = Date.now();
-        const objectTypeId = getObjectTypeId('inventory', DEFAULT_IDS.inventory);
-        console.log('[BOM服务] 使用对象类型ID:', objectTypeId);
-
-        const limit = 2000;
-        let searchAfter: any[] | undefined = undefined;
-        const rawDataAll: any[] = [];
-        let count = 0;
-        const maxRetries = 3;
-        const pageTimeout = 120000; // 2分钟每页
-
-        while (true) {
-            const pageNum = Math.floor(count / limit) + 1;
-            console.log(`[BOM服务] 📄 加载库存分页 ${pageNum}: 已加载=${count}, 本次limit=${limit}`);
-            const pageStartTime = Date.now();
-
-            let response;
-            let retryCount = 0;
-
-            // 添加重试机制
-            while (retryCount < maxRetries) {
-                try {
-                    // 创建超时控制
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), pageTimeout);
-
-                    response = await ontologyApi.queryObjectInstances(objectTypeId, {
-                        limit,
-                        search_after: searchAfter,
-                        include_type_info: true,
-                        include_logic_params: false
-                    });
-
-                    clearTimeout(timeoutId);
-                    break; // 成功则跳出重试循环
-                } catch (error) {
-                    retryCount++;
-                    console.warn(`[BOM服务] 分页 ${pageNum} 请求失败 (尝试 ${retryCount}/${maxRetries}):`, error);
-
-                    if (retryCount >= maxRetries) {
-                        throw new Error(`库存数据加载失败（分页 ${pageNum}），已重试 ${maxRetries} 次: ${error}`);
-                    }
-
-                    // 等待后重试（指数退避）
-                    await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-                }
-            }
-
-            if (!response) {
-                throw new Error(`库存数据加载失败（分页 ${pageNum}）`);
-            }
-
-            const pageElapsed = Date.now() - pageStartTime;
-            console.log(`[BOM服务] 分页 ${pageNum} 请求完成 (耗时 ${pageElapsed}ms)`);
-
-            const pageData = response.entries || [];
-
-            if (!Array.isArray(pageData) || pageData.length === 0) {
-                break;
-            }
-
-            rawDataAll.push(...pageData);
-            count += pageData.length;
-            console.log(`[BOM服务] 分页 ${pageNum} 数据添加完成，累计: ${count} 条`);
-
-            if (pageData.length < limit || !response.search_after) {
-                console.log('[BOM服务] 库存分页加载结束');
-                break;
-            }
-            searchAfter = response.search_after;
-        }
-
-        console.log('[BOM服务] 开始处理库存数据...');
-        const rawData = rawDataAll;
-
-        if (!Array.isArray(rawData)) {
-            console.warn('[BOM服务] 库存数据格式异常');
-            return new Map();
-        }
-
-        // 打印第一条数据的所有字段名
-        if (rawData.length > 0) {
-            console.log('[BOM服务] 库存数据字段:', Object.keys(rawData[0]));
-            if (rawData.length > 5000) {
-                console.log(`[BOM服务] 已加载大量库存数据: ${rawData.length} 条`);
-            }
-        }
-
-        console.log('[BOM服务] 正在转换库存数据格式...');
-        const inventoryMap = new Map<string, InventoryRaw>();
-
-        rawData.forEach((item: any) => {
-            // 根据实际API返回的字段名匹配物料编码
-            const rawCode = item.item_code || item.material_code || item.code ||
-                item['物料编码'] || item.material_id || '';
-            const materialCode = String(rawCode).trim();
-
-            if (materialCode) {
-                // 根据API返回的字段: inventory_data 是库存量, available_quantity 是可用量
-                const stockQuantity = parseFloat(item.inventory_data) ||
-                    parseFloat(item.available_quantity) ||
-                    parseFloat(item.quantity) ||
-                    parseFloat(item.current_stock) || 0;
-
-                // 如果同一物料有多条记录(多仓库)，累加库存
-                const existing = inventoryMap.get(materialCode);
-                const currentStock = existing ? existing.current_stock + stockQuantity : stockQuantity;
-
-                // 库龄字段: inventory_age 或 max_storage_age
-                const storageDays = parseInt(item.inventory_age) ||
-                    parseInt(item.max_storage_age) ||
-                    parseInt(item.storage_days) || 0;
-
-                inventoryMap.set(materialCode, {
-                    material_code: materialCode,
-                    material_name: item.item_name || item.material_name || item['物料名称'] || '',
-                    current_stock: currentStock,
-                    available_stock: parseFloat(item.available_quantity) || currentStock,
-                    storage_days: storageDays,
-                    unit_price: parseFloat(item.unit_price) || 0,
-                    warehouse_name: item.warehouse_name || '',
-                });
-            }
-        });
-
-        const elapsed = Date.now() - startTime;
-        console.log(`[BOM服务] ✅ 加载库存完成: ${inventoryMap.size} 条唯一物料 (总记录 ${count} 条, 耗时 ${elapsed}ms)`);
-
-        // 打印几条样例数据验证
-        let sampleCount = 0;
-        for (const [code, inv] of inventoryMap) {
-            if (sampleCount < 5) {
-                console.log(`[BOM服务] 库存样例 ${code}: 库存=${inv.current_stock}, 库龄=${inv.storage_days}天`);
-                sampleCount++;
-            }
-        }
-
-        return inventoryMap;
-    } catch (error) {
-        console.error('[BOM服务] ❌ 加载库存数据失败:', error);
-        return new Map();
-    }
-}
 export interface ProductRaw {
     product_code: string;
     product_name: string;
@@ -436,20 +66,6 @@ export interface ProductRaw {
     product_series?: string;
     product_type?: string;
     amount?: number;
-}
-
-/** 原始BOM数据 */
-export interface BOMRaw {
-    bom_number: string;
-    parent_code: string;
-    parent_name: string;
-    child_code: string;
-    child_name: string;
-    child_quantity: number;
-    unit: string;
-    loss_rate: number;
-    alternative_group: string;
-    alternative_part: string;
 }
 
 /** 原始库存数据 */
@@ -463,15 +79,17 @@ export interface InventoryRaw {
     warehouse_name?: string;
 }
 
-/** 库存状态 */
+/** 库存状??*/
 export type StockStatus = 'sufficient' | 'insufficient' | 'stagnant' | 'unknown';
 
 /** BOM节点 */
 export interface BOMNode {
+    id: string; // Add unique ID for React keys
     code: string;
     name: string;
     level: number;
-    quantity: number;          // 单耗数量
+    description?: string;
+    quantity: number;          // 单耗数??
     unit: string;
     isLeaf: boolean;
     parentCode: string | null;
@@ -484,14 +102,14 @@ export interface BOMNode {
     storageDays: number;
     unitPrice: number;
 
-    // 替代料信息
+    // 替代料信??
     isSubstitute: boolean;
     alternativeGroup: string | null;
     primaryMaterialCode: string | null;
     substitutes: BOMNode[];
 }
 
-/** 产品BOM树 */
+/** 产品BOM??*/
 export interface ProductBOMTree {
     productCode: string;
     productName: string;
@@ -503,293 +121,17 @@ export interface ProductBOMTree {
     insufficientCount: number;
 }
 
-/** 替代料关系 */
-interface SubstitutionRelation {
-    parentCode: string;
-    alternativeGroup: string;
-    primaryMaterialCode: string;
-    primaryMaterialName: string;
-    primaryQuantity: number;
-    substitutes: {
-        code: string;
-        name: string;
-        quantity: number;
-        ratio: number;
-    }[];
-}
-
 
 // ============================================================================
-// 替代料解析
+// 替代料解??
 // ============================================================================
 
 /**
- * 解析替代料关系
- * 根据 alternative_group 和 alternative_part 字段识别主料和替代料
+ * 解析替代料关??
+ * 根据 alternative_group ??alternative_part 字段识别主料和替代料
  */
-export function parseSubstitutionRelations(bomData: BOMRaw[]): Map<string, SubstitutionRelation> {
-    const relations = new Map<string, SubstitutionRelation>();
-
-    // 按 parent_code + alternative_group 分组
-    const groupedByAltGroup = new Map<string, BOMRaw[]>();
-
-    for (const row of bomData) {
-        if (row.alternative_group && row.alternative_group.trim() !== '') {
-            const groupKey = `${row.parent_code}_${row.alternative_group}`;
-            if (!groupedByAltGroup.has(groupKey)) {
-                groupedByAltGroup.set(groupKey, []);
-            }
-            groupedByAltGroup.get(groupKey)!.push(row);
-        }
-    }
-
-    // 识别主料和替代料
-    for (const [groupKey, rows] of groupedByAltGroup) {
-        // 主料: alternative_part 为空
-        const primary = rows.find(r => !r.alternative_part || String(r.alternative_part).trim() === '');
-
-        // 替代料: alternative_part = "替代"
-        const substitutes = rows.filter(r => String(r.alternative_part).trim() === '替代');
-
-        if (primary && substitutes.length > 0) {
-            const relation: SubstitutionRelation = {
-                parentCode: primary.parent_code,
-                alternativeGroup: primary.alternative_group,
-                primaryMaterialCode: primary.child_code,
-                primaryMaterialName: primary.child_name,
-                primaryQuantity: primary.child_quantity,
-                substitutes: substitutes.map(sub => ({
-                    code: sub.child_code,
-                    name: sub.child_name,
-                    quantity: sub.child_quantity,
-                    ratio: sub.child_quantity / primary.child_quantity,
-                })),
-            };
-
-            // 使用主料编码作为key，方便查找
-            relations.set(`${primary.parent_code}_${primary.child_code}`, relation);
-        }
-    }
-
-    console.log('[BOM服务] 解析替代料关系:', relations.size, '组');
-    return relations;
-}
-
-// ============================================================================
-// BOM树构建
-// ============================================================================
-
-/**
- * 计算库存状态
- */
-function calculateStockStatus(storageDays: number, currentStock: number): StockStatus {
-    if (currentStock <= 0) {
-        return 'insufficient';
-    }
-    if (storageDays >= 60) {
-        return 'stagnant';
-    }
-    if (storageDays >= 30) {
-        return 'insufficient';
-    }
-    return 'sufficient';
-}
-
-/**
- * 递归构建BOM树
- */
-function buildBOMTreeRecursive(
-    parentCode: string,
-    bomData: BOMRaw[],
-    inventoryMap: Map<string, InventoryRaw>,
-    substitutionRelations: Map<string, SubstitutionRelation>,
-    currentQuantity: number,
-    level: number,
-    visited: Set<string>
-): BOMNode[] {
-    // 防止循环引用
-    if (visited.has(parentCode)) {
-        console.warn('[BOM服务] 检测到循环引用:', parentCode);
-        return [];
-    }
-    visited.add(parentCode);
-
-    // 查找当前父级的所有子物料（排除替代料）
-    const children = bomData.filter(row =>
-        row.parent_code === parentCode &&
-        String(row.alternative_part).trim() !== '替代'
-    );
-
-    const nodes: BOMNode[] = [];
-
-    for (const child of children) {
-        const inventory = inventoryMap.get(child.child_code);
-        const currentStock = inventory?.current_stock || 0;
-        const storageDays = inventory?.storage_days || 0;
-
-        // 检查是否有替代料
-        const substitutionKey = `${parentCode}_${child.child_code}`;
-        const substitution = substitutionRelations.get(substitutionKey);
-
-        // 递归构建子节点
-        const childNodes = buildBOMTreeRecursive(
-            child.child_code,
-            bomData,
-            inventoryMap,
-            substitutionRelations,
-            currentQuantity * child.child_quantity,
-            level + 1,
-            new Set(visited)
-        );
-
-        // 构建替代料节点
-        const substituteNodes: BOMNode[] = substitution ?
-            substitution.substitutes.map(sub => {
-                const subInventory = inventoryMap.get(sub.code);
-                const subStock = subInventory?.current_stock || 0;
-                const subStorageDays = subInventory?.storage_days || 0;
-
-                return {
-                    code: sub.code,
-                    name: sub.name,
-                    level: level + 1,
-                    quantity: sub.quantity,
-                    unit: child.unit,
-                    isLeaf: true,
-                    parentCode: parentCode,
-                    children: [],
-                    currentStock: subStock,
-                    availableStock: subInventory?.available_stock || subStock,
-                    stockStatus: calculateStockStatus(subStorageDays, subStock),
-                    storageDays: subStorageDays,
-                    unitPrice: subInventory?.unit_price || 0,
-                    isSubstitute: true,
-                    alternativeGroup: substitution.alternativeGroup,
-                    primaryMaterialCode: child.child_code,
-                    substitutes: [],
-                };
-            }) : [];
-
-        const node: BOMNode = {
-            code: child.child_code,
-            name: child.child_name,
-            level,
-            quantity: child.child_quantity,
-            unit: child.unit,
-            isLeaf: childNodes.length === 0,
-            parentCode,
-            children: childNodes,
-            currentStock,
-            availableStock: inventory?.available_stock || currentStock,
-            stockStatus: calculateStockStatus(storageDays, currentStock),
-            storageDays,
-            unitPrice: inventory?.unit_price || 0,
-            isSubstitute: false,
-            alternativeGroup: substitution?.alternativeGroup || null,
-            primaryMaterialCode: null,
-            substitutes: substituteNodes,
-        };
-
-        nodes.push(node);
-    }
-
-    return nodes;
-}
-
-/**
- * 构建产品BOM树
- */
-export function buildProductBOMTree(
-    productCode: string,
-    productName: string,
-    productModel: string | undefined,
-    bomData: BOMRaw[],
-    inventoryMap: Map<string, InventoryRaw>,
-    substitutionRelations: Map<string, SubstitutionRelation>
-): ProductBOMTree {
-    const startTime = Date.now();
-    console.log(`[BOM服务] 🌲 构建产品BOM树: ${productCode} - ${productName}`);
-
-    // 构建根节点
-    const children = buildBOMTreeRecursive(
-        productCode,
-        bomData,
-        inventoryMap,
-        substitutionRelations,
-        1,
-        1,
-        new Set()
-    );
-
-    const inventory = inventoryMap.get(productCode);
-
-    const rootNode: BOMNode = {
-        code: productCode,
-        name: productName,
-        level: 0,
-        quantity: 1,
-        unit: '套',
-        isLeaf: false,
-        parentCode: null,
-        children,
-        currentStock: inventory?.current_stock || 0,
-        availableStock: inventory?.available_stock || 0,
-        stockStatus: 'unknown',
-        storageDays: 0,
-        unitPrice: inventory?.unit_price || 0,
-        isSubstitute: false,
-        alternativeGroup: null,
-        primaryMaterialCode: null,
-        substitutes: [],
-    };
-
-    // 统计信息
-    let totalMaterials = 0;
-    let totalInventoryValue = 0;
-    let stagnantCount = 0;
-    let insufficientCount = 0;
-
-    function countStats(node: BOMNode) {
-        totalMaterials++;
-        totalInventoryValue += node.currentStock * node.unitPrice;
-        if (node.stockStatus === 'stagnant') stagnantCount++;
-        if (node.stockStatus === 'insufficient') insufficientCount++;
-
-        node.children.forEach(countStats);
-        node.substitutes.forEach(sub => {
-            totalMaterials++;
-            totalInventoryValue += sub.currentStock * sub.unitPrice;
-            if (sub.stockStatus === 'stagnant') stagnantCount++;
-            if (sub.stockStatus === 'insufficient') insufficientCount++;
-        });
-    }
-
-    children.forEach(countStats);
-
-    const elapsed = Date.now() - startTime;
-    console.log(`[BOM服务] ✅ 产品 ${productCode} BOM统计:`, {
-        totalMaterials,
-        totalInventoryValue: totalInventoryValue.toFixed(2),
-        stagnantCount,
-        insufficientCount,
-        耗时: `${elapsed}ms`
-    });
-
-    return {
-        productCode,
-        productName,
-        productModel,
-        rootNode,
-        totalMaterials,
-        totalInventoryValue,
-        stagnantCount,
-        insufficientCount,
-    };
-}
-
-// ============================================================================
-// 主入口函数
-// ============================================================================
+// Initialize helpers with dependencies
+initHelpers({ getObjectTypeId, DEFAULT_IDS });
 
 /**
  * 加载所有数据并构建BOM树
@@ -800,107 +142,27 @@ export async function loadAllBOMTrees(): Promise<ProductBOMTree[]> {
     console.log('='.repeat(60));
     const totalStartTime = Date.now();
 
-    // 串行加载数据,避免同时发起多个请求导致服务器500错误
-    console.log('[BOM服务] 📋 步骤 1/4: 加载产品数据...');
-    const products = await loadProductData();
+    // 尝试使用逻辑属性加载（1次API调用）
+    const optimizedData = await loadBOMDataViaLogicProperty();
 
-    console.log('[BOM服务] 📋 步骤 2/4: 加载BOM数据...');
-    const bomData = await loadBOMData();
+    if (optimizedData && optimizedData.preBuiltTrees && optimizedData.preBuiltTrees.length > 0) {
+        console.log(`[BOM服务] ✅ 使用后端预构建的BOM树 (${optimizedData.preBuiltTrees.length} 个)`);
+        const trees = optimizedData.preBuiltTrees.sort((a, b) => a.productCode.localeCompare(b.productCode));
 
-    console.log('[BOM服务] 📋 步骤 3/4: 加载库存数据...');
-    const inventoryMap = await loadInventoryData();
+        const totalElapsed = Date.now() - totalStartTime;
+        console.log('='.repeat(60));
+        console.log(`[BOM服务] 🏁 完成加载: ${trees.length} 个产品BOM树 (总耗时 ${(totalElapsed / 1000).toFixed(2)}s)`);
+        console.log('='.repeat(60));
 
-    console.log('[BOM服务] 📋 步骤 4/4: 加载物料数据...');
-    const materialMap = await loadMaterialData();
-
-    if (products.length === 0 || bomData.length === 0) {
-        console.error('[BOM服务] ❌ 数据加载失败，无法构建BOM树');
-        return [];
+        return trees;
     }
 
-    // 将物料单价合并到库存数据中，并确保所有物料都在inventoryMap中（即使库存为0）
-    console.log('[BOM服务] 🔄 合并物料单价到库存数据...');
-    let priceMatchCount = 0;
-
-    // 1. 先更新已有的库存记录
-    for (const [code, inventory] of inventoryMap) {
-        const material = materialMap.get(code);
-        if (material && material.unitPrice > 0) {
-            inventory.unit_price = material.unitPrice;
-            priceMatchCount++;
-        }
-    }
-
-    // 2. 补充那些在物料表中存在，但不在库存表中的记录（即库存为0的物料）
-    // 这对生产分析至关重要，因为我们需要知道"缺料"时的采购单价
-    let missingCount = 0;
-    for (const [code, material] of materialMap) {
-        if (!inventoryMap.has(code)) {
-            // 创建一个库存为0的虚拟记录
-            inventoryMap.set(code, {
-                material_code: code,
-                material_name: material.name,
-                current_stock: 0,
-                available_stock: 0,
-                storage_days: 0,
-                unit_price: material.unitPrice,
-                warehouse_name: 'Virtual'
-            });
-            missingCount++;
-        }
-    }
-
-    console.log(`[BOM服务] 匹配单价: ${priceMatchCount}, 补充无库存物料: ${missingCount}, 总数: ${inventoryMap.size}`);
-
-    // 打印几条有单价的库存
-    let sampleCount = 0;
-    for (const [code, inv] of inventoryMap) {
-        if (sampleCount < 3 && (inv.unit_price ?? 0) > 0) {
-            console.log(`[BOM服务] 库存金额样例 ${code}: ${inv.current_stock}    price: ${(inv.unit_price ?? 0) * (inv.current_stock ?? 0)}`);
-            sampleCount++;
-        }
-    }
-
-    // 解析替代料关系
-    console.log('[BOM服务] 🔍 解析替代料关系...');
-    const substitutionRelations = parseSubstitutionRelations(bomData);
-
-    // 使用所有产品
-    const targetProducts = products;
-
-    console.log('[BOM服务] 🎯 加载所有产品:', targetProducts.length, '个');
-
-    // 构建每个产品的BOM树
-    console.log('[BOM服务] 🌳 开始构建产品BOM树...');
-    const bomTrees: ProductBOMTree[] = [];
-
-    for (let i = 0; i < targetProducts.length; i++) {
-        const product = targetProducts[i];
-        console.log(`[BOM服务] 构建进度 (${i + 1}/${targetProducts.length}): ${product.product_code}`);
-        const tree = buildProductBOMTree(
-            product.product_code,
-            product.product_name,
-            product.product_model,
-            bomData,
-            inventoryMap,
-            substitutionRelations
-        );
-        bomTrees.push(tree);
-    }
-
-    // 按产品编码字母顺序排序
-    console.log('[BOM服务] 📊 排序BOM树...');
-    bomTrees.sort((a, b) => a.productCode.localeCompare(b.productCode));
-
-    const totalElapsed = Date.now() - totalStartTime;
-    console.log('='.repeat(60));
-    console.log(`[BOM服务] ✅ 完成加载: ${bomTrees.length} 个产品BOM树 (总耗时 ${(totalElapsed / 1000).toFixed(2)}s)`);
-    console.log('='.repeat(60));
-    return bomTrees;
+    console.error('[BOM服务] ❌ 加载失败或无数据');
+    return [];
 }
 
 /**
- * 加载单个产品的BOM树
+ * 加载单个产品的BOM??
  */
 export async function loadSingleBOMTree(productCode: string): Promise<ProductBOMTree | null> {
     const allTrees = await loadAllBOMTrees();
@@ -911,7 +173,7 @@ export async function loadSingleBOMTree(productCode: string): Promise<ProductBOM
 // 阶段二：生产数量分析 (MRP运算逻辑)
 // ============================================================================
 
-/** 物料需求信息 */
+/** 物料需求信??*/
 export interface MaterialRequirement {
     code: string;
     name: string;
@@ -924,28 +186,28 @@ export interface ProductionAnalysisResult {
     productCode: string;
     productName: string;
 
-    // X轴数据
+    // X轴数??
     productionQuantities: number[];
 
     // 无起订量分析
     replenishmentCosts: number[];      // 补货金额（从库存消耗）
     newProcurementCosts: number[];     // 新增采购金额
-    newStagnantValues?: number[];      // 新增呆滞库存金额 (无MOQ时通常为0)
+    newStagnantValues?: number[];      // 新增呆滞库存金额 (无MOQ时通常??)
 
     // 有起订量分析 (假设MOQ=100)
     replenishmentCostsWithMOQ: number[];
     newProcurementCostsWithMOQ: number[];
-    newStagnantValuesWithMOQ?: number[];  // 因MOQ产生的新增呆滞金额
+    newStagnantValuesWithMOQ?: number[];  // 因MOQ产生的新增呆滞金??
 
     // 关键指标
-    maxProducibleWithoutPurchase: number;  // 最大可生产数量（无需采购）
+    maxProducibleWithoutPurchase: number;  // 最大可生产数量（无需采购??
     crossPointQuantity: number;             // 成本交叉点的生产数量
-    crossPointValue: number;                // 交叉点的成本值
+    crossPointValue: number;                // 交叉点的成本??
 
-    // 高价值物料列表
+    // 高价值物料列??
     topExpensiveMaterials: MaterialRequirement[];
 
-    // 总库存价值（用于计算剩余呆滞）
+    // 总库存价值（用于计算剩余呆滞??
     totalInventoryValue: number;
 
     // 智能分析文字
@@ -958,16 +220,16 @@ export interface ProductionAnalysisResult {
 interface MRPResult {
     replenishmentCost: number;     // 补货成本（消耗现有库存）
     newProcurementCost: number;    // 新增采购成本（缺料采购）
-    newStagnantCost: number;       // 新增呆滞成本（采购产生的剩余库存）
+    newStagnantCost: number;       // 新增呆滞成本（采购产生的剩余库存??
 }
 
 /**
  * 递归计算MRP成本 (Netting Logic)
  * 
- * 核心逻辑：
- * 1. 每一层级先扣减现有库存 (Netting)
- * 2. 只有扣减后的净需求 (Net Requirement) 才展开到下一层级
- * 3. 叶子节点的净需求计入新增采购成本
+ * 核心逻辑??
+ * 1. 每一层级先扣减现有库??(Netting)
+ * 2. 只有扣减后的净需??(Net Requirement) 才展开到下一层级
+ * 3. 叶子节点的净需求计入新增采购成??
  */
 function calculateMRPCosts(
     productCode: string,
@@ -977,27 +239,27 @@ function calculateMRPCosts(
     withMOQ: boolean = false,
     defaultMOQ: number = 100
 ): MRPResult {
-    // 克隆库存状态，因为计算过程会模拟消耗
+    // 克隆库存状态，因为计算过程会模拟消??
     // 为了性能，只克隆需要的字段，这里简化为Map<code, currentStock>
     const tempStock = new Map<string, number>();
     for (const [code, inv] of inventoryMap) {
         tempStock.set(code, inv.current_stock);
     }
 
-    // 待处理队列 { code, qty }
+    // 待处理队??{ code, qty }
     const queue: { code: string; qty: number }[] = [];
 
-    // 初始需求：成品的数量
+    // 初始需求：成品的数??
     queue.push({ code: productCode, qty: quantity });
 
     let totalReplenishmentCost = 0;
     let totalProcurementCost = 0;
     let totalNewStagnantCost = 0;
 
-    // 为了查找BOM节点信息，建立一个快速索引
-    // 注意：BOMTree结构是嵌套的，我们需要一个扁平查找 或者 每次遍历children
+    // 为了查找BOM节点信息，建立一个快速索??
+    // 注意：BOMTree结构是嵌套的，我们需要一个扁平查??或??每次遍历children
     // 优化：在此函数外预处理扁平Map会更快，但为了代码独立性，这里我们使用辅助查找
-    // 考虑到树规模不大，递归查找也可。更高效的是先建立 flatBOM Map。
+    // 考虑到树规模不大，递归查找也可。更高效的是先建??flatBOM Map??
     const bomNodeMap = new Map<string, BOMNode>();
     function indexBOM(node: BOMNode) {
         if (!bomNodeMap.has(node.code)) {
@@ -1008,12 +270,12 @@ function calculateMRPCosts(
     }
     indexBOM(bomData.rootNode);
 
-    // 开始处理队列 (BFS)
+    // 开始处理队??(BFS)
     while (queue.length > 0) {
         const item = queue.shift()!;
         const node = bomNodeMap.get(item.code);
 
-        if (!node) continue; // 应该不会发生，除非数据不一致
+        if (!node) continue; // 应该不会发生，除非数据不一??
 
         // 1. 获取当前库存
         const currentStock = tempStock.get(item.code) || 0;
@@ -1026,43 +288,43 @@ function calculateMRPCosts(
         // 更新临时库存
         tempStock.set(item.code, currentStock - usedStock);
 
-        // 3. 计算补货成本 (消耗的库存价值)
-        // 注意：成品本身通常没有单价(或者单价是售价)，如果是计算"物料"成本，不应该计入成品的"库存价值"?
-        // 通常Reverse BOM分析的是原材料消耗。
-        // 如果成品有库存，我们优先发成品，这部分价值叫"成品去库存"。
+        // 3. 计算补货成本 (消耗的库存价??
+        // 注意：成品本身通常没有单价(或者单价是售价)，如果是计算"物料"成本，不应该计入成品??库存价???
+        // 通常Reverse BOM分析的是原材料消耗??
+        // 如果成品有库存，我们优先发成品，这部分价值叫"成品去库????
         // 如果成品没库存，我们发半成品...
         // 这里假设：所有层级的库存消耗都计入 "补货金额" (Replenishment Cost)
         if (usedStock > 0) {
             totalReplenishmentCost += usedStock * unitPrice;
         }
 
-        // 4. 处理净需求
+        // 4. 处理净需??
         if (netRequirement > 0) {
             if (node.children.length === 0) {
                 // 叶子节点 (Raw Material) -> 必须采购
                 let purchaseQty = netRequirement;
 
-                // 处理起订量 (作为最小包装量/Batch Size处理，即向上取整)
-                // 如果只是作为最小起订量(Floor)，当需求>MOQ时就不会产生呆滞，这通常不符合实际(通常有标准包装)
+                // 处理起订??(作为最小包装量/Batch Size处理，即向上取整)
+                // 如果只是作为最小起订量(Floor)，当需??MOQ时就不会产生呆滞，这通常不符合实??通常有标准包??
                 if (withMOQ && defaultMOQ > 0) {
                     purchaseQty = Math.ceil(netRequirement / defaultMOQ) * defaultMOQ;
                 }
 
                 totalProcurementCost += purchaseQty * unitPrice;
 
-                // 计算新增呆滞（购买量 - 实际需求量）
+                // 计算新增呆滞（购买量 - 实际需求量??
                 const leftoverQty = purchaseQty - netRequirement;
                 if (leftoverQty > 0) {
                     totalNewStagnantCost += leftoverQty * unitPrice;
                 }
             } else {
-                // 非叶子节点 (Assembly) -> 展开到下一层
+                // 非叶子节??(Assembly) -> 展开到下一??
                 for (const child of node.children) {
                     const childRequiredQty = netRequirement * child.quantity;
                     queue.push({ code: child.code, qty: childRequiredQty });
                 }
 
-                // 暂时忽略替代料逻辑简化计算，未来可加入
+                // 暂时忽略替代料逻辑简化计算，未来可加??
             }
         }
     }
@@ -1076,7 +338,7 @@ function calculateMRPCosts(
 
 /**
  * 查找最大可生产数量 (Binary Search)
- * 只要新增采购成本为0，就说明库存够用
+ * 只要新增采购成本??，就说明库存够用
  */
 function findMaxProducible(
     productCode: string,
@@ -1097,11 +359,11 @@ function findMaxProducible(
         const res = calculateMRPCosts(productCode, bomData, mid, inventoryMap, false);
 
         if (res.newProcurementCost === 0) {
-            // 够用，尝试更多
+            // 够用，尝试更??
             max = mid;
             low = mid + 1;
         } else {
-            // 不够，减少
+            // 不够，减??
             high = mid - 1;
         }
     }
@@ -1110,7 +372,7 @@ function findMaxProducible(
 }
 
 /**
- * 从BOM树提取所有物料，用于展示"高价值物料"
+ * 从BOM树提取所有物料，用于展示"高价值物??
  * 只需要扁平化列表，不需要计算逻辑
  */
 function getFlatMaterialList(rootNode: BOMNode): MaterialRequirement[] {
@@ -1138,10 +400,10 @@ function getFlatMaterialList(rootNode: BOMNode): MaterialRequirement[] {
 /**
  * 生成智能分析结论
  * 
- * 基于机器人事业部的分析逻辑：
+ * 基于机器人事业部的分析逻辑??
  * - 分析线性关系和斜率特征
- * - 计算极差并给出决策建议
- * - 以高价值物料为起点规划消耗策略
+ * - 计算极差并给出决策建??
+ * - 以高价值物料为起点规划消耗策??
  */
 function generateAnalysisConclusions(
     maxProducible: number,
@@ -1154,38 +416,38 @@ function generateAnalysisConclusions(
 ): string[] {
     const conclusions: string[] = [];
 
-    // 1. 趋势分析 - 线性关系判断
+    // 1. 趋势分析 - 线性关系判??
     if (replenishmentCosts && newProcurementCosts && replenishmentCosts.length >= 2) {
         const repRange = Math.max(...replenishmentCosts) - Math.min(...replenishmentCosts);
         const procRange = Math.max(...newProcurementCosts) - Math.min(...newProcurementCosts);
 
-        // 计算简单斜率
+        // 计算简单斜??
         const n = replenishmentCosts.length;
         const repSlope = (replenishmentCosts[n - 1] - replenishmentCosts[0]) /
             ((productionQuantities?.[n - 1] || n) - (productionQuantities?.[0] || 1));
 
-        conclusions.push(`新增金额和消耗采购同生产数量之间呈线性关系，斜率较${Math.abs(repSlope) > 100 ? '陡' : '平缓'}`);
+        conclusions.push(`新增金额和消耗采购同生产数量之间呈线性关系，斜率${Math.abs(repSlope) > 100 ? '陡峭' : '平缓'}`);
         conclusions.push(`实际生产数量的极差范围：${(repRange / 10000).toFixed(1)}万 ~ ${(procRange / 10000).toFixed(1)}万元`);
     }
 
     // 2. 最大可生产数量
     conclusions.push(`最大可生产数量（无需采购）：${maxProducible.toLocaleString()} 套`);
 
-    // 3. 成本平衡点分析
+    // 3. 成本平衡点分??
     if (crossPoint > 0) {
-        conclusions.push(`成本平衡点：生产约 ${crossPoint.toLocaleString()} 套时，补货成本与采购成本持平`);
+        conclusions.push(`成本平衡点：生产??${crossPoint.toLocaleString()} 套时，补货成本与采购成本持平`);
     }
 
-    // 4. 高价值物料消耗策略
+    // 4. 高价值物料消耗策??
     if (topMaterials.length > 0) {
         const topMaterial = topMaterials[0];
-        const formatValue = (v: number) => v >= 10000 ? `¥${(v / 10000).toFixed(1)}万` : `¥${v.toLocaleString()}`;
+        const formatValue = (v: number) => v >= 10000 ? `￥${(v / 10000).toFixed(1)}万` : `￥${v.toLocaleString()}`;
         conclusions.push(`最高价值物料：${topMaterial.name}（${formatValue(topMaterial.stockValue)}），建议作为生产规划起点`);
     }
 
     // 5. 呆滞库存提醒
     if (totalStagnantValue > 0) {
-        conclusions.push(`呆滞库存总价值：¥${(totalStagnantValue / 10000).toFixed(1)}万，应优先通过生产消耗`);
+        conclusions.push(`呆滞库存总价值：￥${(totalStagnantValue / 10000).toFixed(1)}万，应优先通过生产消耗`);
     }
 
     // 6. 决策建议
@@ -1195,16 +457,16 @@ function generateAnalysisConclusions(
 }
 
 /**
- * 计算产品的生产分析
+ * 计算产品的生产分??
  */
 export function calculateProductionAnalysis(productBOM: ProductBOMTree): ProductionAnalysisResult {
     const startTime = Date.now();
-    console.log(`[生产分析] 📊 开始分析产品: ${productBOM.productCode} - ${productBOM.productName}`);
+    console.log(`[生产分析] ?? 开始分析产?? ${productBOM.productCode} - ${productBOM.productName}`);
 
-    // 0. 我们需要原始的 InventoryMap 来进行计算
-    // 由于 buildProductBOMTree 已经把 inventory 嵌入到 node 中了，
-    // 我们需要重新构建一个 inventoryMap 或者从 node 中提取。
-    // 为了准确，我们遍历树提取当前库存快照。
+    // 0. 我们需要原始的 InventoryMap 来进行计??
+    // 由于 buildProductBOMTree 已经??inventory 嵌入??node 中了??
+    // 我们需要重新构建一??inventoryMap 或者从 node 中提取??
+    // 为了准确，我们遍历树提取当前库存快照??
     const inventoryMap = new Map<string, InventoryRaw>();
     function extractInv(node: BOMNode) {
         if (!inventoryMap.has(node.code)) {
@@ -1216,34 +478,34 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
                 available_stock: node.availableStock,
                 storage_days: node.storageDays,
                 unit_price: node.unitPrice,
-                warehouse_name: '' // 不重要
+                warehouse_name: '' // 不重??
             });
         }
         node.children.forEach(extractInv);
         node.substitutes.forEach(extractInv);
     }
     extractInv(productBOM.rootNode);
-    // 关键修正：生产分析应该分析"制造"过程，不应扣减"产成品"本身的库存。
-    // 即：我们要计算"利用原材料能做多少个"，而不是"现有库存+能做多少个"。
+    // 关键修正：生产分析应该分??制??过程，不应扣??产成??本身的库存??
+    // 即：我们要计??利用原材料能做多少个"，而不??现有库存+能做多少????
     if (inventoryMap.has(productBOM.productCode)) {
         inventoryMap.delete(productBOM.productCode);
     }
-    console.log(`[生产分析] 提取库存快照: ${inventoryMap.size} 条 (已排除成品本身)`);
+    console.log(`[生产分析] 提取库存快照: ${inventoryMap.size} 个 (已排除成品本身)`);
 
     // 1. 计算最大可生产数量
     const maxProducible = findMaxProducible(productBOM.productCode, productBOM, inventoryMap);
-    console.log(`[生产分析] 最大可生产数量（无需采购）: ${maxProducible}`);
+    console.log(`[生产分析] 最大可生产数量（无需采购）：${maxProducible}`);
 
     // 2. 生成X轴数据点
-    // 策略：覆盖从 0 到 maxProducible * 1.5 或 至少 3000
+    // 策略：覆盖从 0 ??maxProducible * 1.5 ??至少 3000
     const maxX = Math.max(maxProducible * 1.5, 3000);
 
-    // 关键修正：步长不能是MOQ(100)的整数倍，否则在每个采样点，需求量都是MOQ的整数倍，导致呆滞为0。
-    // 使用非整倍数步长（如 质数 或 偏移量）来暴露锯齿状的呆滞库存。
+    // 关键修正：步长不能是MOQ(100)的整数倍，否则在每个采样点，需求量都是MOQ的整数倍，导致呆滞????
+    // 使用非整倍数步长（如 质数 ??偏移量）来暴露锯齿状的呆滞库存??
     let step = Math.max(Math.ceil(maxX / 15), 100);
 
-    // 如果步长接近100的倍数，强制加一个偏移量（例如 23），使其错开
-    // 这样能确保采样点 (Step, 2*Step...) 不会总是落在 MOQ 的倍数上
+    // 如果步长接近100的倍数，强制加一个偏移量（例??23），使其错开
+    // 这样能确保采样点 (Step, 2*Step...) 不会总是落在 MOQ 的倍数??
     if (step % 50 === 0) {
         step += 13;
     } else if (step % 100 === 0) {
@@ -1274,7 +536,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         const resNoMOQ = calculateMRPCosts(productBOM.productCode, productBOM, qty, inventoryMap, false);
         replenishmentCosts.push(resNoMOQ.replenishmentCost);
         newProcurementCosts.push(resNoMOQ.newProcurementCost);
-        newStagnantValues.push(resNoMOQ.newStagnantCost); // 理应是0
+        newStagnantValues.push(resNoMOQ.newStagnantCost); // 理应为0
 
         const resWithMOQ = calculateMRPCosts(productBOM.productCode, productBOM, qty, inventoryMap, true, 100);
         replenishmentCostsWithMOQ.push(resWithMOQ.replenishmentCost);
@@ -1293,7 +555,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         const y2_proc = newProcurementCosts[i + 1];
 
         if (y1_rep <= y1_proc && y2_rep >= y2_proc) {
-            // 简单线性插值找更精确的点
+            // 简单线性插值找更精确的??
             // (y_rep - y_proc) 从负变正
             // diff = y_rep - y_proc
             // diff1 < 0, diff2 > 0
@@ -1307,20 +569,20 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         }
     }
 
-    // 5. 高价值物料列表
+    // 5. 高价值物料列??
     const flatMaterials = getFlatMaterialList(productBOM.rootNode);
     const sortedMaterials = flatMaterials.sort((a, b) => b.stockValue - a.stockValue);
     const topExpensive = sortedMaterials.slice(0, 10);
 
-    // 5.1 计算所有物料的总库存价值（用于图表中的剩余呆滞计算）
+    // 5.1 计算所有物料的总库存价值（用于图表中的剩余呆滞计算??
     const totalInventoryValue = flatMaterials.reduce((sum, m) => sum + m.stockValue, 0);
 
-    // 6. 呆滞总值
+    // 6. 呆滞总??
     const totalStagnantValue = flatMaterials
         .filter(m => m.isStagnant)
         .reduce((sum, m) => sum + m.stockValue, 0);
 
-    // 7. 结论 - 包含斜率和极差分析
+    // 7. 结论 - 包含斜率和极差分??
     console.log('[生产分析] 生成分析结论...');
     const conclusions = generateAnalysisConclusions(
         maxProducible,
@@ -1333,7 +595,7 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
     );
 
     const elapsed = Date.now() - startTime;
-    console.log(`[生产分析] ✅ 分析完成 (耗时 ${(elapsed / 1000).toFixed(2)}s)`);
+    console.log(`[生产分析] ??分析完成 (耗时 ${(elapsed / 1000).toFixed(2)}s)`);
 
     return {
         productCode: productBOM.productCode,
