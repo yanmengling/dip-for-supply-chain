@@ -72,6 +72,17 @@ const SupplyChainAppContent = () => {
     // Initialize entity data first, then populate entity configs
     initializeEntityData();
     const init = async () => {
+      // Sync configuration from backend API
+      try {
+        const { configStorageService } = await import('./services/configStorageService');
+        await configStorageService.syncFromBackend();
+        console.log('[SupplyChainApp] Configuration synced from backend');
+      } catch (error) {
+        console.error('[SupplyChainApp] Failed to sync configuration from backend:', error);
+        // Continue with default configuration if sync fails
+      }
+
+      // Populate entity configs
       await populateEntityConfigs();
     };
     init();

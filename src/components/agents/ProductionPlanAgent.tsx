@@ -1,9 +1,3 @@
-/**
- * Production Plan Agent
- * 
- * 在大脑模式下显示基于CSV数据的智能计算生产计划
- */
-
 import { useState, useEffect, useMemo } from 'react';
 import { Loader2, BarChart3, AlertCircle } from 'lucide-react';
 import {
@@ -18,12 +12,12 @@ import {
  */
 function formatDateString(dateStr: string): string {
     if (!dateStr) return '';
-    
+
     // 如果已经是标准格式（YYYY-MM-DD），直接返回
     if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
         return dateStr;
     }
-    
+
     // 尝试解析并格式化
     const date = new Date(dateStr);
     if (!isNaN(date.getTime())) {
@@ -32,7 +26,7 @@ function formatDateString(dateStr: string): string {
         const day = String(date.getDate()).padStart(2, '0');
         return `${year}-${month}-${day}`;
     }
-    
+
     // 如果无法解析，返回原始字符串
     return dateStr;
 }
@@ -42,7 +36,6 @@ export const ProductionPlanAgent = () => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    // 加载CSV数据
     useEffect(() => {
         const loadData = async () => {
             try {
@@ -63,13 +56,13 @@ export const ProductionPlanAgent = () => {
 
     // 计算统计数据（异步）
     const [stats, setStats] = useState<ProductionStats | null>(null);
-    
+
     useEffect(() => {
         if (plans.length === 0) {
             setStats(null);
             return;
         }
-        
+
         const loadStats = async () => {
             try {
                 const calculatedStats = await calculateProductionStats(plans);
@@ -79,7 +72,7 @@ export const ProductionPlanAgent = () => {
                 setStats(null);
             }
         };
-        
+
         loadStats();
     }, [plans]);
 
@@ -164,8 +157,8 @@ export const ProductionPlanAgent = () => {
                                             {product.quantity.toLocaleString()}
                                         </td>
                                         <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-700 font-medium">
-                                            {product.pendingOrderQuantity !== undefined 
-                                                ? product.pendingOrderQuantity.toLocaleString() 
+                                            {product.pendingOrderQuantity !== undefined
+                                                ? product.pendingOrderQuantity.toLocaleString()
                                                 : '-'}
                                         </td>
                                         <td className="px-4 py-3 whitespace-nowrap">

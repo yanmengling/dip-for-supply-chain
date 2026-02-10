@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Configuration Migration Trigger</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            color: #333;
+            margin-top: 0;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 15px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 10px 5px;
+            transition: all 0.3s ease;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        pre {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border-left: 4px solid #667eea;
+        }
+
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 4px solid #17a2b8;
+        }
+
+        .section {
+            margin: 25px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .section h2 {
+            margin-top: 0;
+            color: #667eea;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔧 配置迁移工具</h1>
+
+        <div class="section">
+            <h2>当前配置状态</h2>
+            <div id="currentStatus"></div>
+        </div>
+
+        <div class="section">
+            <h2>操作</h2>
+            <button onclick="checkConfig()">🔍 检查配置</button>
+            <button onclick="triggerMigration()">🔄 触发迁移</button>
+            <button onclick="clearAndReload()">🗑️ 清除并重新加载</button>
+        </div>
+
+        <div class="section">
+            <h2>结果</h2>
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'supply_chain_api_config_collection';
+
+        function showStatus(message, type = 'info') {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function checkConfig() {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+
+                if (!stored) {
+                    showStatus('❌ 未找到配置数据', 'error');
+                    return;
+                }
+
+                const config = JSON.parse(stored);
+                const purchaseOrderConfig = config.ontologyObjects?.find(o => o.id === 'oo_purchase_order');
+                const purchaseRequestConfig = config.ontologyObjects?.find(o => o.id === 'oo_purchase_request');
+
+                let html = '<div class="info">';
+                html += `<strong>配置版本:</strong> ${config.version}<br>`;
+                html += `<strong>业务对象数量:</strong> ${config.ontologyObjects?.length || 0}<br><br>`;
+
+                if (purchaseOrderConfig) {
+                    html += `✅ <strong>采购订单配置:</strong> 已找到<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;ID: ${purchaseOrderConfig.id}<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;ObjectTypeId: ${purchaseOrderConfig.objectTypeId}<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;已启用: ${purchaseOrderConfig.enabled ? '是' : '否'}<br>`;
+                } else {
+                    html += `❌ <strong>采购订单配置:</strong> 未找到<br>`;
+                }
+
+                if (purchaseRequestConfig) {
+                    html += `<br>✅ <strong>采购申请单配置:</strong> 已找到<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;ID: ${purchaseRequestConfig.id}<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;ObjectTypeId: ${purchaseRequestConfig.objectTypeId}<br>`;
+                    html += `&nbsp;&nbsp;&nbsp;&nbsp;已启用: ${purchaseRequestConfig.enabled ? '是' : '否'}<br>`;
+                } else {
+                    html += `<br>❌ <strong>采购申请单配置:</strong> 未找到<br>`;
+                }
+
+                html += '</div>';
+
+                document.getElementById('result').innerHTML = html;
+
+                // Update current status
+                updateCurrentStatus(config);
+
+            } catch (error) {
+                showStatus(`❌ 检查配置失败: ${error.message}`, 'error');
+            }
+        }
+
+        function updateCurrentStatus(config) {
+            const purchaseOrderConfig = config.ontologyObjects?.find(o => o.id === 'oo_purchase_order');
+            const purchaseRequestConfig = config.ontologyObjects?.find(o => o.id === 'oo_purchase_request');
+
+            let html = '';
+            if (purchaseOrderConfig && purchaseRequestConfig) {
+                html = '<div class="success">✅ 采购订单和采购申请单配置都已存在</div>';
+            } else if (purchaseOrderConfig || purchaseRequestConfig) {
+                html = '<div class="warning">⚠️ 部分配置缺失,需要迁移</div>';
+            } else {
+                html = '<div class="error">❌ 采购配置缺失,需要迁移</div>';
+            }
+
+            document.getElementById('currentStatus').innerHTML = html;
+        }
+
+        function triggerMigration() {
+            showStatus('🔄 正在触发配置迁移...', 'info');
+
+            setTimeout(() => {
+                // Reload the page to trigger the migration logic
+                window.location.reload();
+            }, 1000);
+        }
+
+        function clearAndReload() {
+            if (!confirm('⚠️ 这将清除所有配置并重新加载默认配置。确定继续吗?')) {
+                return;
+            }
+
+            try {
+                localStorage.removeItem(STORAGE_KEY);
+                showStatus('✅ 配置已清除。正在重新加载页面...', 'success');
+
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1500);
+            } catch (error) {
+                showStatus(`❌ 清除配置失败: ${error.message}`, 'error');
+            }
+        }
+
+        // Auto-check on load
+        window.addEventListener('load', () => {
+            checkConfig();
+        });
+    </script>
+</body>
+
+</html>

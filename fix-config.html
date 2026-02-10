@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>手动添加采购配置</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            color: #333;
+            margin-top: 0;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 15px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 10px 5px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 4px solid #17a2b8;
+        }
+
+        .section {
+            margin: 25px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .section h2 {
+            margin-top: 0;
+            color: #667eea;
+            font-size: 20px;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+
+        .step {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #667eea;
+            border-radius: 4px;
+        }
+
+        .step-number {
+            display: inline-block;
+            width: 30px;
+            height: 30px;
+            background: #667eea;
+            color: white;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 30px;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔧 手动添加采购配置</h1>
+
+        <div class="section">
+            <h2>当前状态</h2>
+            <div id="status"></div>
+        </div>
+
+        <div class="section">
+            <h2>一键修复</h2>
+            <button onclick="addPurchaseConfigs()" style="font-size: 18px; padding: 16px 32px;">
+                ✨ 添加采购配置并刷新
+            </button>
+        </div>
+
+        <div class="section">
+            <h2>手动操作步骤</h2>
+            <div class="step">
+                <span class="step-number">1</span>
+                <strong>打开浏览器开发者工具</strong> (按 F12)
+            </div>
+            <div class="step">
+                <span class="step-number">2</span>
+                <strong>切换到 Console 标签</strong>
+            </div>
+            <div class="step">
+                <span class="step-number">3</span>
+                <strong>复制并执行以下代码:</strong>
+                <pre id="codeBlock"></pre>
+                <button onclick="copyCode()">📋 复制代码</button>
+            </div>
+            <div class="step">
+                <span class="step-number">4</span>
+                <strong>刷新页面</strong> (F5)
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>结果</h2>
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'supply_chain_api_config_collection';
+
+        const code = `// 添加采购订单和采购申请单配置
+(function() {
+    const STORAGE_KEY = 'supply_chain_api_config_collection';
+    const config = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    
+    if (!config) {
+        console.error('配置不存在');
+        return;
+    }
+
+    const now = Date.now();
+    
+    // 采购订单配置
+    const purchaseOrderConfig = {
+        id: 'oo_purchase_order',
+        type: 'ontology_object',
+        name: '采购订单',
+        description: '供应链大脑 - 采购订单对象类型',
+        objectTypeId: 'supplychain_hd0202_po',
+        entityType: 'purchase_order',
+        enabled: true,
+        tags: ['purchase', 'order'],
+        createdAt: now,
+        updatedAt: now
+    };
+    
+    // 采购申请单配置
+    const purchaseRequestConfig = {
+        id: 'oo_purchase_request',
+        type: 'ontology_object',
+        name: '采购申请单',
+        description: '供应链大脑 - 采购申请单对象类型',
+        objectTypeId: 'supplychain_hd0202_pr',
+        entityType: 'purchase_request',
+        enabled: true,
+        tags: ['purchase', 'request'],
+        createdAt: now,
+        updatedAt: now
+    };
+    
+    // 检查并添加配置
+    let added = 0;
+    
+    if (!config.ontologyObjects.some(o => o.id === 'oo_purchase_order')) {
+        config.ontologyObjects.push(purchaseOrderConfig);
+        added++;
+        console.log('✅ 已添加采购订单配置');
+    }
+    
+    if (!config.ontologyObjects.some(o => o.id === 'oo_purchase_request')) {
+        config.ontologyObjects.push(purchaseRequestConfig);
+        added++;
+        console.log('✅ 已添加采购申请单配置');
+    }
+    
+    if (added > 0) {
+        config.version = '1.0.9';
+        config.lastUpdated = now;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+        console.log(\`✅ 成功添加 \${added} 个配置\`);
+        console.log('🔄 请刷新页面以应用更改');
+    } else {
+        console.log('ℹ️ 配置已存在,无需添加');
+    }
+})();`;
+
+        document.getElementById('codeBlock').textContent = code;
+
+        function checkStatus() {
+            try {
+                const stored = localStorage.getItem(STORAGE_KEY);
+
+                if (!stored) {
+                    document.getElementById('status').innerHTML =
+                        '<div class="error">❌ 未找到配置数据</div>';
+                    return;
+                }
+
+                const config = JSON.parse(stored);
+                const hasPurchaseOrder = config.ontologyObjects?.some(o => o.id === 'oo_purchase_order');
+                const hasPurchaseRequest = config.ontologyObjects?.some(o => o.id === 'oo_purchase_request');
+
+                let html = '<div class="info">';
+                html += `<strong>配置版本:</strong> ${config.version}<br>`;
+                html += `<strong>业务对象数量:</strong> ${config.ontologyObjects?.length || 0}<br><br>`;
+                html += `${hasPurchaseOrder ? '✅' : '❌'} 采购订单配置<br>`;
+                html += `${hasPurchaseRequest ? '✅' : '❌'} 采购申请单配置`;
+                html += '</div>';
+
+                if (hasPurchaseOrder && hasPurchaseRequest) {
+                    html = '<div class="success">✅ 采购配置已完整,可以刷新页面测试</div>';
+                } else {
+                    html = '<div class="warning">⚠️ 采购配置缺失,请点击上方按钮添加</div>';
+                }
+
+                document.getElementById('status').innerHTML = html;
+            } catch (error) {
+                document.getElementById('status').innerHTML =
+                    `<div class="error">❌ 检查失败: ${error.message}</div>`;
+            }
+        }
+
+        function addPurchaseConfigs() {
+            try {
+                const config = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+                if (!config) {
+                    showResult('❌ 配置不存在', 'error');
+                    return;
+                }
+
+                const now = Date.now();
+                let added = 0;
+
+                // 采购订单配置
+                if (!config.ontologyObjects.some(o => o.id === 'oo_purchase_order')) {
+                    config.ontologyObjects.push({
+                        id: 'oo_purchase_order',
+                        type: 'ontology_object',
+                        name: '采购订单',
+                        description: '供应链大脑 - 采购订单对象类型',
+                        objectTypeId: 'supplychain_hd0202_po',
+                        entityType: 'purchase_order',
+                        enabled: true,
+                        tags: ['purchase', 'order'],
+                        createdAt: now,
+                        updatedAt: now
+                    });
+                    added++;
+                }
+
+                // 采购申请单配置
+                if (!config.ontologyObjects.some(o => o.id === 'oo_purchase_request')) {
+                    config.ontologyObjects.push({
+                        id: 'oo_purchase_request',
+                        type: 'ontology_object',
+                        name: '采购申请单',
+                        description: '供应链大脑 - 采购申请单对象类型',
+                        objectTypeId: 'supplychain_hd0202_pr',
+                        entityType: 'purchase_request',
+                        enabled: true,
+                        tags: ['purchase', 'request'],
+                        createdAt: now,
+                        updatedAt: now
+                    });
+                    added++;
+                }
+
+                if (added > 0) {
+                    config.version = '1.0.9';
+                    config.lastUpdated = now;
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                    showResult(`✅ 成功添加 ${added} 个配置。正在刷新页面...`, 'success');
+
+                    setTimeout(() => {
+                        window.location.href = 'http://localhost:5173';
+                    }, 1500);
+                } else {
+                    showResult('ℹ️ 配置已存在,无需添加。正在刷新页面...', 'info');
+                    setTimeout(() => {
+                        window.location.href = 'http://localhost:5173';
+                    }, 1500);
+                }
+            } catch (error) {
+                showResult(`❌ 添加失败: ${error.message}`, 'error');
+            }
+        }
+
+        function copyCode() {
+            navigator.clipboard.writeText(code).then(() => {
+                showResult('✅ 代码已复制到剪贴板', 'success');
+            }).catch(err => {
+                showResult('❌ 复制失败,请手动复制', 'error');
+            });
+        }
+
+        function showResult(message, type = 'info') {
+            document.getElementById('result').innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // Auto-check on load
+        window.addEventListener('load', checkStatus);
+    </script>
+</body>
+
+</html>

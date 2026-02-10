@@ -2,7 +2,6 @@
  * MPS Data Service
  *
  * 提供MPS甘特图所需的数据获取和转换服务
- * 符合Constitution Principle 1 & 7: 所有数据从供应链知识网络API获取，无CSV fallback
  */
 
 import { ontologyApi } from '../api';
@@ -35,7 +34,6 @@ const getObjectTypeIds = () => ({
 });
 
 // Note: DataSourceResponse type removed - all functions now return direct data from API
-// CSV fallback logic completely removed per Constitution Principle 1 & 7
 
 // ============================================================================
 // API数据获取函数

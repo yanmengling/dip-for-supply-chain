@@ -66,7 +66,7 @@ export interface GlobalApiConfig {
 // 默认 Token（作为 fallback）
 const DEFAULT_API_TOKEN = 'ory_at_7m2C7HYOIJtdConlo7Ntfcoy9-wyQ7wzdblSm_gER0k.h8DMS8RWII1Agln8oX_w7N1y6dor77fz_ZKf6FEc8RY';
 // 默认知识网络ID
-const DEFAULT_KNOWLEDGE_NETWORK_ID = 'd56v1l69olk4bpa66uv0';
+const DEFAULT_KNOWLEDGE_NETWORK_ID = 'supplychain_hd0202';
 
 // 动态获取 Token：优先从 globalSettingsService 读取，否则使用默认值
 function getGlobalApiToken(): string {
@@ -247,7 +247,7 @@ export function setCurrentEnvironment(env: ApiEnvironment): void {
 
     // Auto-switch Knowledge Network ID based on environment
     // Brain Mode: Use specific ID
-    setKnowledgeNetworkId('d56v1l69olk4bpa66uv0');
+    setKnowledgeNetworkId('supplychain_hd0202');
 
     // CRITICAL: Update currentConfig to match the new environment
     const envConfig = ENVIRONMENTS[env];
@@ -357,10 +357,10 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
 export const knowledgeNetworkPresets: KnowledgeNetworkPreset[] = [
 
   {
-    id: 'd56v1l69olk4bpa66uv0',
+    id: 'supplychain_hd0202',
     name: '供应链大脑网络',
     description: '管理配置后台业务知识网络',
-    isDefault: false,
+    isDefault: true,
     category: 'production',
     tags: ['dip-cloud', 'brain'],
   },
@@ -377,7 +377,7 @@ const initialEnvConfig = ENVIRONMENTS[initialEnv];
 
 /** 当前知识网络ID（可运行时修改） */
 const envDefaultKnId = envConfig.knowledgeNetworkId ||
-  (initialEnv === 'dip-cloud' ? 'd56v1l69olk4bpa66uv0' : DEFAULT_KNOWLEDGE_NETWORK_ID);
+  (initialEnv === 'dip-cloud' ? 'supplychain_hd0202' : DEFAULT_KNOWLEDGE_NETWORK_ID);
 
 let currentKnowledgeNetworkId: string = getGlobalKnowledgeNetworkId(envDefaultKnId);
 

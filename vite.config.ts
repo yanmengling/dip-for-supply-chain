@@ -22,6 +22,19 @@ export default defineConfig({
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.error('[Vite Proxy] Ontology Manager 代理错误:', err.message);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('[Vite Proxy] Ontology Manager 请求:', req.url);
+            // Bypass SSL certificate validation
+            proxyReq.setHeader('Connection', 'keep-alive');
+          });
+          proxy.on('proxyRes', (proxyRes, _req, _res) => {
+            console.log('[Vite Proxy] Ontology Manager 响应:', proxyRes.statusCode);
+          });
+        },
       },
       // DIP API 代理 - ontology-query
       '/api/ontology-query': {
@@ -34,8 +47,9 @@ export default defineConfig({
           proxy.on('error', (err, _req, _res) => {
             console.error('[Vite Proxy] Ontology Query 代理错误:', err.message);
           });
-          proxy.on('proxyReq', (_proxyReq, req, _res) => {
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
             console.log('[Vite Proxy] Ontology Query 请求:', req.url);
+            proxyReq.setHeader('Connection', 'keep-alive');
           });
           proxy.on('proxyRes', (proxyRes, _req, _res) => {
             console.log('[Vite Proxy] Ontology Query 响应:', proxyRes.statusCode);
@@ -47,6 +61,18 @@ export default defineConfig({
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, _res) => {
+            console.error('[Vite Proxy] Agent App 代理错误:', err.message);
+          });
+          proxy.on('proxyReq', (proxyReq, req, _res) => {
+            console.log('[Vite Proxy] Agent App 请求:', req.url);
+            proxyReq.setHeader('Connection', 'keep-alive');
+          });
+          proxy.on('proxyRes', (proxyRes, _req, _res) => {
+            console.log('[Vite Proxy] Agent App 响应:', proxyRes.statusCode);
+          });
+        },
       },
       // DIP API 代理 - automation (workflow)
       '/api/automation': {

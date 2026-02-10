@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Query Purchase Config</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+        }
+
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            overflow-x: auto;
+        }
+
+        .info {
+            color: blue;
+        }
+
+        .success {
+            color: green;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>采购订单和采购申请单配置查询</h1>
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = message;
+            output.appendChild(div);
+        }
+
+        try {
+            const configData = localStorage.getItem('supply_chain_api_config_collection');
+
+            if (!configData) {
+                log('❌ No configuration found');
+            } else {
+                const config = JSON.parse(configData);
+
+                log('<h2>查找采购相关配置:</h2>');
+
+                // 查找所有包含"采购"的配置
+                const purchaseConfigs = config.ontologyObjects.filter(obj =>
+                    obj.name.includes('采购') ||
+                    obj.entityType?.includes('purchase') ||
+                    obj.name.includes('订单') ||
+                    obj.name.includes('申请')
+                );
+
+                if (purchaseConfigs.length > 0) {
+                    log(`<h3>找到 ${purchaseConfigs.length} 个相关配置:</h3>`, 'success');
+
+                    const table = document.createElement('table');
+                    table.border = '1';
+                    table.style.borderCollapse = 'collapse';
+                    table.style.width = '100%';
+
+                    table.innerHTML = `
+                        <tr style="background: #ddd;">
+                            <th style="padding: 8px;">ID</th>
+                            <th style="padding: 8px;">Name</th>
+                            <th style="padding: 8px;">Entity Type</th>
+                            <th style="padding: 8px;">Object Type ID</th>
+                            <th style="padding: 8px;">Enabled</th>
+                        </tr>
+                    `;
+
+                    purchaseConfigs.forEach(obj => {
+                        const row = table.insertRow();
+                        row.innerHTML = `
+                            <td style="padding: 8px;">${obj.id}</td>
+                            <td style="padding: 8px;">${obj.name}</td>
+                            <td style="padding: 8px;">${obj.entityType || 'N/A'}</td>
+                            <td style="padding: 8px;"><strong>${obj.objectTypeId}</strong></td>
+                            <td style="padding: 8px; color: ${obj.enabled ? 'green' : 'red'};">
+                                ${obj.enabled ? '✓' : '✗'}
+                            </td>
+                        `;
+                    });
+
+                    output.appendChild(table);
+                } else {
+                    log('⚠️ 未找到采购相关配置', 'warning');
+                }
+
+                // 显示所有配置供参考
+                log('<hr><h3>所有业务对象配置:</h3>');
+                const allTable = document.createElement('table');
+                allTable.border = '1';
+                allTable.style.borderCollapse = 'collapse';
+                allTable.style.width = '100%';
+
+                allTable.innerHTML = `
+                    <tr style="background: #ddd;">
+                        <th style="padding: 8px;">Name</th>
+                        <th style="padding: 8px;">Object Type ID</th>
+                    </tr>
+                `;
+
+                config.ontologyObjects.forEach(obj => {
+                    const row = allTable.insertRow();
+                    row.innerHTML = `
+                        <td style="padding: 8px;">${obj.name}</td>
+                        <td style="padding: 8px;">${obj.objectTypeId}</td>
+                    `;
+                });
+
+                output.appendChild(allTable);
+            }
+        } catch (error) {
+            log(`❌ Error: ${error.message}`, 'error');
+        }
+    </script>
+</body>
+
+</html>

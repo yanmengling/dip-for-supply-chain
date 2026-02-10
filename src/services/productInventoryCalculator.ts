@@ -69,61 +69,10 @@ export interface ProductInventoryResult {
 }
 
 // ============================================================================
-// CSV解析函数
 // ============================================================================
 
-/**
- * 解析CSV文本为对象数组
- */
-function parseCSV<T>(csvText: string): T[] {
-    const lines = csvText.trim().split('\n');
-    if (lines.length < 2) return [];
-
-    const headers = lines[0].split(',').map(h => h.trim().replace(/\r$/, ''));
-    const data: T[] = [];
-
-    for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (!line) continue;
-
-        const values = line.split(',').map(v => v.trim().replace(/\r$/, ''));
-        const obj: any = {};
-
-        headers.forEach((header, index) => {
-            const value = values[index] || '';
-            // 尝试转换为数字
-            const numValue = parseFloat(value);
-            obj[header] = isNaN(numValue) ? value : numValue;
-        });
-
-        data.push(obj as T);
-    }
-
-    return data;
-}
-
-/**
- * 默认ID后备（更新为新的有效 ID）
- */
-const DEFAULT_IDS: Record<string, string> = {
-    bom: 'supplychain_hd0202_bom',
-    inventory: 'supplychain_hd0202_inventory',
-    product: 'supplychain_hd0202_product'
-};
-
-/**
- * 获取对象类型ID
- */
-const getObjectTypeId = (entityType: string): string => {
-    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
-    if (config?.objectTypeId) {
-        return config.objectTypeId;
-    }
-    return DEFAULT_IDS[entityType] || '';
-};
 
 // ============================================================================
-// CSV解析函数
 // ============================================================================
 
 /**
@@ -131,7 +80,7 @@ const getObjectTypeId = (entityType: string): string => {
  */
 export async function loadBOMData(): Promise<BOMItem[]> {
     try {
-        const objectTypeId = getObjectTypeId('bom');
+        const objectTypeId = apiConfigService.getOntologyObjectByEntityType('bom')?.objectTypeId || '';
         const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 5000 });
         const rawData = response.entries || [];
 
@@ -162,7 +111,7 @@ export async function loadBOMData(): Promise<BOMItem[]> {
  */
 export async function loadInventoryData(): Promise<MaterialInventory[]> {
     try {
-        const objectTypeId = getObjectTypeId('inventory');
+        const objectTypeId = apiConfigService.getOntologyObjectByEntityType('inventory')?.objectTypeId || '';
         const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 2000 });
         const rawData = response.entries || [];
 
@@ -199,7 +148,7 @@ export async function loadInventoryData(): Promise<MaterialInventory[]> {
  */
 export async function loadProductData(): Promise<ProductInfo[]> {
     try {
-        const objectTypeId = getObjectTypeId('product');
+        const objectTypeId = apiConfigService.getOntologyObjectByEntityType('product')?.objectTypeId || '';
         const response = await ontologyApi.queryObjectInstances(objectTypeId, { limit: 1000 });
         const rawData = response.entries || [];
 

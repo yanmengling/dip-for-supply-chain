@@ -1,7 +1,7 @@
 /**
  * 产品供应优化智能计算服务
  * 
- * 基于HD供应链CSV文件进行综合分析，提供：
+ * 基于供应链数据进行综合分析，提供：
  * - 产品供应分析（库存状态、需求趋势、供应风险）
  * - 优化建议（NPI选型、EOL决策、库存优化）
  * - 需求预测（基于历史订单数据）
@@ -328,9 +328,7 @@ async function loadDataFromOntology<T>(entityType: string, defaultId: string, ma
     }
 }
 
-/**
- * 加载产品信息CSV
- */
+
 /**
  * 加载产品信息 (API)
  * ID: 2004376134620897282
@@ -346,9 +344,7 @@ export async function loadProductInfo(): Promise<ProductInfo[]> {
     }), '产品信息');
 }
 
-/**
- * 加载订单信息CSV
- */
+
 /**
  * 加载订单信息 (API)
  * ObjectTypeId: supplychain_hd0202_salesorder
@@ -368,9 +364,7 @@ export async function loadOrderInfo(): Promise<OrderInfo[]> {
     }), '订单信息');
 }
 
-/**
- * 加载供应商信息CSV
- */
+
 /**
  * 加载供应商信息 (API)
  * ObjectTypeId: d5700je9olk4bpa66vkg
@@ -388,9 +382,7 @@ export async function loadSupplierInfo(): Promise<SupplierInfo[]> {
     }), '供应商信息');
 }
 
-/**
- * 加载BOM信息CSV
- */
+
 /**
  * 加载BOM信息 (API)
  * ID: 2004376134629285892
@@ -413,9 +405,7 @@ export async function loadBOMInfo(): Promise<BOMInfo[]> {
     }), 'BOM信息');
 }
 
-/**
- * 加载库存信息CSV
- */
+
 /**
  * 加载库存信息 (API)
  * ID: 2004376134625091585

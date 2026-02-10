@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API 认证状态检查</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #2196F3;
+        }
+
+        .error {
+            border-left-color: #f44336;
+            background: #ffebee;
+        }
+
+        .success {
+            border-left-color: #4CAF50;
+            background: #e8f5e9;
+        }
+
+        .warning {
+            border-left-color: #ff9800;
+            background: #fff3e0;
+        }
+
+        pre {
+            background: #263238;
+            color: #aed581;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button.secondary {
+            background: #2196F3;
+        }
+
+        button.secondary:hover {
+            background: #0b7dda;
+        }
+
+        .token-display {
+            word-break: break-all;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔐 API 认证状态检查</h1>
+
+        <div class="section">
+            <h2>当前 Token 信息</h2>
+            <div id="token-info"></div>
+        </div>
+
+        <div class="section">
+            <h2>环境变量配置</h2>
+            <div id="env-info"></div>
+        </div>
+
+        <div class="section">
+            <h2>API 连接测试</h2>
+            <button onclick="testOntologyAPI()">测试 Ontology API</button>
+            <button onclick="testAgentAPI()" class="secondary">测试 Agent API</button>
+            <div id="test-results" style="margin-top: 15px;"></div>
+        </div>
+
+        <div class="section">
+            <h2>Token 管理</h2>
+            <div>
+                <label for="new-token">新 Token:</label><br>
+                <input type="text" id="new-token" style="width: 100%; padding: 8px; margin: 10px 0;"
+                    placeholder="粘贴新的 token">
+                <br>
+                <button onclick="updateToken()">更新 Token</button>
+                <button onclick="clearToken()" class="secondary">清除 Token</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 显示当前 token 信息
+        function displayTokenInfo() {
+            const tokenInfo = document.getElementById('token-info');
+
+            // 从各个来源获取 token
+            const sessionToken = sessionStorage.getItem('api_auth_token');
+            const localToken = localStorage.getItem('api_auth_token');
+            const envToken = import.meta.env?.VITE_AGENT_API_TOKEN || import.meta.env?.VITE_API_TOKEN;
+
+            let html = '<table style="width: 100%; border-collapse: collapse;">';
+            html += '<tr style="border-bottom: 1px solid #ddd;"><th style="text-align: left; padding: 8px;">来源</th><th style="text-align: left; padding: 8px;">Token (前20字符)</th><th style="text-align: left; padding: 8px;">状态</th></tr>';
+
+            const addRow = (source, token, isPrimary = false) => {
+                const status = token ? '✅ 存在' : '❌ 不存在';
+                const tokenDisplay = token ? token.substring(0, 20) + '...' : '-';
+                const style = isPrimary ? 'background: #e8f5e9;' : '';
+                html += `<tr style="border-bottom: 1px solid #eee; ${style}">
+                    <td style="padding: 8px;">${source}</td>
+                    <td style="padding: 8px;" class="token-display">${tokenDisplay}</td>
+                    <td style="padding: 8px;">${status}</td>
+                </tr>`;
+            };
+
+            addRow('SessionStorage', sessionToken, true);
+            addRow('LocalStorage', localToken);
+            addRow('环境变量 (.env.local)', envToken);
+
+            html += '</table>';
+
+            // 显示实际使用的 token
+            const actualToken = sessionToken || localToken || envToken;
+            if (actualToken) {
+                html += `<div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 4px;">
+                    <strong>实际使用的 Token:</strong><br>
+                    <span class="token-display">${actualToken}</span>
+                </div>`;
+            } else {
+                html += `<div style="margin-top: 15px; padding: 10px; background: #ffebee; border-radius: 4px; color: #c62828;">
+                    <strong>⚠️ 警告: 没有找到有效的 Token!</strong>
+                </div>`;
+            }
+
+            tokenInfo.innerHTML = html;
+        }
+
+        // 显示环境变量信息
+        function displayEnvInfo() {
+            const envInfo = document.getElementById('env-info');
+            const env = import.meta.env;
+
+            let html = '<pre>';
+            html += `VITE_AGENT_API_BASE_URL: ${env.VITE_AGENT_API_BASE_URL || '未设置'}\n`;
+            html += `VITE_AGENT_APP_KEY: ${env.VITE_AGENT_APP_KEY || '未设置'}\n`;
+            html += `VITE_AGENT_API_TOKEN: ${env.VITE_AGENT_API_TOKEN ? env.VITE_AGENT_API_TOKEN.substring(0, 20) + '...' : '未设置'}\n`;
+            html += `VITE_API_TOKEN: ${env.VITE_API_TOKEN ? env.VITE_API_TOKEN.substring(0, 20) + '...' : '未设置'}\n`;
+            html += '</pre>';
+
+            envInfo.innerHTML = html;
+        }
+
+        // 测试 Ontology API
+        async function testOntologyAPI() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = '<p>⏳ 测试中...</p>';
+
+            try {
+                const token = sessionStorage.getItem('api_auth_token') ||
+                    localStorage.getItem('api_auth_token') ||
+                    import.meta.env?.VITE_AGENT_API_TOKEN;
+
+                const response = await fetch('/api/ontology-manager/v1/knowledge-networks/supplychain_hd0202/object-types?offset=0&limit=10', {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultsDiv.innerHTML = `
+                        <div class="section success">
+                            <h3>✅ Ontology API 测试成功</h3>
+                            <p>状态码: ${response.status}</p>
+                            <pre>${JSON.stringify(data, null, 2).substring(0, 500)}...</pre>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="section error">
+                            <h3>❌ Ontology API 测试失败</h3>
+                            <p>状态码: ${response.status}</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="section error">
+                        <h3>❌ Ontology API 测试失败</h3>
+                        <p>错误: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 测试 Agent API
+        async function testAgentAPI() {
+            const resultsDiv = document.getElementById('test-results');
+            resultsDiv.innerHTML = '<p>⏳ 测试中...</p>';
+
+            try {
+                const token = sessionStorage.getItem('api_auth_token') ||
+                    localStorage.getItem('api_auth_token') ||
+                    import.meta.env?.VITE_AGENT_API_TOKEN;
+
+                const appKey = import.meta.env?.VITE_AGENT_APP_KEY || '01KBCGGGD7RT20RW7J7DXJ5K96';
+
+                const response = await fetch(`/api/agent-app/v1/app/${appKey}/conversations?page=1&page_size=5`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    resultsDiv.innerHTML = `
+                        <div class="section success">
+                            <h3>✅ Agent API 测试成功</h3>
+                            <p>状态码: ${response.status}</p>
+                            <pre>${JSON.stringify(data, null, 2).substring(0, 500)}...</pre>
+                        </div>
+                    `;
+                } else {
+                    resultsDiv.innerHTML = `
+                        <div class="section error">
+                            <h3>❌ Agent API 测试失败</h3>
+                            <p>状态码: ${response.status}</p>
+                            <pre>${JSON.stringify(data, null, 2)}</pre>
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                resultsDiv.innerHTML = `
+                    <div class="section error">
+                        <h3>❌ Agent API 测试失败</h3>
+                        <p>错误: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        // 更新 token
+        function updateToken() {
+            const newToken = document.getElementById('new-token').value.trim();
+            if (!newToken) {
+                alert('请输入新的 token');
+                return;
+            }
+
+            // 同时更新 sessionStorage 和 localStorage
+            sessionStorage.setItem('api_auth_token', newToken);
+            localStorage.setItem('api_auth_token', newToken);
+
+            alert('Token 已更新!');
+            displayTokenInfo();
+            document.getElementById('new-token').value = '';
+        }
+
+        // 清除 token
+        function clearToken() {
+            sessionStorage.removeItem('api_auth_token');
+            localStorage.removeItem('api_auth_token');
+
+            alert('Token 已清除!');
+            displayTokenInfo();
+        }
+
+        // 页面加载时显示信息
+        displayTokenInfo();
+        displayEnvInfo();
+    </script>
+</body>
+
+</html>

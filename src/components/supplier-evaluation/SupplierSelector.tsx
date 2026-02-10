@@ -34,11 +34,11 @@ const SupplierSelector = ({
       try {
         let data: Array<any> = [];
 
-        // 大脑模式：加载供应商
+        // Load suppliers from purchase data
         const hdSuppliers = await loadSupplierList();
         data = hdSuppliers.map(s => ({
           ...s,
-          annualPurchaseAmount: 0 // DIP数据中此字段仅用于排序，列表展示时已有排序
+          annualPurchaseAmount: s.totalPurchaseAmount || 0
         })) as any;
 
         // Remove duplicates by supplierId

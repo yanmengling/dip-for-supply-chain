@@ -2,7 +2,6 @@
  * Delivery Data Service
  * 
  * Provides delivery order data loading from API.
- * Replaces CSV-based data loading with API calls.
  */
 
 import { ontologyApi } from '../api';

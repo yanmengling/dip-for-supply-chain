@@ -265,7 +265,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={kn.knowledgeNetworkId || ''}
                                 onChange={(e) => handleChange('knowledgeNetworkId', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: d56v1l69olk4bpa66uv0"
+                                placeholder="例如: supplychain_hd0202"
                             />
                         </FormField>
                     </>

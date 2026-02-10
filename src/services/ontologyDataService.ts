@@ -2,44 +2,22 @@
  * Ontology Data Service
  * 
  * Provides data loading from the HD Supply Chain Knowledge Network via API.
- * All functions now use ontologyApi.queryObjectInstances() instead of CSV files.
  */
 
 import { ontologyApi } from '../api';
 import type { QueryCondition } from '../api/ontologyApi';
-import { apiConfigService } from './apiConfigService';
+import { dynamicConfigService } from './dynamicConfigService';
 
 // ============================================================================
-// Object Type ID Getters (从配置中心动态获取)
+// Object Type ID Getters (从后端动态获取)
 // ============================================================================
 
 /**
- * 从配置中心获取对象类型 ID
+ * 从后端获取对象类型 ID
  * @param entityType - 实体类型（如 'product', 'supplier', 等）
  * @param entityName - 实体名称（用于错误提示）
  */
-function getObjectTypeId(entityType: string, entityName: string): string {
-    const config = apiConfigService.getOntologyObjectByEntityType(entityType);
-    if (!config || !config.enabled) {
-        console.error(`[OntologyDataService] 未找到启用的${entityName}对象配置 (entity_type: ${entityType})`);
-        throw new Error(`${entityName}对象未配置，请在配置中心添加 ${entityType} 类型的业务对象配置`);
-    }
-    console.log(`[OntologyDataService] 使用配置的${entityName}对象类型ID: ${config.objectTypeId}`);
-    return config.objectTypeId;
-}
-
-/**
- * 动态获取对象类型 ID
- * 注意：entityType 必须与配置中心的配置匹配
- */
-const getObjectTypeIds = () => ({
-    PRODUCT: getObjectTypeId('product', '产品'),           // supplychain_hd0202_product
-    SUPPLIER: getObjectTypeId('supplier', '供应商'),       // supplychain_hd0202_supplier
-    MATERIAL: getObjectTypeId('material', '物料'),         // supplychain_hd0202_material
-    BOM: getObjectTypeId('bom', 'BOM'),                    // supplychain_hd0202_bom
-    INVENTORY: getObjectTypeId('inventory', '库存'),       // supplychain_hd0202_inventory
-    SALES_ORDER: getObjectTypeId('order', '销售订单'),     // supplychain_hd0202_salesorder (注意：entityType 是 'order')
-});
+// Helper function removed - now using direct dynamicConfigService calls in each function
 
 // ============================================================================
 // In-memory cache
@@ -95,7 +73,12 @@ export async function loadProductEntities(forceReload: boolean = false): Promise
     console.log('[OntologyDataService] Loading product entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().PRODUCT, {
+        const productConfig = await dynamicConfigService.getConfigByEntityType('product');
+        if (!productConfig) {
+            throw new Error('产品对象未配置，请确保知识网络中存在 product 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(productConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });
@@ -139,7 +122,12 @@ export async function loadBOMEvents(forceReload: boolean = false): Promise<any[]
     console.log('[OntologyDataService] Loading BOM events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().BOM, {
+        const bomConfig = await dynamicConfigService.getConfigByEntityType('bom');
+        if (!bomConfig) {
+            throw new Error('BOM对象未配置，请确保知识网络中存在 bom 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(bomConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });
@@ -184,7 +172,12 @@ export async function loadInventoryEvents(forceReload: boolean = false): Promise
     console.log('[OntologyDataService] Loading inventory events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().INVENTORY, {
+        const inventoryConfig = await dynamicConfigService.getConfigByEntityType('inventory');
+        if (!inventoryConfig) {
+            throw new Error('库存对象未配置，请确保知识网络中存在 inventory 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(inventoryConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });
@@ -232,7 +225,12 @@ export async function loadSupplierEntities(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading supplier entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().SUPPLIER, {
+        const supplierConfig = await dynamicConfigService.getConfigByEntityType('supplier');
+        if (!supplierConfig) {
+            throw new Error('供应商对象未配置，请确保知识网络中存在 supplier 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(supplierConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });
@@ -303,7 +301,12 @@ export async function loadSalesOrderEvents(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading sales order events from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().SALES_ORDER, {
+        const orderConfig = await dynamicConfigService.getConfigByEntityType('order');
+        if (!orderConfig) {
+            throw new Error('销售订单对象未配置，请确保知识网络中存在 order 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(orderConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });
@@ -350,7 +353,12 @@ export async function loadMaterialEntities(forceReload: boolean = false): Promis
     console.log('[OntologyDataService] Loading material entities from API...');
 
     try {
-        const response = await ontologyApi.queryObjectInstances(getObjectTypeIds().MATERIAL, {
+        const materialConfig = await dynamicConfigService.getConfigByEntityType('material');
+        if (!materialConfig) {
+            throw new Error('物料对象未配置,请确保知识网络中存在 material 类型的对象');
+        }
+
+        const response = await ontologyApi.queryObjectInstances(materialConfig.objectTypeId, {
             limit: 10000,
             need_total: false,
         });

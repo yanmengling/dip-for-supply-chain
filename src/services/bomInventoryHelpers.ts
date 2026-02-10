@@ -139,9 +139,12 @@ export async function loadBOMDataViaLogicProperty() {
         const products = (productsResponse.entries || []).map((item: any) => ({
             // 兼容不同的字段名: material_number 是产品编码的实际字段名
             product_code: String(item.product_code || item.material_number || '').trim(),
+            material_number: String(item.material_number || item.product_code || '').trim(),
             // material_name 是产品名称的实际映射字段
             product_name: String(item.product_name || item.material_name || '').trim(),
             product_model: String(item.product_model || '').trim(),
+            // 保留原始数据以便使用正确的主键字段
+            _raw: item
         }));
 
         if (products.length === 0) {
@@ -152,12 +155,20 @@ export async function loadBOMDataViaLogicProperty() {
         console.log(`[BOM服务] 📦 加载了 ${products.length} 个产品`);
 
         // 构建 unique_identities 用于查询逻辑属性
-        // 🔑 关键修复：使用动态的 identityKey（从 primary_keys 获取）而不是硬编码
+        // 🔑 关键修复：使用动态的 identityKey（从 primary_keys 获取）并使用对应的字段值
         const uniqueIdentities = products
-            .filter(p => p.product_code) // 确保有编码
-            .map(p => ({
-                [identityKey]: p.product_code
-            }));
+            .filter(p => {
+                // 根据 identityKey 检查对应的字段是否存在
+                const fieldValue = p._raw[identityKey] || (p as any)[identityKey];
+                return !!fieldValue;
+            })
+            .map(p => {
+                // 使用原始数据中的字段值，确保字段名和值都匹配
+                const fieldValue = String(p._raw[identityKey] || (p as any)[identityKey] || '').trim();
+                return {
+                    [identityKey]: fieldValue
+                };
+            });
 
         if (uniqueIdentities.length === 0) {
             console.warn('[BOM服务] ⚠️ 所有产品的编码都为空，无法查询BOM');
@@ -176,15 +187,18 @@ export async function loadBOMDataViaLogicProperty() {
         // 🔑 关键修复：算子逻辑属性需要 dynamic_params
         // 根据错误信息，至少需要提供 cache 参数
         // Batching requests to avoid "Sandbox pool full"
-        const BATCH_SIZE = 50;
+        const BATCH_SIZE = 5; // 每批只处理5个产品,避免后端过载
         const totalItems = uniqueIdentities.length;
         const allPropertyValues: Record<string, any> = {};
 
-        console.log(`[BOM服务] 开始分批加载数据，总数: ${totalItems}, 每批: ${BATCH_SIZE}`);
+        console.log(`[BOM服务] 开始分批加载数据,总数: ${totalItems}, 每批: ${BATCH_SIZE}`);
 
         for (let i = 0; i < totalItems; i += BATCH_SIZE) {
             const batchIdentities = uniqueIdentities.slice(i, i + BATCH_SIZE);
-            console.log(`[BOM服务]正在加载第 ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(totalItems / BATCH_SIZE)} 批 (${batchIdentities.length} 个)...`);
+            const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+            const totalBatches = Math.ceil(totalItems / BATCH_SIZE);
+
+            console.log(`[BOM服务] 正在加载第 ${batchNumber}/${totalBatches} 批 (${batchIdentities.length} 个)...`);
 
             try {
                 // Prepare product codes for this batch to tell the backend script to only fetch these
@@ -214,11 +228,15 @@ export async function loadBOMDataViaLogicProperty() {
                     Object.assign(allPropertyValues, batchResponse);
                 }
 
-                // Add a small delay to be nice to the backend
-                // await new Promise(resolve => setTimeout(resolve, 100));
+                // 添加延迟以避免后端过载
+                // 除了最后一批,每批之间等待500ms
+                if (i + BATCH_SIZE < totalItems) {
+                    console.log(`[BOM服务] 等待500ms后继续下一批...`);
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
 
             } catch (batchError) {
-                console.error(`[BOM服务] ⚠️ 第 ${Math.floor(i / BATCH_SIZE) + 1} 批加载失败:`, batchError);
+                console.error(`[BOM服务] ⚠️ 第 ${batchNumber} 批加载失败:`, batchError);
                 // Continue to next batch instead of failing completely? 
                 // For now, let's log and continue, maybe some partial data is better than none.
             }

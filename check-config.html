@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Configuration Checker</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        pre { background: #f5f5f5; padding: 10px; overflow-x: auto; }
+        .error { color: red; }
+        .success { color: green; }
+        .warning { color: orange; }
+    </style>
+</head>
+<body>
+    <h1>Supply Chain Configuration Checker</h1>
+    <div id="output"></div>
+
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = message;
+            output.appendChild(div);
+        }
+
+        try {
+            const configData = localStorage.getItem('supply_chain_api_config_collection');
+            
+            if (!configData) {
+                log('❌ No configuration found in localStorage', 'error');
+            } else {
+                const config = JSON.parse(configData);
+                
+                log(`<h2>Configuration Version: ${config.version}</h2>`);
+                log(`<h3>Ontology Objects (${config.ontologyObjects?.length || 0}):</h3>`);
+                
+                if (config.ontologyObjects && config.ontologyObjects.length > 0) {
+                    const table = document.createElement('table');
+                    table.border = '1';
+                    table.style.borderCollapse = 'collapse';
+                    table.style.width = '100%';
+                    
+                    table.innerHTML = `
+                        <tr style="background: #ddd;">
+                            <th style="padding: 8px;">ID</th>
+                            <th style="padding: 8px;">Name</th>
+                            <th style="padding: 8px;">Entity Type</th>
+                            <th style="padding: 8px;">Object Type ID</th>
+                            <th style="padding: 8px;">Enabled</th>
+                        </tr>
+                    `;
+                    
+                    config.ontologyObjects.forEach(obj => {
+                        const row = table.insertRow();
+                        const isSupplier = obj.id === 'oo_supplier' || obj.entityType === 'supplier';
+                        if (isSupplier) {
+                            row.style.background = '#ffffcc';
+                            row.style.fontWeight = 'bold';
+                        }
+                        
+                        row.innerHTML = `
+                            <td style="padding: 8px;">${obj.id}</td>
+                            <td style="padding: 8px;">${obj.name}</td>
+                            <td style="padding: 8px;">${obj.entityType}</td>
+                            <td style="padding: 8px;">${obj.objectTypeId}</td>
+                            <td style="padding: 8px; color: ${obj.enabled ? 'green' : 'red'};">
+                                ${obj.enabled ? '✓ Enabled' : '✗ Disabled'}
+                            </td>
+                        `;
+                    });
+                    
+                    output.appendChild(table);
+                    
+                    // Check for oo_supplier specifically
+                    const supplierConfig = config.ontologyObjects.find(o => o.id === 'oo_supplier');
+                    
+                    log('<h3>Diagnostic Results:</h3>');
+                    
+                    if (!supplierConfig) {
+                        log('❌ <strong>PROBLEM FOUND:</strong> No configuration with ID "oo_supplier" exists!', 'error');
+                        log('💡 <strong>Solution:</strong> You need to create or rename a configuration to use ID "oo_supplier"', 'warning');
+                        
+                        const supplierByEntity = config.ontologyObjects.find(o => o.entityType === 'supplier');
+                        if (supplierByEntity) {
+                            log(`ℹ️ Found supplier config with different ID: "${supplierByEntity.id}"`, 'info');
+                            log(`💡 <strong>Quick Fix:</strong> Either rename "${supplierByEntity.id}" to "oo_supplier" or update the code to use "${supplierByEntity.id}"`, 'warning');
+                        }
+                    } else if (!supplierConfig.enabled) {
+                        log('❌ <strong>PROBLEM FOUND:</strong> Configuration "oo_supplier" exists but is DISABLED!', 'error');
+                        log('💡 <strong>Solution:</strong> Enable the "oo_supplier" configuration in the Configuration Center', 'warning');
+                    } else if (!supplierConfig.objectTypeId) {
+                        log('❌ <strong>PROBLEM FOUND:</strong> Configuration "oo_supplier" is missing objectTypeId!', 'error');
+                        log('💡 <strong>Solution:</strong> Set the objectTypeId in the Configuration Center', 'warning');
+                    } else {
+                        log('✅ Configuration "oo_supplier" is properly configured!', 'success');
+                        log(`   - ID: ${supplierConfig.id}`, 'success');
+                        log(`   - Object Type ID: ${supplierConfig.objectTypeId}`, 'success');
+                        log(`   - Enabled: ${supplierConfig.enabled}`, 'success');
+                    }
+                    
+                } else {
+                    log('❌ No ontology objects configured!', 'error');
+                }
+                
+                log('<hr>');
+                log('<h3>Full Configuration (JSON):</h3>');
+                log(`<pre>${JSON.stringify(config, null, 2)}</pre>`);
+            }
+        } catch (error) {
+            log(`❌ Error: ${error.message}`, 'error');
+            log(`<pre>${error.stack}</pre>`, 'error');
+        }
+    </script>
+</body>
+</html>

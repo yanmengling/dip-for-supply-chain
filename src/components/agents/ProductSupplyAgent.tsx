@@ -1,7 +1,7 @@
 /**
  * 产品供应优化智能体组件
  * 
- * 基于CSV数据智能计算展示：
+ * 基于供应链数据智能计算展示：
  * - 产品供应分析
  * - 优化建议
  * - 需求预测
@@ -67,8 +67,8 @@ export const ProductSupplyAgent: React.FC = () => {
                             key={analysis.productId}
                             onClick={() => setSelectedProduct(analysis)}
                             className={`p-4 rounded-lg border-2 transition-all text-left ${selectedProduct?.productId === analysis.productId
-                                    ? 'border-indigo-500 bg-indigo-50'
-                                    : 'border-slate-200 hover:border-indigo-300'
+                                ? 'border-indigo-500 bg-indigo-50'
+                                : 'border-slate-200 hover:border-indigo-300'
                                 }`}
                         >
                             <div className="flex items-start justify-between">
@@ -77,10 +77,10 @@ export const ProductSupplyAgent: React.FC = () => {
                                     <p className="text-xs text-slate-500 mt-1">{analysis.productId}</p>
                                 </div>
                                 <div className={`px-2 py-1 rounded text-xs font-medium ${analysis.inventoryStatus.stockStatus === 'sufficient'
-                                        ? 'bg-green-100 text-green-700'
-                                        : analysis.inventoryStatus.stockStatus === 'warning'
-                                            ? 'bg-yellow-100 text-yellow-700'
-                                            : 'bg-red-100 text-red-700'
+                                    ? 'bg-green-100 text-green-700'
+                                    : analysis.inventoryStatus.stockStatus === 'warning'
+                                        ? 'bg-yellow-100 text-yellow-700'
+                                        : 'bg-red-100 text-red-700'
                                     }`}>
                                     {analysis.inventoryStatus.stockStatus === 'sufficient' ? '充足' :
                                         analysis.inventoryStatus.stockStatus === 'warning' ? '警告' : '紧急'}
@@ -132,10 +132,10 @@ export const ProductSupplyAgent: React.FC = () => {
                             <div className="p-4 bg-slate-50 rounded-lg">
                                 <p className="text-sm text-slate-500">状态</p>
                                 <p className={`text-lg font-bold mt-1 ${selectedProduct.inventoryStatus.stockStatus === 'sufficient'
-                                        ? 'text-green-600'
-                                        : selectedProduct.inventoryStatus.stockStatus === 'warning'
-                                            ? 'text-yellow-600'
-                                            : 'text-red-600'
+                                    ? 'text-green-600'
+                                    : selectedProduct.inventoryStatus.stockStatus === 'warning'
+                                        ? 'text-yellow-600'
+                                        : 'text-red-600'
                                     }`}>
                                     {selectedProduct.inventoryStatus.stockStatus === 'sufficient' ? '充足' :
                                         selectedProduct.inventoryStatus.stockStatus === 'warning' ? '警告' : '紧急'}
@@ -195,10 +195,10 @@ export const ProductSupplyAgent: React.FC = () => {
                                 <div className="flex items-center justify-between mb-4">
                                     <span className="text-sm font-medium text-slate-700">风险等级</span>
                                     <span className={`px-3 py-1 rounded-full text-sm font-medium ${selectedProduct.supplyRisk.riskLevel === 'low'
-                                            ? 'bg-green-100 text-green-700'
-                                            : selectedProduct.supplyRisk.riskLevel === 'medium'
-                                                ? 'bg-yellow-100 text-yellow-700'
-                                                : 'bg-red-100 text-red-700'
+                                        ? 'bg-green-100 text-green-700'
+                                        : selectedProduct.supplyRisk.riskLevel === 'medium'
+                                            ? 'bg-yellow-100 text-yellow-700'
+                                            : 'bg-red-100 text-red-700'
                                         }`}>
                                         {selectedProduct.supplyRisk.riskLevel === 'low' ? '低风险' :
                                             selectedProduct.supplyRisk.riskLevel === 'medium' ? '中风险' : '高风险'}
@@ -249,8 +249,8 @@ export const ProductSupplyAgent: React.FC = () => {
                                 <div className="flex justify-between">
                                     <span className="text-slate-500">调整动作:</span>
                                     <span className={`font-medium ${selectedProduct.inventoryOptimization.adjustmentAction === 'increase' ? 'text-blue-600' :
-                                            selectedProduct.inventoryOptimization.adjustmentAction === 'decrease' ? 'text-orange-600' :
-                                                'text-green-600'
+                                        selectedProduct.inventoryOptimization.adjustmentAction === 'decrease' ? 'text-orange-600' :
+                                            'text-green-600'
                                         }`}>
                                         {selectedProduct.inventoryOptimization.adjustmentAction === 'increase' ? '增加' :
                                             selectedProduct.inventoryOptimization.adjustmentAction === 'decrease' ? '减少' : '维持'}

@@ -1,7 +1,7 @@
 /**
  * Production Plan Calculator
  * 
- * 从CSV文件加载生产计划数据并进行智能计算分析
+ * 加载生产计划数据并进行智能计算分析 (基于 Ontology API)
  */
 
 // 生产计划数据类型
@@ -238,7 +238,7 @@ export async function getPendingOrderQuantity(productCode: string): Promise<numb
 export async function analyzeProducts(plans: ProductionPlan[]): Promise<ProductAnalysis[]> {
     // 获取所有唯一的产品编码
     const uniqueProductCodes = [...new Set(plans.map(plan => plan.code).filter(code => code))];
-    
+
     // 并行查询所有产品的在手订单数量
     const pendingOrderMap = new Map<string, number>();
     await Promise.all(
@@ -294,10 +294,10 @@ export async function calculateProductionStats(plans: ProductionPlan[]): Promise
 
     // 获取产品分析（包含在手订单数量）
     const productAnalysis = await analyzeProducts(plans);
-    
+
     // 计算所有产品的在手订单数量总和
     const totalPendingOrderQuantity = productAnalysis.reduce(
-        (sum, product) => sum + (product.pendingOrderQuantity || 0), 
+        (sum, product) => sum + (product.pendingOrderQuantity || 0),
         0
     );
 

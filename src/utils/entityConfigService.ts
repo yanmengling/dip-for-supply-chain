@@ -21,8 +21,17 @@ import {
   calculateMaterialLogicRules,
   calculateOrderLogicRules
 } from './logicRuleService';
-// NOTE: ontologyDataService has been removed (CSV data sources deleted)
-// The populateEntityConfigs function below is disabled until API-based data loading is implemented
+import {
+  loadProductEntities,
+  loadInventoryEvents,
+  loadBOMEvents,
+  loadSupplierEntities,
+  loadMaterialEntities,
+  loadMaterialProcurementEvents,
+  loadSupplierPerformanceScores,
+  loadSalesOrderEvents
+} from '../services/ontologyDataService';
+
 // Import additional types needed for local storage
 import type {
   Product, Supplier, Order, Material, MaterialStock,
@@ -40,19 +49,10 @@ export let supplier360ScorecardsData: Supplier360Scorecard[] = [];
 export let mainMaterialSuppliersData: MainMaterialSupplier[] = [];
 
 // Static data for entities not yet in ontology
-export let factoriesData: any[] = [
-  { factoryId: 'FAC-001', factoryCode: 'F001', factoryName: '深圳生产基地', capacity: 10000, location: 'Shenzhen', productList: ['PROD-T20', 'PROD-T40'], materialList: ['MAT-001'], warehouseList: ['WH-001'] }
-];
-export let warehousesData: any[] = [
-  { warehouseCode: 'WH-001', warehouseName: '深圳中心仓', location: 'Shenzhen', capacity: 50000, currentStock: 32000, associatedFactory: 'F001', storageType: '常温', temperatureControl: '25℃' }
-];
-export let logisticsData: any[] = [
-  { logisticsId: 'LOG-001', companyName: '顺丰速运', contact: '张调度', phone: '13800138000', vehicleCount: 50, routeCount: 120 }
-];
-export let customersData: any[] = [
-  { customerId: 'CUST-001', customerName: '比亚迪汽车', contact: '王经理', phone: '13900000001', email: 'byd@example.com', creditRating: 'AAA', address: '深圳坪山' },
-  { customerId: 'CUST-002', customerName: '吉利汽车', contact: '李经理', phone: '13900000002', email: 'geely@example.com', creditRating: 'AA', address: '杭州湾' }
-];
+export let factoriesData: any[] = [];
+export let warehousesData: any[] = [];
+export let logisticsData: any[] = [];
+export let customersData: any[] = [];
 export let actionHistories: ActionHistory[] = [];
 
 // Configuration storage
@@ -456,25 +456,13 @@ export const getRoleById = (roleId: string): Role | null => {
 };
 
 /**
- * Populate entity configurations from mock data
- * 
- * NOTE: This function is currently DISABLED because ontologyDataService (CSV data sources) has been removed.
- * To restore functionality, implement API-based data loading.
+ * Populate entity configurations from Ontology API
  * 
  * This function should be called after recreateAllMockDataRecords() to ensure
  * data consistency between in-memory data and entityConfigs Map.
  */
 export const populateEntityConfigs = async (): Promise<void> => {
-  console.warn('[EntityConfigService] populateEntityConfigs is disabled - CSV data sources removed');
-  console.warn('[EntityConfigService] To restore, implement API-based data loading');
-  return;
-
-  /* DISABLED CODE - requires ontologyDataService
-  // Original implementation commented out below:
-  // Clear existing entityConfigs to avoid stale data
-  entityConfigs.clear();
-
-  console.log('=== Populating Entity Configurations from Ontology CSV ===');
+  console.log('=== Populating Entity Configurations from Ontology API ===');
 
   try {
     // Load all required data from Ontology Data Service
@@ -632,9 +620,8 @@ export const populateEntityConfigs = async (): Promise<void> => {
     });
 
   } catch (error) {
-    console.error('Failed to populate entity configs from Ontology CSVs:', error);
+    console.error('Failed to populate entity configs from Ontology API:', error);
   }
-  */ // END DISABLED CODE
 
   console.log('=== Populating Entity Configurations ===');
 
@@ -1453,7 +1440,7 @@ export const populateEntityConfigs = async (): Promise<void> => {
 
 /**
  * Initialize entity data
- * Triggers async population of entity configs from API/CSV
+ * Triggers async population of entity configs from API
  */
 export const initializeEntityData = (): void => {
   populateEntityConfigs().catch(error => {

@@ -135,6 +135,26 @@ class ConfigStorageService {
                     needsSave = true;
                 }
 
+                // MIGRATION 1.0.9: Add purchase order and purchase request configs if missing
+                const newOntologyObjectIds = ['oo_purchase_order', 'oo_purchase_request'];
+                let addedOntologyObjects = 0;
+
+                newOntologyObjectIds.forEach(id => {
+                    const exists = parsed.ontologyObjects?.some(o => o.id === id);
+                    if (!exists) {
+                        const config = defaults.ontologyObjects?.find(o => o.id === id);
+                        if (config) {
+                            parsed.ontologyObjects!.push(config);
+                            addedOntologyObjects++;
+                        }
+                    }
+                });
+
+                if (addedOntologyObjects > 0) {
+                    console.log(`[ConfigStorage] Migration: Added ${addedOntologyObjects} new ontology object configs (purchase order/request)`);
+                    needsSave = true;
+                }
+
                 // Update version
                 parsed.version = this.version;
                 needsSave = true;
@@ -183,6 +203,39 @@ class ConfigStorageService {
             throw new Error('Failed to save configuration to localStorage');
         }
     }
+
+    /**
+     * Sync ontology object configurations from backend API
+     * This method fetches the latest object types from the backend and updates localStorage
+     */
+    async syncFromBackend(): Promise<void> {
+        try {
+            console.log('[ConfigStorage] Syncing configuration from backend...');
+
+            // Dynamically import to avoid circular dependency
+            const { dynamicConfigService } = await import('./dynamicConfigService');
+
+            // Get current configuration
+            const config = this.loadConfig();
+
+            // Fetch object types from backend
+            const backendConfigs = await dynamicConfigService.getObjectTypeConfigs();
+
+            console.log(`[ConfigStorage] Fetched ${backendConfigs.length} object type configs from backend`);
+
+            // Update ontologyObjects with backend data
+            config.ontologyObjects = backendConfigs;
+
+            // Save updated configuration
+            this.saveConfig(config);
+
+            console.log('[ConfigStorage] Configuration synced successfully');
+        } catch (error) {
+            console.error('[ConfigStorage] Failed to sync from backend:', error);
+            throw error;
+        }
+    }
+
 
     /**
      * Export configuration as JSON string
@@ -388,7 +441,7 @@ class ConfigStorageService {
                     type: ApiConfigType.KNOWLEDGE_NETWORK,
                     name: '供应链大脑网络',
                     description: '供应链大脑标准业务环境',
-                    knowledgeNetworkId: 'd56v1l69olk4bpa66uv0',
+                    knowledgeNetworkId: 'supplychain_hd0202',
                     enabled: true,
                     objectTypes: {
                         supplier: { id: 'supplier', name: '供应商', icon: 'Users' },
@@ -404,116 +457,17 @@ class ConfigStorageService {
                     updatedAt: now
                 }
             ],
-            ontologyObjects: [
-                {
-                    id: 'oo_supplier',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '供应商对象',
-                    description: '供应链大脑 - 供应商对象类型',
-                    objectTypeId: 'supplychain_hd0202_supplier',
-                    entityType: 'supplier',
-                    enabled: true,
-                    tags: ['supplier'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_supplier_evaluation',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '供应商评估对象',
-                    description: '供应链大脑 - 供应商评估对象类型',
-                    objectTypeId: 'd5700je9olk4bpa66vkg',
-                    entityType: 'supplier_evaluation',
-                    enabled: true,
-                    tags: ['supplier', 'evaluation'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_material',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '物料对象',
-                    description: '供应链大脑 - 物料对象类型',
-                    objectTypeId: 'supplychain_hd0202_material',
-                    entityType: 'material',
-                    enabled: true,
-                    tags: ['material'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_product',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '产品对象',
-                    description: '供应链大脑 - 产品对象类型',
-                    objectTypeId: 'supplychain_hd0202_product',
-                    entityType: 'product',
-                    enabled: true,
-                    tags: ['product'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_bom',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: 'BOM对象',
-                    description: '供应链大脑 - BOM对象类型',
-                    objectTypeId: 'supplychain_hd0202_bom',
-                    entityType: 'bom',
-                    enabled: true,
-                    tags: ['bom'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_inventory',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '库存对象',
-                    description: '供应链大脑 - 库存对象类型',
-                    objectTypeId: 'supplychain_hd0202_inventory',
-                    entityType: 'inventory',
-                    enabled: true,
-                    tags: ['inventory'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_sales_order',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '销售订单对象',
-                    description: '供应链大脑 - 销售订单对象类型',
-                    objectTypeId: 'supplychain_hd0202_salesorder',
-                    entityType: 'order',  // 修改为 'order' 以匹配用户配置
-                    enabled: true,
-                    tags: ['order', 'sales', 'cockpit'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_customer',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '客户对象',
-                    description: '供应链大脑 - 客户对象类型',
-                    objectTypeId: 'supplychain_hd0202_customer',
-                    entityType: 'customer',
-                    enabled: true,
-                    tags: ['customer'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'oo_production_plan',
-                    type: ApiConfigType.ONTOLOGY_OBJECT,
-                    name: '工厂生产计划',
-                    description: '供应链大脑 - 生产计划对象类型 (MPS)',
-                    objectTypeId: 'supplychain_hd0202_mps',
-                    entityType: 'salesorder',  // 修改为 'salesorder' 以匹配用户配置
-                    enabled: true,
-                    tags: ['production', 'plan', 'mps'],
-                    createdAt: now,
-                    updatedAt: now
-                }
-            ],
+            // ============================================================
+            // Ontology Objects - 完全动态加载
+            // ============================================================
+            // 注意: 对象类型配置现在完全从后端 API 动态获取
+            // 使用 dynamicConfigService.getObjectTypeConfigs() 获取最新配置
+            // 不再使用硬编码配置,确保数据源唯一性
+            ontologyObjects: [],
+
+            // ============================================================
+            // Metric Models - 保留最小化配置
+            // ============================================================
             metricModels: [
 
                 // 供应链图谱指标 - API 模式

@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>检查后端对象类型</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            color: #333;
+            margin-top: 0;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 15px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 14px 28px;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 6px;
+            margin: 10px 5px;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        button:hover {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border-left: 4px solid #28a745;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border-left: 4px solid #dc3545;
+        }
+
+        .warning {
+            background: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffc107;
+        }
+
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border-left: 4px solid #17a2b8;
+        }
+
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 13px;
+            max-height: 400px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        tr:hover {
+            background: #f5f5f5;
+        }
+
+        .section {
+            margin: 25px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🔍 检查后端对象类型</h1>
+
+        <div class="section">
+            <h2>说明</h2>
+            <div class="info">
+                这个工具会帮你检查后端实际存在哪些对象类型,以便正确配置采购订单和采购申请单。
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>操作</h2>
+            <button onclick="checkBackendTypes()">🔍 检查后端对象类型</button>
+            <button onclick="disablePurchaseRequest()">⚠️ 禁用采购申请单配置</button>
+            <button onclick="showCurrentConfig()">📋 查看当前配置</button>
+        </div>
+
+        <div class="section">
+            <h2>结果</h2>
+            <div id="result"></div>
+        </div>
+    </div>
+
+    <script>
+        const STORAGE_KEY = 'supply_chain_api_config_collection';
+        const API_BASE = '/api/ontology-query/v1/knowledge-networks/supplychain_hd0202/object-types';
+
+        async function checkBackendTypes() {
+            showResult('🔄 正在检查后端对象类型...', 'info');
+
+            const typesToCheck = [
+                { name: '采购订单', id: 'supplychain_hd0202_po' },
+                { name: '采购申请单', id: 'supplychain_hd0202_pr' },
+                { name: '供应商', id: 'supplychain_hd0202_supplier' },
+                { name: '物料', id: 'supplychain_hd0202_material' },
+            ];
+
+            let html = '<table><thead><tr><th>对象类型</th><th>ID</th><th>状态</th></tr></thead><tbody>';
+
+            for (const type of typesToCheck) {
+                try {
+                    const response = await fetch(`${API_BASE}/${type.id}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ limit: 1, need_total: false })
+                    });
+
+                    if (response.ok) {
+                        html += `<tr><td>${type.name}</td><td><code>${type.id}</code></td><td style="color: green;">✅ 存在</td></tr>`;
+                    } else {
+                        const error = await response.text();
+                        html += `<tr><td>${type.name}</td><td><code>${type.id}</code></td><td style="color: red;">❌ 不存在</td></tr>`;
+                    }
+                } catch (error) {
+                    html += `<tr><td>${type.name}</td><td><code>${type.id}</code></td><td style="color: orange;">⚠️ 检查失败</td></tr>`;
+                }
+            }
+
+            html += '</tbody></table>';
+            html += '<div class="warning" style="margin-top: 20px;"><strong>建议:</strong> 只启用后端实际存在的对象类型配置</div>';
+
+            document.getElementById('result').innerHTML = html;
+        }
+
+        function disablePurchaseRequest() {
+            try {
+                const config = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+                if (!config) {
+                    showResult('❌ 配置不存在', 'error');
+                    return;
+                }
+
+                // 禁用采购申请单配置
+                const purchaseRequestConfig = config.ontologyObjects.find(o => o.id === 'oo_purchase_request');
+                if (purchaseRequestConfig) {
+                    purchaseRequestConfig.enabled = false;
+                    config.lastUpdated = Date.now();
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+                    showResult('✅ 已禁用采购申请单配置。正在刷新页面...', 'success');
+
+                    setTimeout(() => {
+                        window.location.href = 'http://localhost:5173';
+                    }, 1500);
+                } else {
+                    showResult('ℹ️ 未找到采购申请单配置', 'info');
+                }
+            } catch (error) {
+                showResult(`❌ 操作失败: ${error.message}`, 'error');
+            }
+        }
+
+        function showCurrentConfig() {
+            try {
+                const config = JSON.parse(localStorage.getItem(STORAGE_KEY));
+
+                if (!config) {
+                    showResult('❌ 配置不存在', 'error');
+                    return;
+                }
+
+                const purchaseConfigs = config.ontologyObjects.filter(o =>
+                    o.id === 'oo_purchase_order' || o.id === 'oo_purchase_request'
+                );
+
+                let html = '<table><thead><tr><th>配置名称</th><th>ID</th><th>ObjectTypeId</th><th>状态</th></tr></thead><tbody>';
+
+                purchaseConfigs.forEach(cfg => {
+                    html += `<tr>
+                        <td>${cfg.name}</td>
+                        <td><code>${cfg.id}</code></td>
+                        <td><code>${cfg.objectTypeId}</code></td>
+                        <td>${cfg.enabled ? '<span style="color: green;">✅ 已启用</span>' : '<span style="color: red;">❌ 已禁用</span>'}</td>
+                    </tr>`;
+                });
+
+                html += '</tbody></table>';
+
+                if (purchaseConfigs.length === 0) {
+                    html = '<div class="warning">⚠️ 未找到采购相关配置</div>';
+                }
+
+                document.getElementById('result').innerHTML = html;
+            } catch (error) {
+                showResult(`❌ 查看失败: ${error.message}`, 'error');
+            }
+        }
+
+        function showResult(message, type = 'info') {
+            document.getElementById('result').innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+    </script>
+</body>
+
+</html>

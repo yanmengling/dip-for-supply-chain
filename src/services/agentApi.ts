@@ -376,6 +376,7 @@ class AgentApiClient {
   private getHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      'x-business-domain': 'bd_public',
     };
 
     // Try to get token from config

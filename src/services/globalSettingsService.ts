@@ -10,7 +10,7 @@ import { dipEnvironmentService } from './dipEnvironmentService';
 
 const STORAGE_KEY = 'supply_chain_global_settings';
 const DEFAULT_TOKEN = 'ory_at_eUV5LdKEBbhNINlTSLTlnVlApKMQo3zpYF4zzoK5vWk.hU03-W389ctdeEPcUC-DcbnwoTp6fZkni-vE7V88-Es';
-const DEFAULT_KN_ID = 'd56v1l69olk4bpa66uv0'; // Default for dip-cloud environment
+const DEFAULT_KN_ID = 'supplychain_hd0202'; // Default for dip-cloud environment
 
 class GlobalSettingsService {
     /**
@@ -178,7 +178,7 @@ class GlobalSettingsService {
         try {
             const token = this.getApiToken();
 
-            const knId = this.getKnowledgeNetworkId() || 'd56v1l69olk4bpa66uv0';
+            const knId = this.getKnowledgeNetworkId() || 'supplychain_hd0202';
 
             // Test with ontology endpoint (more reliable than metric health check)
             // Use proxy-manager which maps to /api/ontology-manager

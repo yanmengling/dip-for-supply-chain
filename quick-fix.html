@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>一键禁用采购申请单</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            max-width: 600px;
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-top: 0;
+            font-size: 28px;
+        }
+
+        .big-button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 20px 40px;
+            font-size: 20px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin: 20px 0;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .big-button:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        }
+
+        .status {
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .description {
+            color: #666;
+            line-height: 1.6;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>⚡ 一键修复配置</h1>
+
+        <div class="description">
+            后端不存在采购申请单对象类型,点击下方按钮禁用该配置,系统将只使用采购订单数据。
+        </div>
+
+        <button class="big-button" onclick="fixConfig()">
+            🔧 禁用采购申请单并刷新
+        </button>
+
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function fixConfig() {
+            try {
+                const config = JSON.parse(localStorage.getItem('supply_chain_api_config_collection'));
+
+                if (!config) {
+                    showResult('❌ 配置不存在', 'error');
+                    return;
+                }
+
+                // 禁用采购申请单
+                const purchaseRequestConfig = config.ontologyObjects.find(o => o.id === 'oo_purchase_request');
+                if (purchaseRequestConfig) {
+                    purchaseRequestConfig.enabled = false;
+                }
+
+                // 确保采购订单已启用
+                const purchaseOrderConfig = config.ontologyObjects.find(o => o.id === 'oo_purchase_order');
+                if (purchaseOrderConfig) {
+                    purchaseOrderConfig.enabled = true;
+                }
+
+                config.lastUpdated = Date.now();
+                localStorage.setItem('supply_chain_api_config_collection', JSON.stringify(config));
+
+                showResult('✅ 配置已更新!正在跳转到主页面...', 'success');
+
+                setTimeout(() => {
+                    window.location.href = 'http://localhost:5173';
+                }, 1500);
+            } catch (error) {
+                showResult(`❌ 操作失败: ${error.message}`, 'error');
+            }
+        }
+
+        function showResult(message, type = 'info') {
+            document.getElementById('result').innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        // Auto-run on load
+        window.addEventListener('load', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('auto') === 'true') {
+                fixConfig();
+            }
+        });
+    </script>
+</body>
+
+</html>

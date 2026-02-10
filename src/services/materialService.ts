@@ -13,75 +13,141 @@ import { ontologyApi } from '../api';
  * This avoids calling separate material and procurement APIs
  */
 export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
-    console.log('[MaterialService] Getting main materials from supplier API...');
+    console.log('[MaterialService] Getting main materials from purchase data...');
 
     try {
         const { ontologyApi } = await import('../api');
-        const { apiConfigService } = await import('./apiConfigService');
+        const { dynamicConfigService } = await import('./dynamicConfigService');
 
-        // Load supplier-material relationship data using config
-        const objectTypeId = await apiConfigService.getOntologyObjectId('oo_supplier');
+        // Get purchase order and purchase request configurations from backend
+        const poConfig = await dynamicConfigService.getConfigByEntityType('purchase_order');
+        const prConfig = await dynamicConfigService.getConfigByEntityType('purchase_request');
 
-        if (!objectTypeId) {
-            console.warn('[MaterialService] Missing configuration for "oo_supplier". Data fetching skipped. Please check Configuration Center.');
+        const purchaseOrderTypeId = poConfig?.objectTypeId;
+        const purchaseRequestTypeId = prConfig?.objectTypeId;
+
+        if (!purchaseOrderTypeId && !purchaseRequestTypeId) {
+            console.warn('[MaterialService] Missing configuration for both purchase orders and purchase requests.');
+            console.warn('[MaterialService] Please ensure these object types exist in the knowledge network.');
             return [];
         }
 
-        const response = await ontologyApi.queryObjectInstances(objectTypeId, {
-            limit: 10000,
-            need_total: false,
-        });
 
-        // Group by material and calculate total purchase amount
+        // Query both purchase orders and purchase requests in parallel
+        const queries: Promise<any>[] = [];
+
+        if (purchaseOrderTypeId) {
+            console.log(`[MaterialService] Querying purchase orders (${purchaseOrderTypeId})...`);
+            queries.push(
+                ontologyApi.queryObjectInstances(purchaseOrderTypeId, {
+                    limit: 10000,
+                    need_total: false,
+                }).catch(err => {
+                    console.error('[MaterialService] Failed to query purchase orders:', err);
+                    return { entries: [] };
+                })
+            );
+        } else {
+            queries.push(Promise.resolve({ entries: [] }));
+        }
+
+        if (purchaseRequestTypeId) {
+            console.log(`[MaterialService] Querying purchase requests (${purchaseRequestTypeId})...`);
+            queries.push(
+                ontologyApi.queryObjectInstances(purchaseRequestTypeId, {
+                    limit: 10000,
+                    need_total: false,
+                }).catch(err => {
+                    console.error('[MaterialService] Failed to query purchase requests:', err);
+                    return { entries: [] };
+                })
+            );
+        } else {
+            queries.push(Promise.resolve({ entries: [] }));
+        }
+
+        const [purchaseOrdersResponse, purchaseRequestsResponse] = await Promise.all(queries);
+
+        // Merge all entries
+        const allEntries = [
+            ...(purchaseOrdersResponse.entries || []),
+            ...(purchaseRequestsResponse.entries || [])
+        ];
+
+        console.log(`[MaterialService] Retrieved ${allEntries.length} purchase records`);
+
+        // Group by material and calculate metrics
         const materialMap = new Map<string, {
             materialCode: string;
             materialName: string;
-            suppliers: Array<{
+            suppliers: Map<string, {
                 supplierId: string;
                 supplierName: string;
-                unitPrice: number;
-                paymentTerms: string;
+                totalAmount: number;
+                totalQuantity: number;
+                avgUnitPrice: number;
+                orderCount: number;
             }>;
             totalPurchaseAmount: number;
         }>();
 
-        response.entries.forEach((item: any) => {
-            const materialCode = item.provided_material_code;
-            const materialName = item.provided_material_name;
-            const supplierCode = item.supplier_code;
-            const supplierName = item.supplier;
-            const unitPrice = Number(item.unit_price_with_tax || 0);
+        allEntries.forEach((item: any) => {
+            // Extract fields with multiple possible field names
+            const materialCode = item.material_code || item.materialCode || item.material_id || item.materialId;
+            const materialName = item.material_name || item.materialName || item.material || item.物料名称;
+            const supplierCode = item.supplier_code || item.supplierCode || item.supplier_id || item.supplierId;
+            const supplierName = item.supplier_name || item.supplierName || item.supplier || item.供应商;
+            const quantity = Number(item.quantity || item.purchase_quantity || item.purchaseQuantity || 0);
+            const unitPrice = Number(item.unit_price || item.unitPrice || item.price || item.单价 || 0);
+            const totalAmount = Number(item.total_amount || item.totalAmount || item.amount || item.总金额 || (quantity * unitPrice));
 
-            if (!materialCode) return;
+            // Skip if missing critical fields
+            if (!materialCode || !supplierCode) {
+                return;
+            }
 
+            // Initialize material entry if not exists
             if (!materialMap.has(materialCode)) {
                 materialMap.set(materialCode, {
                     materialCode,
-                    materialName,
-                    suppliers: [],
+                    materialName: materialName || materialCode,
+                    suppliers: new Map(),
                     totalPurchaseAmount: 0,
                 });
             }
 
             const material = materialMap.get(materialCode)!;
-            material.suppliers.push({
-                supplierId: supplierCode,
-                supplierName: supplierName,
-                unitPrice,
-                paymentTerms: item.payment_terms || '',
-            });
 
-            // Estimate purchase amount (unit price * estimated quantity)
-            // Since we don't have actual purchase quantity, use unit price as proxy
-            material.totalPurchaseAmount += unitPrice * 1000; // Assume 1000 units as baseline
+            // Initialize supplier entry if not exists
+            if (!material.suppliers.has(supplierCode)) {
+                material.suppliers.set(supplierCode, {
+                    supplierId: supplierCode,
+                    supplierName: supplierName || supplierCode,
+                    totalAmount: 0,
+                    totalQuantity: 0,
+                    avgUnitPrice: 0,
+                    orderCount: 0,
+                });
+            }
+
+            const supplier = material.suppliers.get(supplierCode)!;
+            supplier.totalAmount += totalAmount;
+            supplier.totalQuantity += quantity;
+            supplier.orderCount += 1;
+            supplier.avgUnitPrice = supplier.totalQuantity > 0
+                ? supplier.totalAmount / supplier.totalQuantity
+                : unitPrice;
+
+            material.totalPurchaseAmount += totalAmount;
         });
 
         // Convert to array and sort by total purchase amount
         const materials = Array.from(materialMap.values())
             .sort((a, b) => b.totalPurchaseAmount - a.totalPurchaseAmount)
             .map((material, index) => {
-                // Get the primary supplier (lowest price)
-                const primarySupplier = material.suppliers.sort((a, b) => a.unitPrice - b.unitPrice)[0];
+                // Get the primary supplier (highest purchase amount)
+                const suppliersArray = Array.from(material.suppliers.values());
+                const primarySupplier = suppliersArray.sort((a, b) => b.totalAmount - a.totalAmount)[0];
 
                 return {
                     rank: index + 1,
@@ -90,20 +156,20 @@ export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
                     supplierId: primarySupplier.supplierId,
                     supplierName: primarySupplier.supplierName,
                     annualPurchaseAmount: material.totalPurchaseAmount,
-                    currentStock: 0, // Not available in supplier API
-                    qualityRating: 85, // Mock value
-                    riskRating: 20, // Mock value
-                    onTimeDeliveryRate: 90, // Mock value
-                    riskCoefficient: 15, // Mock value
-                    qualityEvents: [], // Not available in supplier API
-                    alternativeSuppliers: material.suppliers.length - 1,
+                    currentStock: 0, // Not available in purchase data
+                    qualityRating: 85, // Mock value - should be calculated from quality data
+                    riskRating: 20, // Mock value - should be calculated from risk assessment
+                    onTimeDeliveryRate: 90, // Mock value - should be calculated from delivery data
+                    riskCoefficient: 15, // Mock value - should be calculated from risk model
+                    qualityEvents: [], // Not available in purchase data
+                    alternativeSuppliers: suppliersArray.length - 1,
                 };
             });
 
-        console.log(`[MaterialService] Found ${materials.length} materials from supplier data`);
+        console.log(`[MaterialService] Found ${materials.length} materials from purchase data`);
         return materials;
     } catch (error) {
-        console.error('[MaterialService] Failed to get materials from supplier data:', error);
+        console.error('[MaterialService] Failed to get materials from purchase data:', error);
         return [];
     }
 }

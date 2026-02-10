@@ -2,7 +2,6 @@
  * Supplier Data Loader
  * 
  * Provides supplier data loading from API.
- * Replaces CSV-based data loading with API calls to ontology.
  */
 
 import { ontologyApi } from '../api';
@@ -79,14 +78,109 @@ export async function loadSupplier360Scorecards(): Promise<Supplier360Scorecard[
 
 /**
  * Load supplier list
- * Returns basic supplier information
+ * Returns basic supplier information extracted from purchase data
+ * Note: Since supplier entity may not be available or may cause errors,
+ * we extract supplier information from purchase orders and purchase requests
  */
 export async function loadSupplierList(): Promise<any[]> {
-    console.log('[SupplierDataLoader] Loading supplier list...');
+    console.log('[SupplierDataLoader] Loading supplier list from purchase data...');
 
     try {
-        const suppliers = await loadSupplierEntities();
-        console.log(`[SupplierDataLoader] Loaded ${suppliers.length} suppliers`);
+        const { dynamicConfigService } = await import('./dynamicConfigService');
+
+        // Get purchase order and purchase request configurations from backend
+        const poConfig = await dynamicConfigService.getConfigByEntityType('purchase_order');
+        const prConfig = await dynamicConfigService.getConfigByEntityType('purchase_request');
+
+        const purchaseOrderTypeId = poConfig?.objectTypeId;
+        const purchaseRequestTypeId = prConfig?.objectTypeId;
+
+        if (!purchaseOrderTypeId && !purchaseRequestTypeId) {
+            console.warn('[SupplierDataLoader] No purchase data sources configured');
+            return [];
+        }
+
+        // Query both purchase orders and purchase requests in parallel
+        const queries: Promise<any>[] = [];
+
+        if (purchaseOrderTypeId) {
+            queries.push(
+                ontologyApi.queryObjectInstances(purchaseOrderTypeId, {
+                    limit: 10000,
+                    need_total: false,
+                }).catch(err => {
+                    console.error('[SupplierDataLoader] Failed to query purchase orders:', err);
+                    return { entries: [] };
+                })
+            );
+        } else {
+            queries.push(Promise.resolve({ entries: [] }));
+        }
+
+        if (purchaseRequestTypeId) {
+            queries.push(
+                ontologyApi.queryObjectInstances(purchaseRequestTypeId, {
+                    limit: 10000,
+                    need_total: false,
+                }).catch(err => {
+                    console.error('[SupplierDataLoader] Failed to query purchase requests:', err);
+                    return { entries: [] };
+                })
+            );
+        } else {
+            queries.push(Promise.resolve({ entries: [] }));
+        }
+
+        const [purchaseOrdersResponse, purchaseRequestsResponse] = await Promise.all(queries);
+
+        // Merge all entries
+        const allEntries = [
+            ...(purchaseOrdersResponse.entries || []),
+            ...(purchaseRequestsResponse.entries || [])
+        ];
+
+        // Extract unique suppliers and calculate their purchase amounts
+        const supplierMap = new Map<string, {
+            supplier_id: string;
+            supplier_code: string;
+            supplier_name: string;
+            supplierId: string;
+            supplierName: string;
+            totalPurchaseAmount: number;
+            orderCount: number;
+        }>();
+
+        allEntries.forEach((item: any) => {
+            const supplierCode = item.supplier_code || item.supplierCode || item.supplier_id || item.supplierId;
+            const supplierName = item.supplier_name || item.supplierName || item.supplier || item.供应商;
+            const quantity = Number(item.quantity || item.purchase_quantity || item.purchaseQuantity || 0);
+            const unitPrice = Number(item.unit_price || item.unitPrice || item.price || item.单价 || 0);
+            const totalAmount = Number(item.total_amount || item.totalAmount || item.amount || item.总金额 || (quantity * unitPrice));
+
+            if (!supplierCode) return;
+
+            if (!supplierMap.has(supplierCode)) {
+                supplierMap.set(supplierCode, {
+                    supplier_id: supplierCode,
+                    supplier_code: supplierCode,
+                    supplier_name: supplierName || supplierCode,
+                    supplierId: supplierCode,
+                    supplierName: supplierName || supplierCode,
+                    totalPurchaseAmount: 0,
+                    orderCount: 0,
+                });
+            }
+
+            const supplier = supplierMap.get(supplierCode)!;
+            supplier.totalPurchaseAmount += totalAmount;
+            supplier.orderCount += 1;
+        });
+
+        // Convert to array and sort by purchase amount
+        const suppliers = Array.from(supplierMap.values())
+            .sort((a, b) => b.totalPurchaseAmount - a.totalPurchaseAmount);
+
+        console.log(`[SupplierDataLoader] Loaded ${suppliers.length} suppliers from ${allEntries.length} purchase records`);
         return suppliers;
     } catch (error) {
         console.error('[SupplierDataLoader] Failed to load supplier list:', error);

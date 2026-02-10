@@ -8,7 +8,7 @@ const fetch = require('node-fetch');
 
 // Configuration
 const ONTOLOGY_BASE_URL = '/api/ontology-manager/v1';
-const KN_ID = 'd56v1l69olk4bpa66uv0'; // DIP供应链业务知识网络
+const KN_ID = 'supplychain_hd0202'; // DIP供应链业务知识网络
 const PRODUCT_OBJECT_TYPE_ID = 'supplychain_hd0202_product';
 
 async function checkProductBomLogicProperty() {
