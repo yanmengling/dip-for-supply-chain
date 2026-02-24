@@ -22,7 +22,7 @@ import {
 // ============================================================================
 
 const STORAGE_KEY = 'supply_chain_api_config_collection';
-const CONFIG_VERSION = '1.0.9';
+const CONFIG_VERSION = '1.0.10';
 
 // ============================================================================
 // Configuration Storage Service
@@ -129,10 +129,19 @@ class ConfigStorageService {
                     needsSave = true;
                 }
 
-                // Ensure ontologyObjects exists
+                // Ensure ontologyObjects exists and contains all default objects
                 if (!parsed.ontologyObjects) {
                     parsed.ontologyObjects = defaults.ontologyObjects;
                     needsSave = true;
+                } else {
+                    // MIGRATION: Add missing ontology object configurations
+                    const existingOntologyIds = new Set(parsed.ontologyObjects.map(oo => oo.id));
+                    const missingOntologyObjects = defaults.ontologyObjects.filter(oo => !existingOntologyIds.has(oo.id));
+                    if (missingOntologyObjects.length > 0) {
+                        parsed.ontologyObjects = [...parsed.ontologyObjects, ...missingOntologyObjects];
+                        console.log(`[ConfigStorage] Migration: Added ${missingOntologyObjects.length} missing ontology object(s):`, missingOntologyObjects.map(oo => oo.name));
+                        needsSave = true;
+                    }
                 }
 
                 // MIGRATION 1.0.9: Add purchase order and purchase request configs if missing

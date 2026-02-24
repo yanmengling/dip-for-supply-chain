@@ -47,21 +47,20 @@ export interface SupplierInfo {
     provided_material_name: string;
 }
 
-/** BOM信息 */
+/** BOM信息 (基于HD供应链业务知识网络_v2.json) */
 export interface BOMInfo {
-    parent_id: string;
-    parent_code: string;
-    parent_name: string;
-    parent_type: string;
-    child_id: string;
-    child_code: string;
-    child_name: string;
-    child_type: string;
-    quantity: number;
-    unit: string;
-    status: string;
-    alternative_part?: string;
-    alternative_group?: number;
+    bom_material_code: string;      // BOM所属产品物料编码
+    parent_material_code: string;   // 父级物料编码
+    material_code: string;          // 物料编码
+    material_name: string;          // 物料名称
+    standard_usage: number;         // 标准用量
+    bom_level: number;              // BOM层级(1-8)
+    seq_no: number;                 // BOM序号
+    alt_part: string;               // 替代件标识(空=主料,√=替代料)
+    alt_group_no: string;           // 替代组号
+    alt_priority: number;           // 优先级(0=主料)
+    alt_method: string;             // 替代方式
+    bom_version: string;            // BOM版本
 }
 
 /** 库存信息 */
@@ -225,6 +224,33 @@ export interface SupplierDetailPanelModel {
     materials: ExpandedMaterialRow[];
 }
 
+/** BOM树节点 */
+export interface BOMTreeNode {
+    material_code: string;
+    material_name: string;
+    bom_level: number;
+    standard_usage: number;
+    material_type: MaterialType;
+    is_alternative: boolean;           // 是否是替代件
+    alt_group_no: string;              // 替代组号
+    alt_priority: number;              // 优先级(0=主料)
+    children: BOMTreeNode[];           // 子物料
+    alternatives: BOMTreeNode[];       // 替代料（折叠显示）
+}
+
+/** BOM详情面板模型 */
+export interface BOMDetailPanelModel {
+    product_code: string;
+    product_name: string;
+    bom_version: string;
+    total_materials: number;           // 总物料数（含替代）
+    main_materials: number;            // 主料数
+    alternative_materials: number;     // 替代料数
+    max_bom_level: number;             // 最大BOM层级
+    alternative_group_count: number;   // 替代组数量
+    materials: BOMTreeNode[];          // BOM树结构
+}
+
 /** 综合产品供应分析 */
 export interface ProductSupplyAnalysis {
     productId: string;
@@ -238,6 +264,7 @@ export interface ProductSupplyAnalysis {
     demandForecast: DemandForecast;
     supplierMatch?: SupplierMatchResult;
     supplierDetailPanel?: SupplierDetailPanelModel;
+    bomDetailPanel?: BOMDetailPanelModel;
 }
 
 // ============================================================================
@@ -246,6 +273,53 @@ export interface ProductSupplyAnalysis {
 
 import { ontologyApi } from '../api/ontologyApi';
 import { apiConfigService } from './apiConfigService';
+
+// ============================================================================
+// 数据缓存层 - 避免重复API调用
+// ============================================================================
+
+interface DataCache<T> {
+    data: T[] | null;
+    timestamp: number;
+    loading: boolean;
+    promise: Promise<T[]> | null;
+}
+
+const CACHE_TTL = 5 * 60 * 1000; // 5分钟缓存过期
+
+const dataCache: {
+    products: DataCache<ProductInfo>;
+    orders: DataCache<OrderInfo>;
+    suppliers: DataCache<SupplierInfo>;
+    boms: DataCache<BOMInfo>;
+    inventories: DataCache<InventoryInfo>;
+    materials: DataCache<MaterialInfo>;
+} = {
+    products: { data: null, timestamp: 0, loading: false, promise: null },
+    orders: { data: null, timestamp: 0, loading: false, promise: null },
+    suppliers: { data: null, timestamp: 0, loading: false, promise: null },
+    boms: { data: null, timestamp: 0, loading: false, promise: null },
+    inventories: { data: null, timestamp: 0, loading: false, promise: null },
+    materials: { data: null, timestamp: 0, loading: false, promise: null },
+};
+
+function isCacheValid<T>(cache: DataCache<T>): boolean {
+    return cache.data !== null && (Date.now() - cache.timestamp) < CACHE_TTL;
+}
+
+/**
+ * 清除所有缓存（可用于强制刷新）
+ */
+export function clearDataCache(): void {
+    Object.keys(dataCache).forEach(key => {
+        const k = key as keyof typeof dataCache;
+        dataCache[k].data = null;
+        dataCache[k].timestamp = 0;
+        dataCache[k].loading = false;
+        dataCache[k].promise = null;
+    });
+    console.log('[智能计算] 数据缓存已清除');
+}
 
 /**
  * 获取对象类型ID配置 (与BOM服务保持一致)
@@ -270,8 +344,8 @@ const normalizeCode = (value: unknown): string => {
 };
 
 const isAlternativeBomRow = (bom: BOMInfo): boolean => {
-    const alt = normalizeCode(bom.alternative_part);
-    return alt.includes('替代');
+    const alt = normalizeCode(bom.alt_part);
+    return alt.includes('替代') || alt === '√';
 };
 
 // 默认ID作为后备（更新为新的有效 ID）
@@ -314,8 +388,10 @@ async function loadDataFromOntology<T>(entityType: string, defaultId: string, ma
 
         if (Array.isArray(rawData)) {
             console.log(`[API] Loaded ${name}: ${rawData.length} records`);
-            if (rawData.length > 0 && name.includes('Sample')) {
-                console.log(`[API] Sample data:`, rawData[0]);
+            // Always log first record to debug field names
+            if (rawData.length > 0) {
+                console.log(`[API] ${name} - Sample record fields:`, Object.keys(rawData[0]));
+                console.log(`[API] ${name} - Sample record:`, rawData[0]);
             }
             return rawData.map(mapper);
         } else {
@@ -328,108 +404,157 @@ async function loadDataFromOntology<T>(entityType: string, defaultId: string, ma
     }
 }
 
+/**
+ * 带缓存的数据加载函数
+ */
+async function loadWithCache<T>(
+    cacheKey: keyof typeof dataCache,
+    loader: () => Promise<T[]>
+): Promise<T[]> {
+    const cache = dataCache[cacheKey] as DataCache<T>;
+
+    // 如果缓存有效，直接返回
+    if (isCacheValid(cache)) {
+        console.log(`[缓存] 使用缓存数据: ${cacheKey} (${cache.data!.length} 条记录)`);
+        return cache.data!;
+    }
+
+    // 如果正在加载中，等待现有的 Promise
+    if (cache.loading && cache.promise) {
+        console.log(`[缓存] 等待进行中的加载: ${cacheKey}`);
+        return cache.promise as Promise<T[]>;
+    }
+
+    // 开始新的加载
+    cache.loading = true;
+    cache.promise = loader().then(data => {
+        cache.data = data;
+        cache.timestamp = Date.now();
+        cache.loading = false;
+        cache.promise = null;
+        return data;
+    }).catch(err => {
+        cache.loading = false;
+        cache.promise = null;
+        throw err;
+    });
+
+    return cache.promise as Promise<T[]>;
+}
 
 /**
- * 加载产品信息 (API)
+ * 加载产品信息 (API) - 带缓存
  * ID: 2004376134620897282
  */
 export async function loadProductInfo(): Promise<ProductInfo[]> {
-    return loadDataFromOntology('product', DEFAULT_IDS.product, (item) => ({
-        product_code: item.product_code || item.code || '',
-        product_name: item.product_name || item.name || '',
-        product_model: item.product_model || item.model || '',
-        product_series: item.product_series || item.series || '',
-        product_type: item.product_type || item.type || '',
-        amount: parseFloat(item.amount) || 0,
-    }), '产品信息');
+    return loadWithCache('products', () =>
+        loadDataFromOntology('product', DEFAULT_IDS.product, (item) => ({
+            // Use material_number/material_name as primary fields (from HD供应链业务知识网络)
+            // Fallback to product_code/product_name for backwards compatibility
+            product_code: item.material_number || item.product_code || item.code || '',
+            product_name: item.material_name || item.product_name || item.name || '',
+            product_model: item.product_model || item.model || '',
+            product_series: item.product_series || item.series || '',
+            product_type: item.product_type || item.type || '',
+            amount: parseFloat(item.amount) || 0,
+        }), '产品信息')
+    );
 }
 
-
 /**
- * 加载订单信息 (API)
+ * 加载订单信息 (API) - 带缓存
  * ObjectTypeId: supplychain_hd0202_salesorder
  */
 export async function loadOrderInfo(): Promise<OrderInfo[]> {
-    return loadDataFromOntology('order', DEFAULT_IDS.order, (item) => ({
-        id: parseInt(item.id) || 0,
-        signing_date: item.signing_date || '',
-        contract_number: item.contract_number || '',
-        product_category: item.product_category || '',
-        product_code: item.product_code || '',
-        product_name: item.product_name || '',
-        signing_quantity: parseFloat(item.signing_quantity) || 0,
-        shipping_quantity: parseFloat(item.shipping_quantity) || 0,
-        shipping_date: item.shipping_date || '',
-        promised_delivery_date: item.promised_delivery_date || '',
-    }), '订单信息');
+    return loadWithCache('orders', () =>
+        loadDataFromOntology('order', DEFAULT_IDS.order, (item) => ({
+            id: parseInt(item.id) || 0,
+            signing_date: item.signing_date || '',
+            contract_number: item.contract_number || '',
+            product_category: item.product_category || '',
+            product_code: item.product_code || '',
+            product_name: item.product_name || '',
+            signing_quantity: parseFloat(item.signing_quantity) || 0,
+            shipping_quantity: parseFloat(item.shipping_quantity) || 0,
+            shipping_date: item.shipping_date || '',
+            promised_delivery_date: item.promised_delivery_date || '',
+        }), '订单信息')
+    );
 }
 
-
 /**
- * 加载供应商信息 (API)
+ * 加载供应商信息 (API) - 带缓存
  * ObjectTypeId: d5700je9olk4bpa66vkg
  */
 export async function loadSupplierInfo(): Promise<SupplierInfo[]> {
-    return loadDataFromOntology('supplier', DEFAULT_IDS.supplier, (item) => ({
-        supplier: item.supplier || item.supplier_name || '',
-        supplier_code: item.supplier_code || '',
-        unit_price_with_tax: parseFloat(item.unit_price_with_tax) || 0,
-        payment_terms: item.payment_terms || '',
-        is_lowest_price_alternative: item.is_lowest_price_alternative || '否',
-        is_basic_material: item.is_basic_material || '否',
-        provided_material_code: item.provided_material_code || '',
-        provided_material_name: item.provided_material_name || '',
-    }), '供应商信息');
+    return loadWithCache('suppliers', () =>
+        loadDataFromOntology('supplier', DEFAULT_IDS.supplier, (item) => ({
+            supplier: item.supplier || item.supplier_name || '',
+            supplier_code: item.supplier_code || '',
+            unit_price_with_tax: parseFloat(item.unit_price_with_tax) || 0,
+            payment_terms: item.payment_terms || '',
+            is_lowest_price_alternative: item.is_lowest_price_alternative || '否',
+            is_basic_material: item.is_basic_material || '否',
+            provided_material_code: item.provided_material_code || '',
+            provided_material_name: item.provided_material_name || '',
+        }), '供应商信息')
+    );
 }
 
-
 /**
- * 加载BOM信息 (API)
+ * 加载BOM信息 (API) - 带缓存
  * ID: 2004376134629285892
  */
 export async function loadBOMInfo(): Promise<BOMInfo[]> {
-    return loadDataFromOntology('bom', DEFAULT_IDS.bom, (item) => ({
-        parent_id: item.parent_id || '',
-        parent_code: item.parent_code || '',
-        parent_name: item.parent_name || '',
-        parent_type: item.parent_type || '',
-        child_id: item.child_id || '',
-        child_code: item.child_code || '',
-        child_name: item.child_name || '',
-        child_type: item.child_type || '',
-        quantity: parseFloat(item.quantity) || 0,
-        unit: item.unit || '',
-        status: item.status || 'Active',
-        alternative_part: item.alternative_part,
-        alternative_group: item.alternative_group !== undefined ? Number(item.alternative_group) : undefined,
-    }), 'BOM信息');
+    return loadWithCache('boms', () =>
+        loadDataFromOntology('bom', DEFAULT_IDS.bom, (item) => ({
+            bom_material_code: String(item.bom_material_code || ''),
+            parent_material_code: String(item.parent_material_code || ''),
+            material_code: String(item.material_code || ''),
+            material_name: item.material_name || '',
+            standard_usage: parseFloat(item.standard_usage) || 0,
+            bom_level: parseInt(item.bom_level) || 1,
+            seq_no: parseInt(item.seq_no) || 0,
+            alt_part: String(item.alt_part || ''),
+            alt_group_no: String(item.alt_group_no || ''),
+            alt_priority: parseInt(item.alt_priority) || 0,
+            alt_method: item.alt_method || '',
+            bom_version: item.bom_version || '',
+        }), 'BOM信息')
+    );
 }
 
-
 /**
- * 加载库存信息 (API)
+ * 加载库存信息 (API) - 带缓存
  * ID: 2004376134625091585
  */
 export async function loadInventoryInfo(): Promise<InventoryInfo[]> {
-    return loadDataFromOntology('inventory', DEFAULT_IDS.inventory, (item) => ({
-        item_id: item.item_id || '',
-        item_code: item.item_code || '',
-        item_name: item.item_name || '',
-        item_type: item.item_type || '',
-        quantity: item.quantity ? String(item.quantity) : '0',
-        warehouse_id: item.warehouse_id || '',
-        warehouse_name: item.warehouse_name || '',
-        snapshot_month: item.snapshot_month || '',
-        status: item.status || 'Active',
-    }), '库存信息');
+    return loadWithCache('inventories', () =>
+        loadDataFromOntology('inventory', DEFAULT_IDS.inventory, (item) => ({
+            item_id: item.item_id || '',
+            item_code: item.item_code || item.material_code || '',
+            item_name: item.item_name || item.material_name || '',
+            item_type: item.item_type || item.stock_type || '',
+            quantity: item.quantity ? String(item.quantity) : (item.available_inventory_qty || '0'),
+            warehouse_id: item.warehouse_id || '',
+            warehouse_name: item.warehouse_name || item.warehouse || '',
+            snapshot_month: item.snapshot_month || '',
+            status: item.status || item.stock_status || 'Active',
+        }), '库存信息')
+    );
 }
 
+/**
+ * 加载物料信息 (API) - 带缓存
+ */
 export async function loadMaterialInfo(): Promise<MaterialInfo[]> {
-    return loadDataFromOntology('material', DEFAULT_IDS.material, (item) => ({
-        material_code: item.material_code || '',
-        material_name: item.material_name || '',
-        material_type: item.material_type || '',
-    }), '物料信息');
+    return loadWithCache('materials', () =>
+        loadDataFromOntology('material', DEFAULT_IDS.material, (item) => ({
+            material_code: item.material_code || '',
+            material_name: item.material_name || '',
+            material_type: item.material_type || '',
+        }), '物料信息')
+    );
 }
 
 type BomChildrenIndex = Map<string, Set<string>>;
@@ -439,8 +564,8 @@ function buildBomChildrenIndex(boms: BOMInfo[]): BomChildrenIndex {
     const index: BomChildrenIndex = new Map();
     for (const bom of boms) {
         if (isAlternativeBomRow(bom)) continue;
-        const parent = normalizeCode(bom.parent_code);
-        const child = normalizeCode(bom.child_code);
+        const parent = normalizeCode(bom.parent_material_code);
+        const child = normalizeCode(bom.material_code);
         if (!parent || !child) continue;
         const set = index.get(parent) ?? new Set<string>();
         set.add(child);
@@ -583,15 +708,15 @@ function buildAlternativesIndex(
     const mainsByParent = new Map<string, Set<string>>();
 
     for (const bom of boms) {
-        const parent = normalizeCode(bom.parent_code);
+        const parent = normalizeCode(bom.parent_material_code);
         if (!parent || !visitedParents.has(parent)) continue;
 
-        const child = normalizeCode(bom.child_code);
+        const child = normalizeCode(bom.material_code);
         if (!child) continue;
 
-        const altFlag = normalizeCode(bom.alternative_part);
+        const altFlag = normalizeCode(bom.alt_part);
         const isMain = altFlag === '';
-        const isAlt = altFlag === '替代';
+        const isAlt = altFlag === '替代' || altFlag === '√';
         if (!isMain && !isAlt) continue;
 
         if (isMain) {
@@ -600,7 +725,7 @@ function buildAlternativesIndex(
             mainsByParent.set(parent, set);
         }
 
-        const group = bom.alternative_group;
+        const group = bom.alt_group_no;
         const hasGroup = group !== undefined && group !== null && !Number.isNaN(Number(group));
         if (!hasGroup) {
             if (isAlt) {
@@ -729,6 +854,151 @@ function buildSupplierDetailPanelModel(
     };
 }
 
+/**
+ * 构建BOM详情面板模型
+ * 根据 bom_material_code 找到产品的所有物料，构建树结构
+ */
+function buildBOMDetailPanelModelFromBoms(
+    productCode: string,
+    productName: string,
+    boms: BOMInfo[],
+    materialMasterByCode: Map<string, MaterialInfo>
+): BOMDetailPanelModel {
+    const normalizedProductCode = normalizeCode(productCode);
+
+    // 过滤出该产品的所有BOM记录
+    const productBoms = boms.filter(
+        bom => normalizeCode(bom.bom_material_code) === normalizedProductCode
+    );
+
+    if (productBoms.length === 0) {
+        return {
+            product_code: normalizedProductCode,
+            product_name: productName,
+            bom_version: '',
+            total_materials: 0,
+            main_materials: 0,
+            alternative_materials: 0,
+            max_bom_level: 0,
+            alternative_group_count: 0,
+            materials: [],
+        };
+    }
+
+    // 统计信息
+    const bomVersion = productBoms[0]?.bom_version || '';
+    let maxBomLevel = 0;
+    const alternativeGroups = new Set<string>();
+
+    // 分离主料和替代料
+    const mainMaterials: BOMInfo[] = [];
+    const alternativeMaterials: BOMInfo[] = [];
+
+    for (const bom of productBoms) {
+        if (bom.bom_level > maxBomLevel) {
+            maxBomLevel = bom.bom_level;
+        }
+
+        if (bom.alt_group_no) {
+            alternativeGroups.add(bom.alt_group_no);
+        }
+
+        if (isAlternativeBomRow(bom)) {
+            alternativeMaterials.push(bom);
+        } else {
+            mainMaterials.push(bom);
+        }
+    }
+
+    // 构建父子关系索引
+    const childrenByParent = new Map<string, BOMInfo[]>();
+    const alternativesByGroupAndParent = new Map<string, BOMInfo[]>();
+
+    for (const bom of mainMaterials) {
+        const parentCode = normalizeCode(bom.parent_material_code);
+        const children = childrenByParent.get(parentCode) || [];
+        children.push(bom);
+        childrenByParent.set(parentCode, children);
+    }
+
+    for (const bom of alternativeMaterials) {
+        const key = `${normalizeCode(bom.parent_material_code)}:${bom.alt_group_no}`;
+        const alts = alternativesByGroupAndParent.get(key) || [];
+        alts.push(bom);
+        alternativesByGroupAndParent.set(key, alts);
+    }
+
+    // 递归构建树节点
+    function buildTreeNode(bom: BOMInfo): BOMTreeNode {
+        const materialCode = normalizeCode(bom.material_code);
+        const master = materialMasterByCode.get(materialCode);
+
+        // 获取该物料的子物料
+        const childBoms = childrenByParent.get(materialCode) || [];
+        const children = childBoms
+            .sort((a, b) => a.seq_no - b.seq_no || a.bom_level - b.bom_level)
+            .map(buildTreeNode);
+
+        // 获取该物料位置的替代料
+        const altKey = `${normalizeCode(bom.parent_material_code)}:${bom.alt_group_no}`;
+        const altBoms = bom.alt_group_no ? (alternativesByGroupAndParent.get(altKey) || []) : [];
+        const alternatives = altBoms
+            .filter(alt => normalizeCode(alt.material_code) !== materialCode) // 排除自身
+            .sort((a, b) => a.alt_priority - b.alt_priority)
+            .map(alt => {
+                const altMaterialCode = normalizeCode(alt.material_code);
+                const altMaster = materialMasterByCode.get(altMaterialCode);
+                return {
+                    material_code: altMaterialCode,
+                    material_name: altMaster?.material_name || alt.material_name || '',
+                    bom_level: alt.bom_level,
+                    standard_usage: alt.standard_usage,
+                    material_type: toMaterialType(altMaster?.material_type),
+                    is_alternative: true,
+                    alt_group_no: alt.alt_group_no,
+                    alt_priority: alt.alt_priority,
+                    children: [],
+                    alternatives: [],
+                };
+            });
+
+        return {
+            material_code: materialCode,
+            material_name: master?.material_name || bom.material_name || '',
+            bom_level: bom.bom_level,
+            standard_usage: bom.standard_usage,
+            material_type: toMaterialType(master?.material_type),
+            is_alternative: false,
+            alt_group_no: bom.alt_group_no,
+            alt_priority: bom.alt_priority,
+            children,
+            alternatives,
+        };
+    }
+
+    // 找到第一层物料（parent_material_code 为产品编码本身或为空）
+    const rootBoms = mainMaterials.filter(bom => {
+        const parent = normalizeCode(bom.parent_material_code);
+        return parent === normalizedProductCode || parent === '' || bom.bom_level === 1;
+    });
+
+    const materials = rootBoms
+        .sort((a, b) => a.seq_no - b.seq_no || a.bom_level - b.bom_level)
+        .map(buildTreeNode);
+
+    return {
+        product_code: normalizedProductCode,
+        product_name: productName,
+        bom_version: bomVersion,
+        total_materials: productBoms.length,
+        main_materials: mainMaterials.length,
+        alternative_materials: alternativeMaterials.length,
+        max_bom_level: maxBomLevel,
+        alternative_group_count: alternativeGroups.size,
+        materials,
+    };
+}
+
 // ============================================================================
 // 计算函数
 // ============================================================================
@@ -744,10 +1014,9 @@ export function calculateProductStockFromMaterials(
 
 
     // 获取该产品的BOM
-    // 注意：API返回的数据可能缺失 parent_type 字段，因此主要依赖 parent_code 进行匹配
+    // 根据bom_material_code过滤产品的BOM
     const productBOMs = boms.filter(
-        bom => bom.parent_code === productCode &&
-            (bom.status === 'Active' || !bom.status) // 兼容 status 为空的情况
+        bom => bom.bom_material_code === productCode
     );
 
 
@@ -776,7 +1045,7 @@ export function calculateProductStockFromMaterials(
     for (const bom of productBOMs) {
         // 获取该物料的库存
         const materialInventories = inventories.filter(
-            inv => inv.item_code === bom.child_code &&
+            inv => inv.item_code === bom.material_code &&
                 inv.item_type === 'Material' &&
                 inv.status === 'Active'
         );
@@ -788,17 +1057,17 @@ export function calculateProductStockFromMaterials(
         );
 
         // 计算该物料可支持的产品数量
-        const productQuantityFromThisMaterial = bom.quantity > 0
-            ? Math.floor(totalMaterialStock / bom.quantity)
+        const productQuantityFromThisMaterial = bom.standard_usage > 0
+            ? Math.floor(totalMaterialStock / bom.standard_usage)
             : 0;
 
         // 更新最小值（瓶颈）
         if (productQuantityFromThisMaterial < minProductQuantity) {
             minProductQuantity = productQuantityFromThisMaterial;
             bottleneckMaterials.length = 0;
-            bottleneckMaterials.push(bom.child_name);
+            bottleneckMaterials.push(bom.material_name);
         } else if (productQuantityFromThisMaterial === minProductQuantity) {
-            bottleneckMaterials.push(bom.child_name);
+            bottleneckMaterials.push(bom.material_name);
         }
     }
 
@@ -1163,6 +1432,7 @@ export function calculateDemandForecast(
  */
 export async function calculateAllProductsSupplyAnalysis(): Promise<ProductSupplyAnalysis[]> {
     try {
+        console.log('[智能计算] 开始加载所有数据...');
         const [products, orders, suppliers, boms, inventories] = await Promise.all([
             loadProductInfo(),
             loadOrderInfo(),
@@ -1170,6 +1440,13 @@ export async function calculateAllProductsSupplyAnalysis(): Promise<ProductSuppl
             loadBOMInfo(),
             loadInventoryInfo(),
         ]);
+
+        console.log(`[智能计算] 数据加载完成: 产品=${products.length}, 订单=${orders.length}, 供应商=${suppliers.length}, BOM=${boms.length}, 库存=${inventories.length}`);
+
+        // Debug: Show first product to verify field mapping
+        if (products.length > 0) {
+            console.log('[智能计算] 第一个产品:', products[0]);
+        }
 
         const materials = await loadMaterialInfo();
 
@@ -1260,4 +1537,226 @@ export async function calculateAllProductsSupplyAnalysis(): Promise<ProductSuppl
         console.error('计算产品供应分析失败:', error);
         return [];
     }
+}
+
+// ============================================================================
+// 懒加载版本 - 按需加载产品分析
+// ============================================================================
+
+/** 产品列表项（轻量级） */
+export interface ProductListItem {
+    productId: string;
+    productName: string;
+}
+
+/**
+ * 快速加载产品列表（仅产品ID和名称）
+ * 用于初始页面加载，非常快速
+ */
+export async function loadProductList(): Promise<ProductListItem[]> {
+    console.log('[懒加载] 开始加载产品列表...');
+    const startTime = Date.now();
+
+    const products = await loadProductInfo();
+
+    const list = products.map(p => ({
+        productId: p.product_code,
+        productName: p.product_name,
+    }));
+
+    console.log(`[懒加载] 产品列表加载完成: ${list.length} 个产品, 耗时 ${Date.now() - startTime}ms`);
+    return list;
+}
+
+// 预加载的数据索引缓存
+interface CachedIndices {
+    bomChildrenByParent: Map<string, Set<string>>;
+    suppliersByMaterial: Map<string, SupplierInfo[]>;
+    materialMasterByCode: Map<string, MaterialInfo>;
+    boms: BOMInfo[];
+    inventories: InventoryInfo[];
+    orders: OrderInfo[];
+}
+
+let cachedIndices: CachedIndices | null = null;
+let indicesLoadingPromise: Promise<CachedIndices> | null = null;
+
+/**
+ * 预加载并缓存数据索引（后台执行）
+ */
+async function ensureIndicesLoaded(): Promise<CachedIndices> {
+    if (cachedIndices) {
+        return cachedIndices;
+    }
+
+    if (indicesLoadingPromise) {
+        return indicesLoadingPromise;
+    }
+
+    console.log('[懒加载] 开始后台预加载数据索引...');
+    const startTime = Date.now();
+
+    indicesLoadingPromise = (async (): Promise<CachedIndices> => {
+        const [orders, suppliers, boms, inventories, materials] = await Promise.all([
+            loadOrderInfo(),
+            loadSupplierInfo(),
+            loadBOMInfo(),
+            loadInventoryInfo(),
+            loadMaterialInfo(),
+        ]);
+
+        const bomChildrenByParent = buildBomChildrenIndex(boms);
+        const suppliersByMaterial = buildSuppliersByMaterialIndex(suppliers);
+        const materialMasterByCode = buildMaterialMasterIndex(materials);
+
+        const indices: CachedIndices = {
+            bomChildrenByParent,
+            suppliersByMaterial,
+            materialMasterByCode,
+            boms,
+            inventories,
+            orders,
+        };
+
+        cachedIndices = indices;
+        console.log(`[懒加载] 数据索引预加载完成, 耗时 ${Date.now() - startTime}ms`);
+        return indices;
+    })();
+
+    return indicesLoadingPromise;
+}
+
+/**
+ * 计算单个产品的供应分析（懒加载版本）
+ * 仅当用户选择产品时调用
+ */
+export async function calculateSingleProductAnalysis(productId: string): Promise<ProductSupplyAnalysis | null> {
+    console.log(`[懒加载] 计算产品分析: ${productId}`);
+    const startTime = Date.now();
+
+    try {
+        // 确保索引已加载
+        const indices = await ensureIndicesLoaded();
+
+        // 加载产品信息
+        const products = await loadProductInfo();
+        const product = products.find(p => p.product_code === productId);
+
+        if (!product) {
+            console.warn(`[懒加载] 未找到产品: ${productId}`);
+            return null;
+        }
+
+        const { bomChildrenByParent, suppliersByMaterial, materialMasterByCode, boms, inventories, orders } = indices;
+
+        // 计算该产品的分析
+        const { materials: expandedMaterials, depthByCode, visitedParents } = expandBomMaterialsWithDepth(
+            product.product_code,
+            bomChildrenByParent,
+            10
+        );
+
+        const supplierMatch = buildSupplierMatchResult(product.product_code, expandedMaterials, suppliersByMaterial);
+
+        const supplierDetailPanel = buildSupplierDetailPanelModel(
+            product.product_code,
+            product.product_name,
+            expandedMaterials,
+            depthByCode,
+            visitedParents,
+            boms,
+            materialMasterByCode,
+            suppliersByMaterial,
+            supplierMatch
+        );
+
+        // 计算需求趋势
+        const demandTrend = calculateDemandTrend(product.product_code, orders);
+
+        // 基于BOM和物料库存计算产品库存
+        const { stock: currentStock, bottleneckMaterials } = calculateProductStockFromMaterials(
+            product.product_code,
+            boms,
+            inventories
+        );
+
+        // 计算库存状态
+        const inventoryStatus = calculateInventoryStatus(
+            product.product_code,
+            product.product_name,
+            currentStock,
+            demandTrend
+        );
+
+        // 计算供应风险
+        const supplyRisk = calculateSupplyRisk(
+            product.product_code,
+            orders,
+            supplierMatch,
+            bottleneckMaterials
+        );
+
+        // 生成优化建议
+        const inventoryOptimization = generateInventoryOptimization(
+            product.product_code,
+            inventoryStatus,
+            demandTrend
+        );
+
+        const npiRecommendation = generateNPIRecommendation(
+            product.product_code,
+            demandTrend,
+            supplyRisk,
+            product.amount
+        );
+
+        const eolRecommendation = generateEOLRecommendation(
+            product.product_code,
+            demandTrend,
+            inventoryStatus,
+            product.amount
+        );
+
+        const demandForecast = calculateDemandForecast(product.product_code, demandTrend);
+
+        // 构建BOM详情面板
+        const bomDetailPanel = buildBOMDetailPanelModelFromBoms(
+            product.product_code,
+            product.product_name,
+            boms,
+            materialMasterByCode
+        );
+
+        const analysis: ProductSupplyAnalysis = {
+            productId: product.product_code,
+            productName: product.product_name,
+            inventoryStatus,
+            demandTrend,
+            supplyRisk,
+            inventoryOptimization,
+            npiRecommendation,
+            eolRecommendation,
+            demandForecast,
+            supplierMatch,
+            supplierDetailPanel,
+            bomDetailPanel,
+        };
+
+        console.log(`[懒加载] 产品分析完成: ${productId}, 耗时 ${Date.now() - startTime}ms`);
+        return analysis;
+    } catch (error) {
+        console.error(`[懒加载] 计算产品分析失败: ${productId}`, error);
+        return null;
+    }
+}
+
+/**
+ * 开始后台预加载数据索引
+ * 在页面加载后调用，不阻塞UI
+ */
+export function startBackgroundPreload(): void {
+    console.log('[懒加载] 启动后台预加载...');
+    ensureIndicesLoaded().catch(err => {
+        console.error('[懒加载] 后台预加载失败:', err);
+    });
 }

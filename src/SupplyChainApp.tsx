@@ -25,6 +25,7 @@ import SearchView from './components/views/SearchView';
 import InventoryView from './components/views/InventoryView';
 import DeliveryViewEnhanced from './components/views/DeliveryViewEnhanced';
 import PlanningView from './components/views/PlanningView';
+import PlanningViewV2 from './components/views/PlanningViewV2';
 import { getCopilotConfig } from './utils/copilotConfig';
 import type { CopilotSidebarProps } from './components/shared/CopilotSidebar';
 import { useHeaderHeight } from './hooks/useHeaderHeight';
@@ -37,13 +38,14 @@ import { initializeEntityData } from './utils/entityConfigService';
 const navigation = [
   { id: 'cockpit' as const, label: '驾驶舱', icon: LayoutDashboard },
   { id: 'planning' as const, label: '动态计划协同', icon: Calendar },
+  { id: 'planningV2' as const, label: '新版动态计划协同', icon: Calendar },
   { id: 'inventory' as const, label: '库存优化', icon: Package },
   { id: 'optimization' as const, label: '产品供应优化', icon: TrendingUp },
   { id: 'delivery' as const, label: '订单交付', icon: Truck },
   { id: 'evaluation' as const, label: '供应商评估', icon: Users },
 ];
 
-type ViewType = 'cockpit' | 'search' | 'planning' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
+type ViewType = 'cockpit' | 'search' | 'planning' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
 
 const SupplyChainAppContent = () => {
   const [currentView, setCurrentView] = useState<ViewType>('cockpit');
@@ -143,7 +145,7 @@ const SupplyChainAppContent = () => {
   return (
     <div className="h-full bg-slate-50 flex flex-col">
       {/* Top Navigation */}
-      <div ref={headerRef} className="z-50 bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
+      <div ref={headerRef} id="app-header" className="z-50 bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -171,6 +173,11 @@ const SupplyChainAppContent = () => {
                   >
                     <nav.icon size={16} />
                     {nav.label}
+                    {'badge' in nav && (
+                      <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-medium rounded">
+                        {String((nav as { badge?: unknown }).badge ?? '')}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -203,6 +210,7 @@ const SupplyChainAppContent = () => {
               {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'planning' && <PlanningView />}
+              {currentView === 'planningV2' && <PlanningViewV2 />}
               {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}

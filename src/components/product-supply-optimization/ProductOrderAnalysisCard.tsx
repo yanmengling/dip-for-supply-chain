@@ -49,12 +49,29 @@ export const ProductOrderAnalysisCard: React.FC<Props> = ({
       setLoading(true);
       setError(null);
 
+      // Add timeout to prevent infinite loading
+      const timeoutId = setTimeout(() => {
+        setLoading(false);
+        setError('订单数据加载超时');
+      }, 15000); // 15 second timeout
+
       try {
         let orders: any[] = [];
 
         // 大脑模式：使用 productSupplyCalculator 的 loadOrderInfo
+        console.log(`[ProductOrderAnalysisCard] Loading orders for productId: ${productId}`);
         const orderInfo = await loadOrderInfo();
+        clearTimeout(timeoutId);
+        console.log(`[ProductOrderAnalysisCard] Loaded ${orderInfo.length} total orders`);
+
+        // Debug: show sample product_codes from orders
+        if (orderInfo.length > 0) {
+          const sampleCodes = orderInfo.slice(0, 5).map(o => o.product_code);
+          console.log(`[ProductOrderAnalysisCard] Sample product_codes:`, sampleCodes);
+        }
+
         orders = orderInfo.filter(o => o.product_code === productId);
+        console.log(`[ProductOrderAnalysisCard] Found ${orders.length} orders for ${productId}`);
 
         if (orders.length === 0) {
           setAnalysis({
@@ -88,6 +105,7 @@ export const ProductOrderAnalysisCard: React.FC<Props> = ({
           orderCount: orders.length,
         });
       } catch (err) {
+        clearTimeout(timeoutId);
         console.error('[ProductOrderAnalysisCard] Failed to fetch:', err);
         setError('获取订单数据失败');
       } finally {

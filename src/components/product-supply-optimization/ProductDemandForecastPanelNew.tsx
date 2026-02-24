@@ -24,18 +24,22 @@ type PanelForecastAlgorithm = 'prophet' | 'simple_exponential' | 'holt_linear' |
 
 interface ForecastComparisonData {
   month: string;
-  actual: number | null;       // 历史真实数据
-  backtest: number | null;     // 历史回测数据（算法拟合值）
-  forecast: number | null;     // 未来预测数据（与回测连续）
+  actual: number | null;           // 历史真实数据
+  backtest: number | null;         // 历史回测数据（算法拟合值）
+  forecast: number | null;         // 未来预测数据（与回测连续）
+  confirmedOrder: number | null;   // 已确认订单（在手订单）
+  consensusDemand: number | null;  // 共识需求（AI 60% + 订单 40%）
   isHistorical: boolean;
-  isForecastStart?: boolean;   // 预测起点标记
+  isForecastStart?: boolean;       // 预测起点标记
 }
 
 interface ForecastStats {
   avgActual: number;
   avgForecast: number;
   totalForecast: number;
-  backtestMAPE: number;        // 回测平均绝对百分比误差
+  totalConfirmedOrders: number;  // 已确认订单总量
+  avgConsensusDemand: number;    // 共识需求平均值
+  backtestMAPE: number;          // 回测平均绝对百分比误差
   confidenceLevel: 'high' | 'medium' | 'low';
 }
 
@@ -265,32 +269,56 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
         }
       }
 
+      // 获取已确认订单数据（未来月份）
+      const lastMonth = history[history.length - 1]?.month || new Date().toISOString().slice(0, 7);
+      const futureMonthsRaw: string[] = [];
+      for (let i = 0; i < FORECAST_MONTHS; i++) {
+        futureMonthsRaw.push(addMonths(lastMonth, i + 1));
+      }
+
+      // 调用 demandPlanningService 获取已确认订单
+      let confirmedOrdersMap: Record<string, number> = {};
+      try {
+        const confirmedOrdersResult = await demandPlanningService.getConfirmedOrders([productId], futureMonthsRaw);
+        confirmedOrdersMap = confirmedOrdersResult[productId] || {};
+        console.log(`[DemandForecast] Confirmed orders for ${productId}:`, confirmedOrdersMap);
+      } catch (err) {
+        console.warn(`[DemandForecast] Failed to get confirmed orders:`, err);
+      }
+
       // 构建对比数据：历史12个月 + 未来12个月（含本月）
       const comparisonData: ForecastComparisonData[] = [];
 
-      // 添加历史数据（过去12个月）：包含真实值和回测值
+      // 添加历史数据（过去12个月）：包含真实值和回测值，无已确认订单
       history.forEach((h, idx) => {
         comparisonData.push({
           month: formatMonth(h.month),
           actual: h.quantity,
           backtest: backtestValues[idx],
           forecast: null,
+          confirmedOrder: null,  // 历史月份无已确认订单
+          consensusDemand: null, // 历史月份无共识需求
           isHistorical: true,
         });
       });
 
       // 添加预测数据（未来12个月含本月）：回测曲线延续为预测曲线
-      const lastMonth = history[history.length - 1]?.month || new Date().toISOString().slice(0, 7);
-
+      // 同时添加已确认订单和共识需求
       for (let i = 0; i < FORECAST_MONTHS; i++) {
         const futureMonth = addMonths(lastMonth, i + 1);
         const forecastValue = Math.round(Math.max(0, futureForecasts[i]));
+        const confirmedOrderValue = confirmedOrdersMap[futureMonth] || 0;
+
+        // 共识需求 = AI预测 × 60% + 已确认订单 × 40%
+        const consensusDemandValue = Math.round(forecastValue * 0.6 + confirmedOrderValue * 0.4);
+
         comparisonData.push({
           month: formatMonth(futureMonth),
           actual: null,
           backtest: null,
-          // 第一个预测点需要与最后一个回测点连接
           forecast: forecastValue,
+          confirmedOrder: confirmedOrderValue > 0 ? confirmedOrderValue : null,
+          consensusDemand: consensusDemandValue,
           isHistorical: false,
           isForecastStart: i === 0,
         });
@@ -313,6 +341,17 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
       const avgActual = actualValues.reduce((a, b) => a + b, 0) / actualValues.length;
       const avgForecast = futureForecasts.reduce((a, b) => a + b, 0) / futureForecasts.length;
       const totalForecast = futureForecasts.reduce((a, b) => a + b, 0);
+
+      // 计算已确认订单和共识需求统计
+      const confirmedOrderValues = Object.values(confirmedOrdersMap);
+      const totalConfirmedOrders = confirmedOrderValues.reduce((a, b) => a + b, 0);
+
+      // 共识需求 = AI预测 × 60% + 已确认订单 × 40%
+      const consensusDemandValues = futureForecasts.map((f, i) => {
+        const confirmedOrder = confirmedOrdersMap[futureMonthsRaw[i]] || 0;
+        return f * 0.6 + confirmedOrder * 0.4;
+      });
+      const avgConsensusDemand = consensusDemandValues.reduce((a, b) => a + b, 0) / consensusDemandValues.length;
 
       // 计算回测MAPE (Mean Absolute Percentage Error)
       let mapeSum = 0;
@@ -353,6 +392,8 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
         avgActual: Math.round(avgActual),
         avgForecast: Math.round(avgForecast),
         totalForecast: Math.round(totalForecast),
+        totalConfirmedOrders: Math.round(totalConfirmedOrders),
+        avgConsensusDemand: Math.round(avgConsensusDemand),
         backtestMAPE: Math.round(backtestMAPE * 10) / 10,
         confidenceLevel,
       };
@@ -412,6 +453,8 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
   const actualGradientId = useMemo(() => `colorActual-${productId}`, [productId]);
   const backtestGradientId = useMemo(() => `colorBacktest-${productId}`, [productId]);
   const forecastGradientId = useMemo(() => `colorForecast-${productId}`, [productId]);
+  const confirmedOrderGradientId = useMemo(() => `colorConfirmedOrder-${productId}`, [productId]);
+  const consensusDemandGradientId = useMemo(() => `colorConsensusDemand-${productId}`, [productId]);
 
   if (externalLoading) {
     return (
@@ -498,7 +541,7 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
 
       {/* Stats Cards */}
       {hasGenerated && stats && (
-        <div className="grid grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-7 gap-3 mb-6">
           <div className="bg-gradient-to-br from-blue-50 to-blue-100/50 rounded-xl p-3 border border-blue-100">
             <div className="text-xs text-slate-600 mb-1">平均实际值</div>
             <div className="text-lg font-bold text-slate-800">{stats.avgActual.toLocaleString()}</div>
@@ -513,6 +556,16 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
             <div className="text-xs text-slate-600 mb-1">预测总量</div>
             <div className="text-lg font-bold text-slate-800">{stats.totalForecast.toLocaleString()}</div>
             <div className="text-xs text-slate-500 mt-1">未来12个月总计</div>
+          </div>
+          <div className="bg-gradient-to-br from-pink-50 to-pink-100/50 rounded-xl p-3 border border-pink-100">
+            <div className="text-xs text-slate-600 mb-1">已确认订单</div>
+            <div className="text-lg font-bold text-pink-600">{stats.totalConfirmedOrders.toLocaleString()}</div>
+            <div className="text-xs text-slate-500 mt-1">在手订单总计</div>
+          </div>
+          <div className="bg-gradient-to-br from-indigo-50 to-indigo-100/50 rounded-xl p-3 border border-indigo-100">
+            <div className="text-xs text-slate-600 mb-1">共识需求</div>
+            <div className="text-lg font-bold text-indigo-600">{stats.avgConsensusDemand.toLocaleString()}</div>
+            <div className="text-xs text-slate-500 mt-1">AI 60% + 订单 40%</div>
           </div>
           <div className="bg-gradient-to-br from-orange-50 to-orange-100/50 rounded-xl p-3 border border-orange-100">
             <div className="text-xs text-slate-600 mb-1">回测误差</div>
@@ -549,6 +602,14 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
                   <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id={confirmedOrderGradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#ec4899" stopOpacity={0.2} />
+                  <stop offset="95%" stopColor="#ec4899" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id={consensusDemandGradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                </linearGradient>
               </defs>
               <XAxis
                 dataKey="month"
@@ -568,7 +629,9 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
                   const labels: Record<string, string> = {
                     actual: '历史实际',
                     backtest: '回测拟合',
-                    forecast: '预测值'
+                    forecast: 'AI预测',
+                    confirmedOrder: '已确认订单',
+                    consensusDemand: '共识需求'
                   };
                   return [value.toLocaleString(), labels[name] || name];
                 }}
@@ -578,7 +641,9 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
                   const labels: Record<string, string> = {
                     actual: '历史实际销量',
                     backtest: '回测拟合曲线',
-                    forecast: '未来预测'
+                    forecast: 'AI预测',
+                    confirmedOrder: '已确认订单',
+                    consensusDemand: '共识需求'
                   };
                   return labels[value] || value;
                 }}
@@ -627,6 +692,31 @@ export const ProductDemandForecastPanelNew: React.FC<Props> = ({ productId, prod
                 name="forecast"
                 connectNulls={true}
                 dot={{ fill: '#10b981', strokeWidth: 0, r: 3 }}
+              />
+              {/* Confirmed orders - pink line (future months only) */}
+              <Area
+                type="monotone"
+                dataKey="confirmedOrder"
+                stroke="#ec4899"
+                strokeWidth={2}
+                strokeDasharray="5 5"
+                fillOpacity={1}
+                fill={`url(#${confirmedOrderGradientId})`}
+                name="confirmedOrder"
+                connectNulls={false}
+                dot={{ fill: '#ec4899', strokeWidth: 0, r: 3 }}
+              />
+              {/* Consensus demand - indigo line (AI 60% + orders 40%) */}
+              <Area
+                type="monotone"
+                dataKey="consensusDemand"
+                stroke="#6366f1"
+                strokeWidth={3}
+                fillOpacity={1}
+                fill={`url(#${consensusDemandGradientId})`}
+                name="consensusDemand"
+                connectNulls={true}
+                dot={{ fill: '#6366f1', strokeWidth: 0, r: 4 }}
               />
             </AreaChart>
           </ResponsiveContainer>

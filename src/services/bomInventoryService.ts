@@ -57,7 +57,7 @@ initHelpers({
 });
 
 // ============================================================================
-// 数据加载
+// 数据加载 - 已迁移至 bomInventoryHelpers（通过 loadBOMDataViaLogicProperty）
 // ============================================================================
 export interface ProductRaw {
     product_code: string;

@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { ProductSupplyAnalysis, DemandForecast } from '../../types/ontology';
-import type { SupplierDetailPanelModel } from '../../services/productSupplyCalculator';
-import { Package, Search } from 'lucide-react';
+import type { BOMDetailPanelModel } from '../../services/productSupplyCalculator';
+import { Package } from 'lucide-react';
 import { ProductSupplyMetricsCards } from './ProductSupplyMetricsCards';
-import { ProductDemandForecastCard } from './ProductDemandForecastCard';
 import { ProductDemandForecastPanelNew } from './ProductDemandForecastPanelNew';
-import { ProductSelectionSection } from './ProductSelectionSection';
+import ProductSearchSection from './ProductSearchSection';
 
 
 interface Props {
@@ -15,7 +14,7 @@ interface Props {
   selectedProductId?: string | null;
   onProductSelect?: (productId: string) => void;
   demandForecasts?: Map<string, DemandForecast>;
-  supplierDetailPanels?: Map<string, SupplierDetailPanelModel>;
+  bomDetailPanels?: Map<string, BOMDetailPanelModel>;
 }
 
 export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
@@ -25,14 +24,19 @@ export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
   selectedProductId = null,
   onProductSelect,
   demandForecasts = new Map(),
-  supplierDetailPanels = new Map(),
+  bomDetailPanels = new Map(),
 }) => {
+  // 产品列表加载中（初始加载）
+  const isListLoading = loading && allProducts.length === 0;
+  // 产品详情加载中
+  const isDetailLoading = loading && allProducts.length > 0;
 
-
-  if (loading) {
+  // 初始加载：显示完整骨架屏
+  if (isListLoading) {
     return (
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
         <div className="animate-pulse">
+          <div className="h-10 bg-slate-200 rounded w-64 mb-6"></div>
           <div className="h-6 bg-slate-200 rounded w-48 mb-4"></div>
           <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
             {[1, 2, 3, 4, 5].map(i => (
@@ -47,29 +51,41 @@ export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
     );
   }
 
-  if (!analysis) {
-    return (
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
-        <h2 className="text-xl font-bold text-slate-800 mb-4">产品供应分析</h2>
-        <div className="text-center py-8 text-slate-500">
-          <Package className="mx-auto mb-2 text-slate-400" size={48} />
-          <p>暂无数据</p>
-        </div>
-      </div>
-    );
-  }
-
-
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 hover:shadow-md transition-shadow">
 
-
-      {/* Product Selection */}
-      <ProductSelectionSection
+      {/* Product Selection - 始终显示 */}
+      <ProductSearchSection
         allProducts={allProducts}
-        selectedProductId={selectedProductId}
-        onProductSelect={onProductSelect}
+        selectedProductId={selectedProductId || undefined}
+        onProductSelect={onProductSelect || (() => {})}
       />
+
+      {/* 详情加载中：显示骨架屏但保留产品选择器 */}
+      {isDetailLoading && (
+        <div className="animate-pulse mt-6">
+          <div className="h-6 bg-slate-200 rounded w-48 mb-4"></div>
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="bg-slate-100 rounded-lg p-4">
+                <div className="h-4 bg-slate-200 rounded w-24 mb-2"></div>
+                <div className="h-8 bg-slate-200 rounded w-16"></div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 text-center text-slate-500 text-sm">
+            正在加载产品详情...
+          </div>
+        </div>
+      )}
+
+      {/* 无数据状态 */}
+      {!isDetailLoading && !analysis && (
+        <div className="text-center py-8 text-slate-500">
+          <Package className="mx-auto mb-2 text-slate-400" size={48} />
+          <p>请选择一个产品查看分析</p>
+        </div>
+      )}
 
       {/* Panel Header */}
       {analysis && (
@@ -86,10 +102,13 @@ export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
         </div>
       )}
 
-      {/* Product Name Display (FR-001.1) */}
+      {/* Product Name and ID Display (FR-001.1) */}
       {analysis && (
         <div className="mb-6">
-          <h3 className="text-lg font-bold text-slate-800">{analysis.productName}</h3>
+          <h3 className="text-lg font-bold text-slate-800">
+            {analysis.productName}
+            <span className="text-sm font-normal text-slate-500 ml-2">({analysis.productId})</span>
+          </h3>
         </div>
       )}
 
@@ -97,7 +116,7 @@ export const ProductSupplyAnalysisPanel: React.FC<Props> = ({
       {analysis && (
         <ProductSupplyMetricsCards
           analysis={analysis}
-          supplierDetailPanel={supplierDetailPanels.get(analysis.productId)}
+          bomDetailPanel={bomDetailPanels.get(analysis.productId)}
         />
       )}
 

@@ -1,15 +1,15 @@
 import React, { useState } from 'react';
 import type { ProductSupplyAnalysis } from '../../types/ontology';
-import type { SupplierDetailPanelModel } from '../../services/productSupplyCalculator';
-import { Package, Truck, TrendingUp, AlertTriangle, Info, ChevronRight } from 'lucide-react';
+import type { BOMDetailPanelModel } from '../../services/productSupplyCalculator';
+import { Layers, Truck, TrendingUp, AlertTriangle, Info, ChevronRight } from 'lucide-react';
 import { productsData } from '../../utils/entityConfigService';
 import { ProductOrderAnalysisCard } from './ProductOrderAnalysisCard';
 import { ErrorBoundary } from '../shared/ErrorBoundary';
-import { SupplierDetailDrawer } from './SupplierDetailDrawer';
+import { BOMDetailDrawer } from './BOMDetailDrawer';
 
 interface Props {
   analysis: ProductSupplyAnalysis;
-  supplierDetailPanel?: SupplierDetailPanelModel;
+  bomDetailPanel?: BOMDetailPanelModel;
 }
 
 /**
@@ -68,8 +68,8 @@ const getStockoutRiskExplanation = (riskLevel: string, stockDays?: number): stri
   }
 };
 
-export const ProductSupplyMetricsCards: React.FC<Props> = ({ analysis, supplierDetailPanel }) => {
-  const [supplierDrawerOpen, setSupplierDrawerOpen] = useState(false);
+export const ProductSupplyMetricsCards: React.FC<Props> = ({ analysis, bomDetailPanel }) => {
+  const [bomDrawerOpen, setBomDrawerOpen] = useState(false);
   const riskColors = {
     low: 'bg-emerald-100 text-emerald-700 border-emerald-200',
     medium: 'bg-amber-100 text-amber-700 border-amber-200',
@@ -88,10 +88,10 @@ export const ProductSupplyMetricsCards: React.FC<Props> = ({ analysis, supplierD
 
   return (
     <div className="space-y-4">
-      <SupplierDetailDrawer
-        open={supplierDrawerOpen}
-        onClose={() => setSupplierDrawerOpen(false)}
-        model={supplierDetailPanel}
+      <BOMDetailDrawer
+        open={bomDrawerOpen}
+        onClose={() => setBomDrawerOpen(false)}
+        model={bomDetailPanel}
       />
       {/* First row: Order Analysis Card (wider) + 4 smaller cards */}
       <div className="grid grid-cols-1 md:grid-cols-6 gap-3">
@@ -106,27 +106,27 @@ export const ProductSupplyMetricsCards: React.FC<Props> = ({ analysis, supplierD
           </ErrorBoundary>
         </div>
 
-        {/* Supplier Count */}
+        {/* Product BOM Card */}
         <button
           type="button"
-          onClick={() => setSupplierDrawerOpen(true)}
+          onClick={() => setBomDrawerOpen(true)}
           className="text-left bg-gradient-to-br from-indigo-50 to-indigo-100/50 rounded-lg p-3 border border-indigo-100 hover:shadow-md hover:border-indigo-200 transition-all group"
         >
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 bg-indigo-500/10 rounded flex items-center justify-center">
-                <Package className="text-indigo-600" size={16} />
+                <Layers className="text-indigo-600" size={16} />
               </div>
-              <div className="text-xs text-slate-600">供应商数量</div>
+              <div className="text-xs text-slate-600">产品BOM</div>
             </div>
             <ChevronRight className="text-indigo-400 group-hover:text-indigo-600 transition-colors" size={18} />
           </div>
           <div className="flex items-baseline gap-1">
-            <div className="text-2xl font-bold text-slate-800">{analysis.supplierCount}</div>
-            <div className="text-xs text-slate-500">家</div>
+            <div className="text-2xl font-bold text-slate-800">{bomDetailPanel?.main_materials ?? 0}</div>
+            <div className="text-xs text-slate-500">种物料</div>
           </div>
           <div className="mt-1 text-xs text-slate-500 group-hover:text-slate-600 transition-colors">
-            查看物料展开与供应商明细
+            {bomDetailPanel?.alternative_materials ? `含${bomDetailPanel.alternative_materials}种替代料` : '查看BOM结构'}
           </div>
         </button>
 

@@ -861,14 +861,26 @@ export class DemandPlanningService {
       limit: 5000
     });
 
-    // Filter orders by productIds, future months, and confirmed status
+    // Filter orders by productIds, future months
+    // Use correct field names from HD供应链业务知识网络:
+    // - product_code: 产品编码
+    // - promised_delivery_date: 承诺交期时间
+    // - signing_quantity: 签约数量
+    // - shipping_quantity: 交付数量
     const filteredOrders = ordersResponse.entries.filter((order: any) => {
-      const orderMonth = order.dueDate?.slice(0, 7) || order.orderDate?.slice(0, 7);
-      const isConfirmed = order.status === '已确认' || order.status === 'confirmed' || order.status === 'CONFIRMED';
+      // Use promised_delivery_date for delivery month, fallback to signing_date
+      const orderMonth = (order.promised_delivery_date || order.signing_date || order.dueDate || order.orderDate)?.slice(0, 7);
+      // Use product_code field, with fallbacks
+      const orderProductId = order.product_code || order.productId || order.product_id;
+      // Consider orders that are not fully delivered as "confirmed"
+      const signingQty = parseFloat(order.signing_quantity) || parseFloat(order.quantity) || 0;
+      const shippingQty = parseFloat(order.shipping_quantity) || 0;
+      const pendingQty = signingQty - shippingQty;
+
       return (
-        productIds.includes(order.productId || order.product_id) &&
+        productIds.includes(orderProductId) &&
         futureMonths.includes(orderMonth) &&
-        isConfirmed
+        pendingQty > 0  // Has pending quantity to deliver
       );
     });
 
@@ -876,9 +888,14 @@ export class DemandPlanningService {
     const result: Record<string, Record<string, number>> = {};
 
     for (const order of filteredOrders) {
-      const productId = order.productId || order.product_id;
-      const orderMonth = order.dueDate?.slice(0, 7) || order.orderDate?.slice(0, 7);
-      const quantity = order.quantity || 0;
+      // Use correct field names
+      const productId = order.product_code || order.productId || order.product_id;
+      const orderMonth = (order.promised_delivery_date || order.signing_date || order.dueDate || order.orderDate)?.slice(0, 7);
+
+      // Calculate pending quantity = signing_quantity - shipping_quantity
+      const signingQty = parseFloat(order.signing_quantity) || parseFloat(order.quantity) || 0;
+      const shippingQty = parseFloat(order.shipping_quantity) || 0;
+      const pendingQty = signingQty - shippingQty;
 
       if (!result[productId]) {
         result[productId] = {};
@@ -888,7 +905,7 @@ export class DemandPlanningService {
         result[productId][orderMonth] = 0;
       }
 
-      result[productId][orderMonth] += quantity;
+      result[productId][orderMonth] += pendingQty;
     }
 
     return result;
