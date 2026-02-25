@@ -8,13 +8,14 @@
 import { useState } from 'react';
 import {
   GitBranch, Database, BarChart2, Bot, Workflow,
-  Settings, ArrowLeft, Layout, Menu, Key
+  Settings, ArrowLeft, Layout, Menu, Key, LayoutDashboard
 } from 'lucide-react';
 import { ApiConfigType, type AnyApiConfig } from '../../types/apiConfig';
 import { ApiConfigListView } from './ApiConfigListView';
 import { ApiConfigEditor } from './ApiConfigEditor';
 import KnowledgeGraphView from './KnowledgeGraphView';
 import GlobalSettingsView from './GlobalSettingsView';
+import GeneralConfigView from './GeneralConfigView';
 import { dipEnvironmentService } from '../../services/dipEnvironmentService';
 
 interface ConfigBackendLayoutProps {
@@ -22,11 +23,18 @@ interface ConfigBackendLayoutProps {
 }
 
 type ConfigViewType =
+  | 'general_config'
   | 'visual_graph'
   | 'global_settings'
   | ApiConfigType;
 
 const MENU_ITEMS = [
+  {
+    id: 'general_config',
+    label: '综合配置',
+    icon: LayoutDashboard,
+    group: '应用配置'
+  },
   {
     id: 'visual_graph',
     label: '业务知识网络可视化',
@@ -160,7 +168,7 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
         {/* Navigation */}
         <div className="flex-1 overflow-y-auto py-4">
           <div className="space-y-6 px-2">
-            {['可视化', '系统配置'].map(group => {
+            {['应用配置', '可视化', '系统配置'].map(group => {
               const groupItems = MENU_ITEMS.filter(i => i.group === group);
               if (groupItems.length === 0) return null;
 
@@ -241,7 +249,9 @@ export default function ConfigBackendLayout({ onBack }: ConfigBackendLayoutProps
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {activeView === 'visual_graph' ? (
+        {activeView === 'general_config' ? (
+          <GeneralConfigView />
+        ) : activeView === 'visual_graph' ? (
           <KnowledgeGraphView />
         ) : activeView === 'global_settings' ? (
           <GlobalSettingsView />

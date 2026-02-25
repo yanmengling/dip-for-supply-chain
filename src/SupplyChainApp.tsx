@@ -33,9 +33,10 @@ import { useConversation } from './hooks/useConversation';
 import ConfigBackendLayout from './components/config-backend/ConfigBackendLayout';
 import { populateEntityConfigs } from './utils/entityConfigService';
 import { initializeEntityData } from './utils/entityConfigService';
+import { navigationConfigService } from './services/navigationConfigService';
 
-// Navigation configuration
-const navigation = [
+// Full navigation items (icons and labels)
+const ALL_NAV_ITEMS = [
   { id: 'cockpit' as const, label: '驾驶舱', icon: LayoutDashboard },
   { id: 'planning' as const, label: '动态计划协同', icon: Calendar },
   { id: 'planningV2' as const, label: '新版动态计划协同', icon: Calendar },
@@ -49,6 +50,7 @@ type ViewType = 'cockpit' | 'search' | 'planning' | 'planningV2' | 'inventory' |
 
 const SupplyChainAppContent = () => {
   const [currentView, setCurrentView] = useState<ViewType>('cockpit');
+  const [visibleNavigation, setVisibleNavigation] = useState<typeof ALL_NAV_ITEMS>(ALL_NAV_ITEMS);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotProps, setCopilotProps] = useState<Omit<CopilotSidebarProps, 'isOpen' | 'onClose'>>({
     title: '供应链智能助手',
@@ -68,6 +70,23 @@ const SupplyChainAppContent = () => {
     agentId: 'supply_chain_agent',
     autoLoad: false // We'll load conversations when copilot opens
   });
+
+  // Load navigation config and filter visible sections (reload when view changes, e.g. returning from config)
+  useEffect(() => {
+    const config = navigationConfigService.loadConfig();
+    const enabledIds = new Set(config.sections.filter((s) => s.enabled).map((s) => s.id));
+    const idToSection = new Map(config.sections.map((s) => [s.id, s]));
+    const filtered = ALL_NAV_ITEMS.filter((n) => enabledIds.has(n.id)).map((n) => ({
+      ...n,
+      label: idToSection.get(n.id)?.label?.trim() || n.label,
+    }));
+    setVisibleNavigation(filtered.length > 0 ? filtered : ALL_NAV_ITEMS);
+
+    // If current view was disabled, switch to first enabled
+    if (currentView !== 'config' && currentView !== 'search' && !enabledIds.has(currentView)) {
+      setCurrentView((filtered[0]?.id ?? 'cockpit') as ViewType);
+    }
+  }, [currentView]);
 
   // Initialize entity configurations on app mount
   useEffect(() => {
@@ -162,7 +181,7 @@ const SupplyChainAppContent = () => {
                 </div>
               </div>
               <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
-                {navigation.map((nav) => (
+                {visibleNavigation.map((nav) => (
                   <button
                     key={nav.id}
                     onClick={() => setCurrentView(nav.id)}
