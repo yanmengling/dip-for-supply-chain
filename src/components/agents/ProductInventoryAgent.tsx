@@ -11,7 +11,7 @@ import type { ProductInventoryResult } from '../../services/productInventoryCalc
 
 // 指标模型 ID 和分析维度配置
 const PRODUCT_INVENTORY_MODEL_ID = 'd58keb5g5lk40hvh48og';
-const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
+const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name'];
 
 interface Props {
     onNavigate?: (view: string) => void;

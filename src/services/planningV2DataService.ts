@@ -6,6 +6,7 @@
  */
 
 import { ontologyApi } from '../api';
+import type { BOMRecord, MaterialRecord, PRRecord, PORecord } from '../types/planningV2';
 
 // ============================================================================
 // Object Type IDs (对接 HD供应链业务知识网络)
@@ -18,6 +19,14 @@ const OBJECT_TYPE_IDS = {
     MPS: 'supplychain_hd0202_mps',
     // 物料需求计划 - 663条数据
     MRP: 'supplychain_hd0202_mrp',
+    // BOM - 数百条/产品
+    BOM: 'supplychain_hd0202_bom',
+    // 物料主数据 - 26339条
+    MATERIAL: 'supplychain_hd0202_material',
+    // 采购申请 - 32306条
+    PR: 'supplychain_hd0202_pr',
+    // 采购订单 - 31732条
+    PO: 'supplychain_hd0202_po',
 };
 
 // ============================================================================
@@ -111,6 +120,18 @@ function getCached<T>(key: string): T | null {
 
 function setCache<T>(key: string, data: T): void {
     cache.set(key, { data, timestamp: Date.now() });
+}
+
+/** 批量分片大小 - 避免 in 条件过大导致 API 超时 */
+const BATCH_CHUNK_SIZE = 50;
+
+/** 将数组分片 */
+function chunkArray<T>(arr: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
+    }
+    return chunks;
 }
 
 // ============================================================================
@@ -336,6 +357,227 @@ export async function getMRPStats(): Promise<{
 }
 
 // ============================================================================
+// BOM 数据加载
+// ============================================================================
+
+/**
+ * 按产品编码查询全部 BOM 数据
+ */
+export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]> {
+    const cacheKey = `bom_${productCode}`;
+    const cached = getCached<BOMRecord[]>(cacheKey);
+    if (cached) return cached;
+
+    console.log(`[PlanningV2DataService] 加载 BOM 数据: ${productCode}...`);
+
+    try {
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'bom_material_code', operation: '==', value: productCode }
+                ]
+            },
+            limit: 10000,
+            need_total: true,
+        });
+
+        const allData: BOMRecord[] = response.entries.map((item: any) => ({
+            bom_material_code: item.bom_material_code || '',
+            material_code: item.material_code || '',
+            material_name: item.material_name || '',
+            parent_material_code: item.parent_material_code || '',
+            bom_level: parseInt(item.bom_level) || 1,
+            standard_usage: parseFloat(item.standard_usage) || 0,
+            bom_version: item.bom_version || '',
+            alt_part: item.alt_part || '',
+            alt_priority: parseInt(item.alt_priority) || 0,
+        }));
+
+        // 取最新 BOM 版本（bom_version 为时间字符串，字典序最大即最新）
+        const latestVersion = allData.reduce((max, r) => r.bom_version > max ? r.bom_version : max, '');
+        const data = latestVersion
+            ? allData.filter(r => r.bom_version === latestVersion)
+            : allData;
+
+        console.log(`[PlanningV2DataService] BOM ${productCode}: 全部 ${allData.length} 条，最新版本 "${latestVersion}" 共 ${data.length} 条`);
+        setCache(cacheKey, data);
+        return data;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载 BOM 失败:', error);
+        return [];
+    }
+}
+
+// ============================================================================
+// 物料主数据加载
+// ============================================================================
+
+/**
+ * 按物料编码列表批量查询物料主数据（自动分片，避免 in 条件过大）
+ */
+export async function loadMaterialsByCode(codes: string[]): Promise<MaterialRecord[]> {
+    if (codes.length === 0) return [];
+
+    const sortedCodes = [...codes].sort();
+    const cacheKey = `material_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
+    const cached = getCached<MaterialRecord[]>(cacheKey);
+    if (cached) return cached;
+
+    console.log(`[PlanningV2DataService] 加载物料主数据: ${codes.length} 个编码...`);
+
+    try {
+        const chunks = chunkArray(codes, BATCH_CHUNK_SIZE);
+        console.log(`[PlanningV2DataService] 物料主数据分 ${chunks.length} 批查询`);
+
+        const allData: MaterialRecord[] = [];
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MATERIAL, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_code', operation: 'in', value: chunk }
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+            });
+
+            const data: MaterialRecord[] = response.entries.map((item: any) => ({
+                material_code: item.material_code || '',
+                material_name: item.material_name || '',
+                materialattr: item.materialattr || '',
+                purchase_fixedleadtime: item.purchase_fixedleadtime || '0',
+                product_fixedleadtime: item.product_fixedleadtime || '0',
+            }));
+            allData.push(...data);
+        }
+
+        console.log(`[PlanningV2DataService] 物料主数据: ${allData.length} 条`);
+        setCache(cacheKey, allData);
+        return allData;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载物料主数据失败:', error);
+        return [];
+    }
+}
+
+// ============================================================================
+// PR 采购申请数据加载
+// ============================================================================
+
+/**
+ * 按物料编码列表查询采购申请（自动分片）
+ */
+export async function loadPRByMaterials(materialCodes: string[]): Promise<PRRecord[]> {
+    if (materialCodes.length === 0) return [];
+
+    const sortedCodes = [...materialCodes].sort();
+    const cacheKey = `pr_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
+    const cached = getCached<PRRecord[]>(cacheKey);
+    if (cached) return cached;
+
+    console.log(`[PlanningV2DataService] 加载 PR 数据: ${materialCodes.length} 个物料...`);
+
+    try {
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        console.log(`[PlanningV2DataService] PR 分 ${chunks.length} 批查询`);
+
+        const allData: PRRecord[] = [];
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_number', operation: 'in', value: chunk }
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+            });
+
+            const data: PRRecord[] = response.entries.map((item: any) => ({
+                billno: item.billno || '',
+                material_number: item.material_number || '',
+                material_name: item.material_name || '',
+                qty: parseFloat(item.qty) || 0,
+                biztime: item.biztime || '',
+                joinqty: parseFloat(item.joinqty) || 0,
+                auditdate: item.auditdate || '',
+                org_name: item.org_name || '',
+                billtype_name: item.billtype_name || '',
+            }));
+            allData.push(...data);
+        }
+
+        console.log(`[PlanningV2DataService] PR: ${allData.length} 条`);
+        setCache(cacheKey, allData);
+        return allData;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载 PR 失败:', error);
+        return [];
+    }
+}
+
+// ============================================================================
+// PO 采购订单数据加载
+// ============================================================================
+
+/**
+ * 按物料编码列表查询采购订单（自动分片）
+ */
+export async function loadPOByMaterials(materialCodes: string[]): Promise<PORecord[]> {
+    if (materialCodes.length === 0) return [];
+
+    const sortedCodes = [...materialCodes].sort();
+    const cacheKey = `po_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
+    const cached = getCached<PORecord[]>(cacheKey);
+    if (cached) return cached;
+
+    console.log(`[PlanningV2DataService] 加载 PO 数据: ${materialCodes.length} 个物料...`);
+
+    try {
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        console.log(`[PlanningV2DataService] PO 分 ${chunks.length} 批查询`);
+
+        const allData: PORecord[] = [];
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_number', operation: 'in', value: chunk }
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+            });
+
+            const data: PORecord[] = response.entries.map((item: any) => ({
+                billno: item.billno || '',
+                material_number: item.material_number || '',
+                material_name: item.material_name || '',
+                qty: parseFloat(item.qty) || 0,
+                biztime: item.biztime || '',
+                deliverdate: item.deliverdate || '',
+                supplier_name: item.supplier_name || '',
+                operatorname: item.operatorname || '',
+                srcbillnumber: item.srcbillnumber || '',
+                actqty: parseFloat(item.actqty) || 0,
+            }));
+            allData.push(...data);
+        }
+
+        console.log(`[PlanningV2DataService] PO: ${allData.length} 条`);
+        setCache(cacheKey, allData);
+        return allData;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载 PO 失败:', error);
+        return [];
+    }
+}
+
+// ============================================================================
 // 清除缓存
 // ============================================================================
 
@@ -361,6 +603,14 @@ export const planningV2DataService = {
     getMRPByProduct,
     getShortfallMaterials,
     getMRPStats,
+    // BOM
+    loadBOMByProduct,
+    // Material
+    loadMaterialsByCode,
+    // PR
+    loadPRByMaterials,
+    // PO
+    loadPOByMaterials,
     // Cache
     clearCache: clearPlanningV2Cache,
 };

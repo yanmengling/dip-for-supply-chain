@@ -50,19 +50,34 @@ export interface ProductionStats {
 import { ontologyApi } from '../api/ontologyApi';
 import type { QueryCondition } from '../api/ontologyApi';
 import { apiConfigService } from './apiConfigService';
+import { dynamicConfigService } from './dynamicConfigService';
+
+const DEFAULT_MPS_OBJECT_TYPE_ID = 'supplychain_hd0202_mps';
 
 /**
- * 获取生产计划对象类型 ID（从配置中心获取）
- * 注意：使用 entityType: 'salesorder' 对应工厂生产计划 (supplychain_hd0202_mps)
+ * 获取生产计划对象类型 ID
+ * 优先从 Context（dynamicConfigService 从 Ontology API 动态加载的对象类型）获取，
+ * 其次从配置中心（apiConfigService）获取，最后使用默认 MPS 对象类型。
  */
-function getProductionPlanObjectTypeId(): string {
-    const config = apiConfigService.getOntologyObjectByEntityType('salesorder');
-    if (!config || !config.enabled) {
-        console.error('[ProductionPlanCalculator] 未找到启用的生产计划对象配置 (entity_type: salesorder)');
-        throw new Error('生产计划对象未配置，请在配置中心添加 salesorder 类型的业务对象配置');
+async function getProductionPlanObjectTypeId(): Promise<string> {
+    // 1. 从 Context/Dynamic 加载：从 Ontology API 获取对象类型列表，匹配 production_plan / mps
+    const dynamicConfig = await dynamicConfigService.getConfigByEntityType('production_plan')
+        || await dynamicConfigService.getConfigByEntityType('mps');
+    if (dynamicConfig?.objectTypeId) {
+        console.log(`[ProductionPlanCalculator] 使用 Context 加载的生产计划对象类型ID: ${dynamicConfig.objectTypeId}`);
+        return dynamicConfig.objectTypeId;
     }
-    console.log(`[ProductionPlanCalculator] 使用配置的生产计划对象类型ID: ${config.objectTypeId}`);
-    return config.objectTypeId;
+
+    // 2. 从配置中心获取（entityType: salesorder 对应工厂生产计划）
+    const config = apiConfigService.getOntologyObjectByEntityType('salesorder');
+    if (config?.enabled && config.objectTypeId) {
+        console.log(`[ProductionPlanCalculator] 使用配置中心的生产计划对象类型ID: ${config.objectTypeId}`);
+        return config.objectTypeId;
+    }
+
+    // 3. 使用默认 MPS 对象类型
+    console.log(`[ProductionPlanCalculator] 使用默认生产计划对象类型ID: ${DEFAULT_MPS_OBJECT_TYPE_ID}`);
+    return DEFAULT_MPS_OBJECT_TYPE_ID;
 }
 
 /**
@@ -80,14 +95,14 @@ function getSalesOrderObjectTypeId(): string {
 }
 
 /**
- * 加载生产计划数据 (通过 Ontology API)
+ * 加载生产计划数据 (通过 Context 加载对象类型，再查询 Ontology API)
+ * 数据源：Context_loader（dynamicConfigService 从 Ontology 动态获取对象类型）-> Ontology API
  */
 export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
     try {
-        console.log('[ProductionPlanCalculator] 通过 Ontology API 加载生产计划数据...');
+        console.log('[ProductionPlanCalculator] 通过 Context 加载生产计划对象类型，并查询 Ontology API...');
 
-        // 从配置中心获取生产计划对象类型 ID
-        const productionPlanObjectTypeId = getProductionPlanObjectTypeId();
+        const productionPlanObjectTypeId = await getProductionPlanObjectTypeId();
 
         const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
             limit: 1000,
@@ -99,17 +114,25 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
             console.log(`[ProductionPlanCalculator] Ontology API 返回 ${entries.length} 条生产计划记录`);
             console.log('[ProductionPlanCalculator] 第一条数据示例:', entries[0]);
 
-            return entries.map((item: any) => ({
-                order_number: item.order_number || item.orderNumber || item.id || '',
-                code: item.product_code || item.productCode || item.code || '',
-                name: item.product_name || item.productName || item.name || '',
-                quantity: parseFloat(item.quantity) || 0,
-                ordered: parseFloat(item.ordered) || 0,
-                start_time: item.start_time || item.startTime || item.startDate || '',
-                end_time: item.end_time || item.endTime || item.endDate || '',
-                status: item.status || '待确认',
-                priority: parseInt(item.priority) || 0,
-            }));
+            return entries.map((item: any) => {
+                // 兼容 MPS 格式 (bom_code, planned_start_date) 与销售订单格式 (order_number, code, start_time)
+                const code = item.product_code || item.productCode || item.code || item.bom_code || '';
+                const orderNumber = item.order_number || item.orderNumber || item.id || `mps-${item.seq_no ?? ''}`;
+                const startTime = item.start_time || item.startTime || item.startDate || item.planned_start_date || '';
+                const endTime = item.end_time || item.endTime || item.endDate || item.planned_end_date || '';
+
+                return {
+                    order_number: orderNumber,
+                    code,
+                    name: item.product_name || item.productName || item.name || '',
+                    quantity: parseFloat(item.quantity) || 0,
+                    ordered: parseFloat(item.ordered) || 0,
+                    start_time: startTime,
+                    end_time: endTime,
+                    status: item.status || item.order_type || '待确认',
+                    priority: parseInt(item.priority) || 0,
+                };
+            });
         }
 
         console.warn('[ProductionPlanCalculator] Ontology API 返回空数据');

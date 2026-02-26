@@ -38,8 +38,8 @@ import { navigationConfigService } from './services/navigationConfigService';
 // Full navigation items (icons and labels)
 const ALL_NAV_ITEMS = [
   { id: 'cockpit' as const, label: '驾驶舱', icon: LayoutDashboard },
-  { id: 'planning' as const, label: '动态计划协同', icon: Calendar },
-  { id: 'planningV2' as const, label: '新版动态计划协同', icon: Calendar },
+  { id: 'planning' as const, label: '老版计划协同', icon: Calendar },
+  { id: 'planningV2' as const, label: '动态计划协同', icon: Calendar },
   { id: 'inventory' as const, label: '库存优化', icon: Package },
   { id: 'optimization' as const, label: '产品供应优化', icon: TrendingUp },
   { id: 'delivery' as const, label: '订单交付', icon: Truck },
@@ -223,13 +223,16 @@ const SupplyChainAppContent = () => {
           <div className="h-full">
             <ConfigBackendLayout onBack={() => setCurrentView('cockpit')} />
           </div>
+        ) : currentView === 'planningV2' ? (
+          <div className="flex-1 overflow-y-auto">
+            <PlanningViewV2 />
+          </div>
         ) : (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-6xl mx-auto px-6 py-8">
               {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'planning' && <PlanningView />}
-              {currentView === 'planningV2' && <PlanningViewV2 />}
               {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
               {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}

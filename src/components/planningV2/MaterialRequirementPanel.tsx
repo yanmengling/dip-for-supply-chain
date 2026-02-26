@@ -1,334 +1,369 @@
 /**
- * 物料需求计划(MRP) - Material Requirements Planning Panel
- *
- * 展示物料需求计划数据，基于 API 对象 supplychain_hd0202_mrp
- * 参考: /docs/PRD_动态计划协同V2.md 2.3 章节
+ * 步骤③ 物料需求计划(MRP) - BOM级物料需求 + PR/PO状态跟踪
  */
-
-import { useState, useEffect, useMemo } from 'react';
-import { Package, AlertTriangle, CheckCircle, Search, RefreshCw, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import {
-    planningV2DataService,
-    type MaterialRequirementPlanAPI,
-} from '../../services/planningV2DataService';
-
-const PAGE_SIZE = 20; // 每页20条
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, AlertCircle, Check, X, Minus, Filter } from 'lucide-react';
+import { planningV2DataService } from '../../services/planningV2DataService';
+import type { Step1Data, MRPDisplayRow, PRRecord, PORecord } from '../../types/planningV2';
 
 interface MaterialRequirementPanelProps {
-    active: boolean;
+  active: boolean;
+  step1Data: Step1Data;
+  onConfirm: () => void;
+  onBack: () => void;
 }
 
-const MaterialRequirementPanel = ({ active }: MaterialRequirementPanelProps) => {
-    // 状态管理
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [plans, setPlans] = useState<MaterialRequirementPlanAPI[]>([]);
-    const [searchText, setSearchText] = useState('');
-    const [showShortfallOnly, setShowShortfallOnly] = useState(false);
-    const [currentPage, setCurrentPage] = useState(1);
+type BomLevelFilter = 'all' | 1 | 2 | 3;
 
-    // 加载数据
-    const loadData = async (forceReload: boolean = false) => {
-        setLoading(true);
-        setError(null);
+/** Reusable key-value row inside tooltip cards */
+const TipRow = ({ label, value }: { label: string; value: string | number }) => (
+  <div className="flex justify-between">
+    <span className="text-slate-500">{label}</span>
+    <span className="text-slate-800">{value || '-'}</span>
+  </div>
+);
 
-        try {
-            const data = await planningV2DataService.loadMaterialRequirementPlans(forceReload);
-            setPlans(data);
-        } catch (err) {
-            console.error('加载物料需求计划失败:', err);
-            setError('加载数据失败，请检查网络连接或 API 配置');
-        } finally {
-            setLoading(false);
-        }
-    };
+const PAGE_SIZE = 20;
 
-    useEffect(() => {
-        if (active) {
-            loadData();
-        }
-    }, [active]);
+const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: MaterialRequirementPanelProps) => {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<MRPDisplayRow[]>([]);
+  const [bomLevelFilter, setBomLevelFilter] = useState<BomLevelFilter>('all');
+  const [shortageOnly, setShortageOnly] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [tooltip, setTooltip] = useState<{
+    type: 'pr' | 'po'; records: PRRecord[] | PORecord[]; rect: DOMRect;
+  } | null>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
 
-    // 过滤后的计划列表
-    const filteredPlans = useMemo(() => {
-        let result = plans;
+  // ── data loading ──────────────────────────────────────────────────
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const { productCode } = step1Data;
+      const [mrpData, bomData] = await Promise.all([
+        planningV2DataService.getMRPByProduct(productCode),
+        planningV2DataService.loadBOMByProduct(productCode),
+      ]);
 
-        // 仅显示缺口物料
-        if (showShortfallOnly) {
-            result = result.filter(p => p.material_demand_quantity < 0);
-        }
+      const codeSet = new Set<string>();
+      mrpData.forEach(m => codeSet.add(m.main_material));
+      bomData.forEach(b => codeSet.add(b.material_code));
+      const codes = Array.from(codeSet);
+      console.log(`[MRP Panel] 产品 ${productCode}: MRP ${mrpData.length} 条, BOM ${bomData.length} 条, 去重物料 ${codes.length} 个`);
 
-        // 按搜索文本筛选（物料名称、物料编码、规格）
-        if (searchText.trim()) {
-            const lowerSearch = searchText.toLowerCase();
-            result = result.filter(p =>
-                p.component_name.toLowerCase().includes(lowerSearch) ||
-                p.main_material.toLowerCase().includes(lowerSearch) ||
-                (p.specification && p.specification.toLowerCase().includes(lowerSearch))
-            );
-        }
+      const [materials, prRecords, poRecords] = await Promise.all([
+        planningV2DataService.loadMaterialsByCode(codes),
+        planningV2DataService.loadPRByMaterials(codes),
+        planningV2DataService.loadPOByMaterials(codes),
+      ]);
 
-        // 按计划日期排序
-        return result.sort((a, b) => a.planned_date.localeCompare(b.planned_date));
-    }, [plans, showShortfallOnly, searchText]);
+      const materialMap = new Map(materials.map(m => [m.material_code, m]));
+      const group = <T extends { material_number: string }>(arr: T[]) => {
+        const map = new Map<string, T[]>();
+        arr.forEach(r => { const k = r.material_number; if (!map.has(k)) map.set(k, []); map.get(k)!.push(r); });
+        return map;
+      };
+      const prByMat = group(prRecords);
+      const poByMat = group(poRecords);
 
-    // 分页信息
-    const pagination = useMemo(() => {
-        const totalCount = filteredPlans.length;
-        const totalPages = Math.ceil(totalCount / PAGE_SIZE) || 1;
-        const startIndex = (currentPage - 1) * PAGE_SIZE;
-        const endIndex = Math.min(startIndex + PAGE_SIZE, totalCount);
-        const pageData = filteredPlans.slice(startIndex, endIndex);
+      const mrpMap = new Map<string, { demand: number; name: string }>();
+      mrpData.forEach(m => mrpMap.set(m.main_material, { demand: m.material_demand_quantity, name: m.component_name }));
 
+      const bomLevelMap = new Map<string, number>();
+      bomData.forEach(b => bomLevelMap.set(b.material_code, b.bom_level));
+
+      const displayRows: MRPDisplayRow[] = codes.map(code => {
+        const mat = materialMap.get(code);
+        const mrp = mrpMap.get(code);
+        const prs = prByMat.get(code) ?? [];
+        const pos = poByMat.get(code) ?? [];
         return {
-            totalCount,
-            totalPages,
-            startIndex,
-            endIndex,
-            pageData,
-            hasPrev: currentPage > 1,
-            hasNext: currentPage < totalPages,
+          materialCode: code,
+          materialName: mrp?.name || mat?.material_name || code,
+          bomLevel: bomLevelMap.get(code) ?? 0,
+          materialType: mat?.materialattr ?? '',
+          netDemand: mrp?.demand ?? 0,
+          hasPR: prs.length > 0, hasPO: pos.length > 0,
+          prRecords: prs, poRecords: pos,
         };
-    }, [filteredPlans, currentPage]);
+      });
 
-    // 当筛选条件变化时，重置到第一页
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [showShortfallOnly, searchText]);
+      displayRows.sort((a, b) => {
+        if ((a.netDemand < 0) !== (b.netDemand < 0)) return a.netDemand < 0 ? -1 : 1;
+        return a.bomLevel - b.bomLevel;
+      });
+      setRows(displayRows);
+    } catch (err) {
+      console.error('[MRP Panel] 加载失败:', err);
+      setError('数据加载失败，请检查网络后重试');
+    } finally {
+      setLoading(false);
+    }
+  }, [step1Data]);
 
-    // 统计信息
-    const stats = useMemo(() => {
-        const shortfallCount = plans.filter(p => p.material_demand_quantity < 0).length;
-        const sufficientCount = plans.filter(p => p.material_demand_quantity >= 0).length;
+  useEffect(() => { if (active) loadData(); }, [active, loadData]);
+  useEffect(() => {
+    const h = () => setTooltip(null);
+    document.addEventListener('click', h);
+    return () => document.removeEventListener('click', h);
+  }, []);
 
-        return {
-            totalMaterials: plans.length,
-            shortfallCount,
-            sufficientCount,
-            filteredCount: filteredPlans.length,
-        };
-    }, [plans, filteredPlans]);
+  // ── filtering ─────────────────────────────────────────────────────
+  const filteredRows = useMemo(() => {
+    let r = rows;
+    if (bomLevelFilter !== 'all') r = r.filter(x => x.bomLevel === bomLevelFilter);
+    if (shortageOnly) r = r.filter(x => x.netDemand < 0);
+    return r;
+  }, [rows, bomLevelFilter, shortageOnly]);
 
-    if (!active) return null;
+  // Reset page when filters change
+  useEffect(() => { setCurrentPage(1); }, [bomLevelFilter, shortageOnly]);
 
-    return (
-        <div className="space-y-4">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                        <Package className="w-5 h-5 text-indigo-600" />
-                        物料需求计划（MRP）
-                    </h2>
-                    <p className="text-sm text-slate-500 mt-1">
-                        展示 MRP 运算产生的物料净需求，负数表示缺口
-                        <span className="ml-2 text-xs text-slate-400">
-                            数据源: supplychain_hd0202_mrp
-                        </span>
-                    </p>
-                </div>
-                <button
-                    onClick={() => loadData(true)}
-                    disabled={loading}
-                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
-                >
-                    <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-                    刷新数据
-                </button>
-            </div>
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedRows = filteredRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white border border-slate-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-500">物料总数</p>
-                            <p className="text-2xl font-bold text-slate-800 mt-1">{stats.totalMaterials}</p>
-                        </div>
-                        <Package className="w-8 h-8 text-indigo-500" />
-                    </div>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-500">缺口物料</p>
-                            <p className="text-2xl font-bold text-red-600 mt-1">{stats.shortfallCount}</p>
-                        </div>
-                        <AlertTriangle className="w-8 h-8 text-red-500" />
-                    </div>
-                </div>
-                <div className="bg-white border border-slate-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <p className="text-sm text-slate-500">满足需求</p>
-                            <p className="text-2xl font-bold text-green-600 mt-1">{stats.sufficientCount}</p>
-                        </div>
-                        <CheckCircle className="w-8 h-8 text-green-500" />
-                    </div>
-                </div>
-            </div>
+  const stats = useMemo(() => {
+    const s = rows.filter(r => r.netDemand < 0).length;
+    return { total: rows.length, shortage: s, sufficient: rows.length - s };
+  }, [rows]);
 
-            {/* Error Message */}
-            {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
-                    <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-                    <div>
-                        <p className="text-sm text-red-700">{error}</p>
-                        <button
-                            onClick={() => loadData(true)}
-                            className="text-sm text-red-600 underline mt-1"
-                        >
-                            点击重试
-                        </button>
-                    </div>
-                </div>
-            )}
+  // ── helpers ───────────────────────────────────────────────────────
+  const isExternal = (t: string) => t.includes('外购') || t.includes('委外');
 
-            {/* Table */}
-            <div className="bg-white border border-slate-200 rounded-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-base font-semibold text-slate-800">物料需求计划列表</h3>
-                    <div className="flex items-center gap-3">
-                        {/* 仅显示缺口 */}
-                        <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
-                            <input
-                                type="checkbox"
-                                checked={showShortfallOnly}
-                                onChange={(e) => setShowShortfallOnly(e.target.checked)}
-                                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                            />
-                            仅显示缺口
-                        </label>
+  const showTip = (e: React.MouseEvent<HTMLTableCellElement>, type: 'pr' | 'po', recs: PRRecord[] | PORecord[]) => {
+    e.stopPropagation();
+    if (recs.length === 0) return;
+    setTooltip({ type, records: recs, rect: e.currentTarget.getBoundingClientRect() });
+  };
 
-                        {/* 搜索框 */}
-                        <div className="relative">
-                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                            <input
-                                type="text"
-                                placeholder="搜索物料..."
-                                value={searchText}
-                                onChange={(e) => setSearchText(e.target.value)}
-                                className="pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-sm w-48"
-                            />
-                        </div>
-                    </div>
-                </div>
+  if (!active) return null;
 
-                {loading ? (
-                    <div className="text-center py-12">
-                        <RefreshCw className="w-8 h-8 text-slate-300 mx-auto mb-3 animate-spin" />
-                        <p className="text-slate-500">加载中...</p>
-                    </div>
-                ) : filteredPlans.length === 0 ? (
-                    <div className="text-center py-12">
-                        <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                        <p className="text-slate-500">暂无物料需求计划数据</p>
-                        <p className="text-sm text-slate-400 mt-1">
-                            {plans.length === 0
-                                ? '请检查 API 连接是否正常'
-                                : '没有符合筛选条件的数据'}
-                        </p>
-                    </div>
-                ) : (
-                    <>
-                        <div className="overflow-x-auto">
-                            <table className="w-full">
-                                <thead className="border-b border-slate-200">
-                                    <tr className="text-left text-sm text-slate-600">
-                                        <th className="pb-3 font-medium">物料编码</th>
-                                        <th className="pb-3 font-medium">物料名称</th>
-                                        <th className="pb-3 font-medium">规格</th>
-                                        <th className="pb-3 font-medium">成品料号</th>
-                                        <th className="pb-3 font-medium">计划日期</th>
-                                        <th className="pb-3 font-medium text-right">净需求</th>
-                                        <th className="pb-3 font-medium">状态</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pagination.pageData.map((plan, index) => {
-                                        const isShortfall = plan.material_demand_quantity < 0;
-                                        return (
-                                            <tr
-                                                key={`${plan.main_material}-${plan.planned_date}-${index}`}
-                                                className={`border-b border-slate-100 hover:bg-slate-50 ${isShortfall ? 'bg-red-50/50' : ''}`}
-                                            >
-                                                <td className="py-3 text-sm text-slate-800 font-mono">
-                                                    {plan.main_material}
-                                                </td>
-                                                <td className="py-3 text-sm text-slate-800">
-                                                    {plan.component_name}
-                                                </td>
-                                                <td className="py-3 text-sm text-slate-600">
-                                                    {plan.specification || '-'}
-                                                </td>
-                                                <td className="py-3 text-sm text-slate-600 font-mono">
-                                                    {plan.finished_product_code}
-                                                </td>
-                                                <td className="py-3 text-sm text-slate-600">
-                                                    {plan.planned_date}
-                                                </td>
-                                                <td className={`py-3 text-sm font-medium text-right ${isShortfall ? 'text-red-600' : 'text-green-600'}`}>
-                                                    {plan.material_demand_quantity.toLocaleString()}
-                                                </td>
-                                                <td className="py-3 text-sm">
-                                                    {isShortfall ? (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-red-100 text-red-700">
-                                                            <AlertTriangle className="w-3 h-3" />
-                                                            缺口
-                                                        </span>
-                                                    ) : (
-                                                        <span className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700">
-                                                            <CheckCircle className="w-3 h-3" />
-                                                            满足
-                                                        </span>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+  // ── sub-components ────────────────────────────────────────────────
+  const SkeletonRows = () => (
+    <>{Array.from({ length: 6 }).map((_, i) => (
+      <tr key={i} className="border-b border-slate-100 animate-pulse">
+        {Array.from({ length: 6 }).map((__, j) => (
+          <td key={j} className="py-3 px-3"><div className="h-4 bg-slate-200 rounded w-3/4" /></td>
+        ))}
+      </tr>
+    ))}</>
+  );
 
-                        {/* 分页控件 */}
-                        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
-                            <div className="text-sm text-slate-500">
-                                显示 {pagination.startIndex + 1} - {pagination.endIndex} 条，共 {pagination.totalCount} 条
-                            </div>
-                            <div className="flex items-center gap-2">
-                                <button
-                                    onClick={() => setCurrentPage(p => p - 1)}
-                                    disabled={!pagination.hasPrev}
-                                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <ChevronLeft className="w-4 h-4" />
-                                    上一页
-                                </button>
-                                <span className="px-3 py-1.5 text-sm text-slate-600">
-                                    {currentPage} / {pagination.totalPages}
-                                </span>
-                                <button
-                                    onClick={() => setCurrentPage(p => p + 1)}
-                                    disabled={!pagination.hasNext}
-                                    className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm flex items-center gap-1 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    下一页
-                                    <ChevronRight className="w-4 h-4" />
-                                </button>
-                            </div>
-                        </div>
-                    </>
-                )}
+  const TooltipCard = () => {
+    if (!tooltip) return null;
+    const { type, records, rect } = tooltip;
+    const tRect = tableRef.current?.getBoundingClientRect();
+    if (!tRect) return null;
+    const top = rect.bottom - tRect.top + 4;
+    const left = Math.max(0, Math.min(rect.left - tRect.left, tRect.width - 340));
+    const style = { top, left };
 
-                {/* 数据来源提示 */}
-                {!loading && filteredPlans.length > 0 && (
-                    <div className="mt-2 text-xs text-slate-400">
-                        数据来源: Ontology API - supplychain_hd0202_mrp | 净需求: 负数=缺口，正数=满足
-                    </div>
-                )}
-            </div>
+    if (type === 'pr') {
+      return (
+        <div className="absolute z-50 bg-white rounded-lg shadow-lg border p-3 w-80 text-xs" style={style} onClick={e => e.stopPropagation()}>
+          <div className="font-semibold text-slate-700 mb-2">PR 采购申请 ({records.length})</div>
+          <div className="space-y-2 max-h-48 overflow-y-auto">
+            {(records as PRRecord[]).map((pr, i) => (
+              <div key={i} className="border-b border-slate-100 pb-2 last:border-0">
+                <TipRow label="单号" value={pr.billno} />
+                <TipRow label="数量" value={pr.qty} />
+                <TipRow label="业务日期" value={pr.biztime?.slice(0, 10)} />
+                <TipRow label="审核日期" value={pr.auditdate?.slice(0, 10)} />
+                <TipRow label="组织" value={pr.org_name} />
+              </div>
+            ))}
+          </div>
         </div>
+      );
+    }
+    return (
+      <div className="absolute z-50 bg-white rounded-lg shadow-lg border p-3 w-80 text-xs" style={style} onClick={e => e.stopPropagation()}>
+        <div className="font-semibold text-slate-700 mb-2">PO 采购订单 ({records.length})</div>
+        <div className="space-y-2 max-h-48 overflow-y-auto">
+          {(records as PORecord[]).map((po, i) => (
+            <div key={i} className="border-b border-slate-100 pb-2 last:border-0">
+              <TipRow label="单号" value={po.billno} />
+              <TipRow label="数量" value={po.qty} />
+              <TipRow label="业务日期" value={po.biztime?.slice(0, 10)} />
+              <TipRow label="交货日期" value={po.deliverdate?.slice(0, 10)} />
+              <TipRow label="供应商" value={po.supplier_name} />
+              <TipRow label="经办人" value={po.operatorname} />
+            </div>
+          ))}
+        </div>
+      </div>
     );
+  };
+
+  /** PR/PO status cell content */
+  const StatusIcon = ({ ext, has, label }: { ext: boolean; has: boolean; label: string }) => {
+    if (!ext) return <span className="text-slate-300"><Minus className="w-4 h-4 mx-auto" /></span>;
+    return has
+      ? <span className="inline-flex items-center gap-0.5 text-green-600"><Check className="w-4 h-4" /><span className="text-xs">已{label}</span></span>
+      : <span className="inline-flex items-center gap-0.5 text-red-500"><X className="w-4 h-4" /><span className="text-xs">未{label}</span></span>;
+  };
+
+  // ── render ────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div>
+        <h2 className="text-lg font-semibold text-slate-800">步骤③ 物料需求计划（MRP）</h2>
+        <p className="text-sm text-slate-500 mt-1">
+          产品: <span className="font-medium text-slate-700">{step1Data.productCode}</span>{' '}
+          <span className="text-slate-700">{step1Data.productName}</span>
+        </p>
+      </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm text-red-700">{error}</p>
+            <button onClick={loadData} className="text-sm text-red-600 underline mt-1">点击重试</button>
+          </div>
+        </div>
+      )}
+
+      {/* Filters + Legend */}
+      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-sm">
+            <Filter className="w-4 h-4 text-slate-400" />
+            <span className="text-slate-600">BOM层级:</span>
+            <select
+              value={bomLevelFilter}
+              onChange={e => setBomLevelFilter(e.target.value === 'all' ? 'all' : Number(e.target.value) as 1 | 2 | 3)}
+              className="border border-slate-300 rounded px-2 py-1 text-sm bg-white"
+            >
+              <option value="all">全部层级</option>
+              <option value={1}>L1</option>
+              <option value={2}>L2</option>
+              <option value={3}>L3</option>
+            </select>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+            <input type="checkbox" checked={shortageOnly} onChange={e => setShortageOnly(e.target.checked)}
+              className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
+            仅显示缺口
+          </label>
+        </div>
+        <div className="flex items-center gap-4 text-xs text-slate-500">
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-green-500" />满足 ({stats.sufficient})</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2.5 h-2.5 rounded-full bg-red-500" />缺口 ({stats.shortage})</span>
+          <span className="text-slate-400">共 {filteredRows.length} / {stats.total} 条</span>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div ref={tableRef} className="bg-white border border-slate-200 rounded-lg overflow-hidden relative">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 border-b border-slate-200">
+              <tr className="text-left text-slate-600">
+                <th className="py-3 px-3 font-medium w-16">层级</th>
+                <th className="py-3 px-3 font-medium">物料编码</th>
+                <th className="py-3 px-3 font-medium">物料名称</th>
+                <th className="py-3 px-3 font-medium text-right w-28">净需求</th>
+                <th className="py-3 px-3 font-medium text-center w-20">PR</th>
+                <th className="py-3 px-3 font-medium text-center w-20">PO</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? <SkeletonRows /> : filteredRows.length === 0 ? (
+                <tr><td colSpan={6} className="py-12 text-center text-slate-400">暂无符合条件的物料数据</td></tr>
+              ) : pagedRows.map(row => {
+                const short = row.netDemand < 0;
+                const ext = isExternal(row.materialType);
+                return (
+                  <tr key={row.materialCode} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${short ? 'bg-red-50' : ''}`}>
+                    <td className="py-2.5 px-3">
+                      <span className="inline-flex items-center justify-center w-7 h-5 rounded bg-slate-100 text-xs font-medium text-slate-600">L{row.bomLevel}</span>
+                    </td>
+                    <td className="py-2.5 px-3 font-mono text-slate-800 text-xs">{row.materialCode}</td>
+                    <td className="py-2.5 px-3 text-slate-700">
+                      {row.materialName}
+                      {row.materialType && <span className="ml-2 text-xs text-slate-400">({row.materialType})</span>}
+                    </td>
+                    <td className={`py-2.5 px-3 text-right font-medium ${short ? 'text-red-600 font-bold' : 'text-green-600'}`}>
+                      <span className="inline-flex items-center gap-1 justify-end">
+                        {short ? <AlertCircle className="w-3.5 h-3.5 text-red-500" /> : <Check className="w-3.5 h-3.5 text-green-500" />}
+                        {row.netDemand.toLocaleString()}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-center cursor-pointer"
+                      onMouseEnter={e => ext && showTip(e, 'pr', row.prRecords)} onMouseLeave={() => setTooltip(null)}>
+                      <StatusIcon ext={ext} has={row.hasPR} label="PR" />
+                    </td>
+                    <td className="py-2.5 px-3 text-center cursor-pointer"
+                      onMouseEnter={e => ext && showTip(e, 'po', row.poRecords)} onMouseLeave={() => setTooltip(null)}>
+                      <StatusIcon ext={ext} has={row.hasPO} label="PO" />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <TooltipCard />
+        {loading && (
+          <div className="absolute inset-0 bg-white/60 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-slate-500">
+              <Loader2 className="w-5 h-5 animate-spin" /><span className="text-sm">加载物料需求数据...</span>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Bottom bar: back | pagination | next */}
+      <div className="flex items-center justify-between pt-2 gap-4">
+        {/* Left: back */}
+        <button onClick={onBack}
+          className="px-5 py-2.5 border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors flex items-center gap-1 flex-shrink-0">
+          <ChevronLeft className="w-4 h-4" />上一步
+        </button>
+
+        {/* Center: pagination */}
+        {!loading && filteredRows.length > PAGE_SIZE && (
+          <div className="flex items-center gap-1">
+            <button onClick={() => setCurrentPage(1)} disabled={safePage === 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+              <ChevronsLeft className="w-4 h-4" />
+            </button>
+            <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safePage === 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="px-3 text-sm text-slate-600 select-none">
+              第 <span className="font-medium text-slate-800">{safePage}</span> / <span className="font-medium text-slate-800">{totalPages}</span> 页
+              <span className="text-slate-400 ml-2">({filteredRows.length} 条)</span>
+            </span>
+            <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={safePage === totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            <button onClick={() => setCurrentPage(totalPages)} disabled={safePage === totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors">
+              <ChevronsRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+        {/* Spacer when pagination not shown, to keep next button on the right */}
+        {(loading || filteredRows.length <= PAGE_SIZE) && <div className="flex-1" />}
+
+        {/* Right: next */}
+        <button onClick={onConfirm} disabled={loading || !!error}
+          className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">
+          确认，进入下一步<ChevronRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
 };
 
 export default MaterialRequirementPanel;

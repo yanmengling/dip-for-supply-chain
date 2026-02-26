@@ -284,3 +284,130 @@ export interface PlanningAIAssistant {
   isTyping: boolean;
   suggestions: string[];
 }
+
+// ============= 优化新增类型（2026-02-25） =============
+
+/** 视图路由状态 */
+export type PlanningViewMode = 'task-list' | 'new-task' | 'task-detail';
+
+/** 新建任务流程步骤 */
+export type NewTaskStep = 1 | 2 | 3 | 4;
+
+/** 任务状态 */
+export type TaskStatus = 'active' | 'ended' | 'expired';
+
+/** 监测任务对象（localStorage 持久化） */
+export interface PlanningTask {
+  id: string;
+  name: string;
+  status: TaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  // 步骤① 产品需求计划
+  productCode: string;
+  productName: string;
+  demandStart: string;       // YYYY-MM-DD
+  demandEnd: string;
+  demandQuantity: number;
+  // 步骤② 生产计划
+  productionStart: string;   // YYYY-MM-DD（甘特图倒排起点）
+  productionEnd: string;
+  productionQuantity: number;
+}
+
+/** 步骤①确认数据 */
+export interface Step1Data {
+  productCode: string;
+  productName: string;
+  demandStart: string;
+  demandEnd: string;
+  demandQuantity: number;
+}
+
+/** 步骤②确认数据 */
+export interface Step2Data {
+  productionStart: string;
+  productionEnd: string;
+  productionQuantity: number;
+}
+
+/** 甘特图条目（运行时，不持久化） */
+export interface GanttBar {
+  materialCode: string;
+  materialName: string;
+  bomLevel: number;          // 0=产品, 1=一级子件, 2=二级...
+  parentCode: string | null;
+  startDate: Date;
+  endDate: Date;
+  leadtime: number;
+  materialType: string;      // 外购/自制/委外
+  status: 'on_time' | 'risk' | 'ordered';
+  hasShortage: boolean;
+  shortageQuantity: number;
+  poStatus: 'has_po' | 'no_po' | 'not_applicable';
+  prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
+  poDeliverDate?: string;    // 最新PO交货日
+  children: GanttBar[];
+}
+
+/** 步骤③ MRP 展示行 */
+export interface MRPDisplayRow {
+  materialCode: string;
+  materialName: string;
+  bomLevel: number;
+  materialType: string;
+  netDemand: number;
+  hasPR: boolean;
+  hasPO: boolean;
+  prRecords: PRRecord[];
+  poRecords: PORecord[];
+}
+
+/** PR 记录 */
+export interface PRRecord {
+  billno: string;
+  material_number: string;
+  material_name: string;
+  qty: number;
+  biztime: string;
+  joinqty: number;
+  auditdate: string;
+  org_name: string;
+  billtype_name: string;
+}
+
+/** PO 记录 */
+export interface PORecord {
+  billno: string;
+  material_number: string;
+  material_name: string;
+  qty: number;
+  biztime: string;
+  deliverdate: string;
+  supplier_name: string;
+  operatorname: string;
+  srcbillnumber: string;
+  actqty: number;
+}
+
+/** BOM 原始记录 */
+export interface BOMRecord {
+  bom_material_code: string;
+  material_code: string;
+  material_name: string;
+  parent_material_code: string;
+  bom_level: number;
+  standard_usage: number;
+  bom_version: string;
+  alt_part?: string;
+  alt_priority?: number;
+}
+
+/** 物料主数据 */
+export interface MaterialRecord {
+  material_code: string;
+  material_name: string;
+  materialattr: string;      // 外购/自制/委外
+  purchase_fixedleadtime: string;  // 字符串，需 parseFloat
+  product_fixedleadtime: string;
+}
