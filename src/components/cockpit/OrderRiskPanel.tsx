@@ -170,7 +170,7 @@ const OrderRiskPanel = ({ onNavigate }: Props) => {
             <Clock className="text-red-500" size={16} />
             逾期订单前5
           </h3>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <div className="space-y-2">
             {top5OverdueOrders.length === 0 ? (
               <div className="text-center py-6 bg-green-50 rounded-lg">
                 <CheckCircle className="mx-auto text-green-500 mb-2" size={24} />

@@ -237,38 +237,76 @@ const SupplyChainGraphPanel = ({ onNavigate }: Props) => {
       setShowProductModal(true);
       setProductModalLoading(true);
       try {
-        // 使用指标模型 API 获取产品库存数据
         const modelId = currentMetricIds.PRODUCT_INVENTORY_DETAIL;
         const timeRange = createLastDaysRange(1);
 
-        const result = await metricModelApi.queryByModelId(
+        // ── 第一步：不传维度，获取 model.analysis_dimensions ────
+        const firstResult = await metricModelApi.queryByModelId(
           modelId,
-          {
-            instant: true,
-            start: timeRange.start,
-            end: timeRange.end,
-            analysis_dimensions: PRODUCT_INVENTORY_DIMENSIONS,
-          },
+          { instant: true, start: timeRange.start, end: timeRange.end },
           { includeModel: true }
         );
 
-        // 转换 API 数据为组件期望的格式
-        const transformedData: ProductInventoryResult[] = [];
+        // 从模型信息中提取有效的分析维度
+        const rawDims = firstResult.model?.analysis_dimensions ?? [];
+        const allDims: string[] = rawDims.map((d) =>
+          typeof d === 'string' ? d : (d as { name: string }).name
+        ).filter(Boolean);
+
+        // 数量查询只用无歧义的编码 + 数量字段
+        const NEEDED_DIMS = ['material_code', 'inventory_qty', 'available_inventory_qty'];
+        const validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
+
+        let result = firstResult;
+        if (validDims.length > 0) {
+          result = await metricModelApi.queryByModelId(
+            modelId,
+            {
+              instant: true,
+              start: timeRange.start,
+              end: timeRange.end,
+              analysis_dimensions: validDims,
+            },
+            { includeModel: false, ignoringHcts: true }
+          );
+        }
+
+        // ── 第二步：从本体加载产品基础信息，建立准确的编号到名称的映射 ──
+        const nameMap = new Map<string, string>();
+        try {
+          const { loadProductData } = await import('../../services/productInventoryCalculator');
+          const productData = await loadProductData();
+          if (productData) {
+            const NIL_LIKE_NAME = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+            for (const p of productData) {
+              const c = (p.productCode || '').trim();
+              const n = (p.productName || '').trim();
+              if (c && !NIL_LIKE_NAME.test(c) && n && !NIL_LIKE_NAME.test(n)) {
+                nameMap.set(c, n);
+              }
+            }
+          }
+        } catch (nameErr) {
+          console.warn('[SupplyChainGraphPanel] 产品名称查询失败，降级显示编号:', nameErr);
+        }
+
+        const mergedMap = new Map<string, ProductInventoryResult>();
 
         if (result.datas && result.datas.length > 0) {
           for (const series of result.datas) {
-            const materialCode = series.labels?.material_code || '';
-            const materialName = series.labels?.material_name || '';
-            // 获取 available_quantity：可能在 labels 中作为维度，或在 values 中作为度量值
-            let availableQuantity = 0;
+            const labels = series.labels || {};
+            const code = (labels.material_code || labels.product_code || labels.material_number || '').trim();
+            const name = (labels.material_name || labels.product_name || '').trim();
 
-            // 优先从 labels 中获取（如果作为维度传递）
-            if (series.labels?.available_quantity) {
-              availableQuantity = parseFloat(series.labels.available_quantity) || 0;
-            }
-            // 其次从 values 中获取最新值（如果作为度量值）
-            else if (series.values && series.values.length > 0) {
-              // 取最后一个非空值
+            const NIL_LIKE = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+            if (!code || NIL_LIKE.test(code)) continue;
+
+            let availableQuantity = 0;
+            const qtyFromLabel = labels.available_quantity ?? labels.available_inventory_qty ?? labels.inventory_qty ?? null;
+
+            if (qtyFromLabel !== null && qtyFromLabel !== undefined) {
+              availableQuantity = parseFloat(String(qtyFromLabel)) || 0;
+            } else if (series.values && series.values.length > 0) {
               for (let i = series.values.length - 1; i >= 0; i--) {
                 if (series.values[i] !== null) {
                   availableQuantity = series.values[i]!;
@@ -277,23 +315,33 @@ const SupplyChainGraphPanel = ({ onNavigate }: Props) => {
               }
             }
 
-            transformedData.push({
-              productCode: materialCode,
-              productName: materialName,
-              calculatedStock: Math.floor(availableQuantity),
-              details: [],
-            });
+            const qty = Math.floor(availableQuantity);
+
+            if (mergedMap.has(code)) {
+              const existing = mergedMap.get(code)!;
+              existing.calculatedStock += qty;
+              if (!existing.productName || existing.productName === code) {
+                existing.productName = nameMap.get(code) || name || code;
+              }
+            } else {
+              mergedMap.set(code, {
+                productCode: code,
+                productName: nameMap.get(code) || name || code,
+                calculatedStock: qty,
+                details: [],
+              });
+            }
           }
         }
 
-        // 按库存量降序排序
+        const transformedData: ProductInventoryResult[] = Array.from(mergedMap.values());
         transformedData.sort((a, b) => b.calculatedStock - a.calculatedStock);
 
         setProductModalData(transformedData);
       } catch (err) {
         console.error('Failed to load product inventory from API:', err);
-        // API 失败时回退到本地计算
         try {
+          const { calculateAllProductInventory } = await import('../../services/productInventoryCalculator');
           const results = await calculateAllProductInventory();
           setProductModalData(results);
         } catch (fallbackErr) {

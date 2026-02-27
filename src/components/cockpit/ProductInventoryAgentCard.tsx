@@ -1,19 +1,32 @@
 /**
  * 产品库存智能体卡片组件
- * 
- * 直接通过指标模型 API 获取产品库存数据
+ *
+ * 通过指标模型 API 获取产品库存数据：
+ * 从配置中心配置的"产品库存优化模型"（mm_product_inventory_optimization）查询。
  */
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle, TrendingUp, Package } from 'lucide-react';
-import { metricModelApi, createLastDaysRange } from '../../api';
+import { AlertTriangle, CheckCircle, TrendingUp } from 'lucide-react';
+import { metricModelApi, createLastDaysRange } from '../../api/metricModelApi';
+import { apiConfigService } from '../../services/apiConfigService';
 import type { ProductInventoryResult } from '../../services/productInventoryCalculator';
 
-import { apiConfigService } from '../../services/apiConfigService';
+// ============================================================================
+// 指标模型 ID 解析
+// ============================================================================
 
-// 指标模型 ID 和分析维度配置
-const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization_dip') || 'd58keb5g5lk40hvh48og';
-const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name', 'available_quantity'];
+/**
+ * 从配置中心获取"产品库存优化模型"的 modelId，
+ * 回退到默认 modelId。
+ */
+const getProductInventoryModelId = () =>
+    apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
+
+
+
+// ============================================================================
+// 主组件
+// ============================================================================
 
 const ProductInventoryAgentCard = () => {
     const [products, setProducts] = useState<ProductInventoryResult[]>([]);
@@ -26,36 +39,113 @@ const ProductInventoryAgentCard = () => {
                 setLoading(true);
                 setError(null);
 
+                const modelId = getProductInventoryModelId();
+                console.log('[产品库存] 查询指标模型，modelId:', modelId);
+
                 const timeRange = createLastDaysRange(1);
 
-                const result = await metricModelApi.queryByModelId(
-                    getProductInventoryModelId(),
-                    {
-                        instant: true,
-                        start: timeRange.start,
-                        end: timeRange.end,
-                        analysis_dimensions: PRODUCT_INVENTORY_DIMENSIONS,
-                    },
+                // ── 第一步：不传维度，获取 model.analysis_dimensions ────
+                const firstResult = await metricModelApi.queryByModelId(
+                    modelId,
+                    { instant: true, start: timeRange.start, end: timeRange.end },
                     { includeModel: true }
                 );
 
-                // 转换 API 数据为组件期望的格式
-                const transformedData: ProductInventoryResult[] = [];
+                // 从模型信息中提取有效的分析维度，只保留需要的字段
+                const rawDims = firstResult.model?.analysis_dimensions ?? [];
+                const allDims: string[] = rawDims.map((d) =>
+                    typeof d === 'string' ? d : (d as { name: string }).name
+                ).filter(Boolean);
+
+                // material_name 在底层 SQL 视图中跨多表存在（Column is ambiguous），不能用作维度
+                // 数量查询只用无歧义的编码 + 数量字段
+                const NEEDED_DIMS = ['material_code', 'inventory_qty', 'available_inventory_qty'];
+                const validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
+
+                console.log('[产品库存] 全部维度:', allDims, '使用维度:', validDims);
+
+                // ── 第二步：用有效维度下钻，否则沿用第一步结果 ──────────
+                let result = firstResult;
+                if (validDims.length > 0) {
+                    result = await metricModelApi.queryByModelId(
+                        modelId,
+                        {
+                            instant: true,
+                            start: timeRange.start,
+                            end: timeRange.end,
+                            analysis_dimensions: validDims,
+                        },
+                        { includeModel: false, ignoringHcts: true }
+                    );
+                }
+
+                console.log('[产品库存] 指标模型返回数据条数:', result.datas?.length ?? 0);
+
+                // ── 第三步：单独查询 material_code + material_name 建立名称映射 ──
+                // 由于产品库存模型的 material_name 有歧义，我们从无歧义的物料库存模型获取映射
+                const nameMap = new Map<string, string>();
+                const materialModelId = apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58ihclg5lk40hvh48mg';
+                const nameDims = ['material_code', 'material_name'];
+                try {
+                    const nameResult = await metricModelApi.queryByModelId(
+                        materialModelId,
+                        {
+                            instant: true,
+                            start: timeRange.start,
+                            end: timeRange.end,
+                            analysis_dimensions: nameDims,
+                        },
+                        { includeModel: false, ignoringHcts: true }
+                    );
+                    if (nameResult.datas) {
+                        const NIL_LIKE_NAME = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                        for (const s of nameResult.datas) {
+                            const c = (s.labels?.material_code || '').trim();
+                            const n = (s.labels?.material_name || '').trim();
+                            if (c && !NIL_LIKE_NAME.test(c) && n && !NIL_LIKE_NAME.test(n)) {
+                                nameMap.set(c, n);
+                            }
+                        }
+                    }
+                    console.log('[产品库存] 名称映射条数:', nameMap.size);
+                } catch (nameErr) {
+                    console.warn('[产品库存] 名称查询失败，降级显示编号:', nameErr);
+                }
+
+
+                // 使用 Map 按 code 合并，避免同一产品编码因多条 series 重复出现
+                const mergedMap = new Map<string, ProductInventoryResult>();
 
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
-                        const materialCode = series.labels?.material_code || '';
-                        const materialName = series.labels?.material_name || '';
-                        // 获取 available_quantity：可能在 labels 中作为维度，或在 values 中作为度量值
-                        let availableQuantity = 0;
+                        const labels = series.labels || {};
 
-                        // 优先从 labels 中获取（如果作为维度传递）
-                        if (series.labels?.available_quantity) {
-                            availableQuantity = parseFloat(series.labels.available_quantity) || 0;
-                        }
-                        // 其次从 values 中获取最新值（如果作为度量值）
-                        else if (series.values && series.values.length > 0) {
-                            // 取最后一个非空值
+                        const code = (
+                            labels.material_code ||
+                            labels.product_code ||
+                            labels.material_number ||
+                            ''
+                        ).trim();
+
+                        const name = (
+                            labels.material_name ||
+                            labels.product_name ||
+                            ''
+                        ).trim();
+
+                        const NIL_LIKE = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                        if (!code || NIL_LIKE.test(code)) continue;
+
+                        // 优先从 labels 中读取库存量，否则取 values 末尾最新值
+                        let availableQuantity = 0;
+                        const qtyFromLabel =
+                            labels.available_quantity ??
+                            labels.available_inventory_qty ??
+                            labels.inventory_qty ??
+                            null;
+                        if (qtyFromLabel !== null && qtyFromLabel !== undefined) {
+                            availableQuantity = parseFloat(String(qtyFromLabel)) || 0;
+                        } else if (series.values && series.values.length > 0) {
                             for (let i = series.values.length - 1; i >= 0; i--) {
                                 if (series.values[i] !== null) {
                                     availableQuantity = series.values[i]!;
@@ -64,26 +154,41 @@ const ProductInventoryAgentCard = () => {
                             }
                         }
 
-                        transformedData.push({
-                            productCode: materialCode,
-                            productName: materialName,
-                            calculatedStock: Math.floor(availableQuantity),
-                            details: [],
-                        });
+                        const qty = Math.floor(availableQuantity);
+
+                        if (mergedMap.has(code)) {
+                            // 相同编码：累加库存量，name 取已有的（非空优先）
+                            const existing = mergedMap.get(code)!;
+                            existing.calculatedStock += qty;
+                            if (!existing.productName || existing.productName === code) {
+                                existing.productName = nameMap.get(code) || name || code;
+                            }
+                        } else {
+                            mergedMap.set(code, {
+                                productCode: code,
+                                productName: nameMap.get(code) || name || code,
+                                calculatedStock: qty,
+                                details: [],
+                            });
+                        }
                     }
                 }
 
-                // 按库存量降序排序
-                transformedData.sort((a, b) => b.calculatedStock - a.calculatedStock);
+                const resultList: ProductInventoryResult[] = Array.from(mergedMap.values());
 
-                setProducts(transformedData);
+                // 按库存量降序排序
+                resultList.sort((a, b) => b.calculatedStock - a.calculatedStock);
+
+                console.log('[产品库存] 最终合并结果数量:', resultList.length);
+                setProducts(resultList);
             } catch (err) {
-                console.error('[Product Inventory Agent] API call failed:', err);
+                console.error('[产品库存] 指标模型查询失败:', err);
                 setError(err instanceof Error ? err.message : '获取数据失败');
             } finally {
                 setLoading(false);
             }
         }
+
         fetchData();
     }, []);
 
@@ -121,9 +226,6 @@ const ProductInventoryAgentCard = () => {
                         </div>
                         <div className="text-3xl font-bold text-green-900">
                             {totalStock}
-                        </div>
-                        <div className="text-xs text-green-600 mt-1">
-                            基于指标模型实时查询
                         </div>
                     </div>
                     <div className="p-3 bg-green-100 rounded-lg">

@@ -1,30 +1,43 @@
 /**
  * 产品库存智能体组件
- * 
- * 直接通过指标模型 API 获取产品库存数据
+ *
+ * 通过指标模型 API 获取产品库存数据：
+ * 从配置中心配置的"产品库存优化模型"（mm_product_inventory_optimization）查询。
  */
 
 import { useEffect, useState } from 'react';
 import { Package, AlertTriangle, CheckCircle, Loader2 } from 'lucide-react';
-import { metricModelApi, createLastDaysRange } from '../../api';
-import type { ProductInventoryResult } from '../../services/productInventoryCalculator';
+import { metricModelApi, createLastDaysRange } from '../../api/metricModelApi';
+import { apiConfigService } from '../../services/apiConfigService';
+import { loadProductData, type ProductInventoryResult } from '../../services/productInventoryCalculator';
 
-// 指标模型 ID 和分析维度配置
-const PRODUCT_INVENTORY_MODEL_ID = 'd58keb5g5lk40hvh48og';
-const PRODUCT_INVENTORY_DIMENSIONS = ['material_code', 'material_name'];
+// ============================================================================
+// 指标模型 ID 解析
+// ============================================================================
+
+const getProductInventoryModelId = () =>
+    apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
+
+
+
+// ============================================================================
+// 主组件
+// ============================================================================
+
 
 interface Props {
     onNavigate?: (view: string) => void;
 }
 
-const ProductInventoryAgent = ({ onNavigate }: Props) => {
+const PAGE_SIZE = 10;
+
+const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
     const [products, setProducts] = useState<ProductInventoryResult[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [page, setPage] = useState(1);
 
     useEffect(() => {
-        // 创建 AbortController 用于取消请求
-        const abortController = new AbortController();
         let isMounted = true;
 
         async function fetchData() {
@@ -32,43 +45,109 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
                 setLoading(true);
                 setError(null);
 
-                console.log('[Product Inventory Agent] Fetching from API...');
+                const modelId = getProductInventoryModelId();
+                console.log('[产品库存智能体] 查询指标模型，modelId:', modelId);
 
                 const timeRange = createLastDaysRange(1);
 
-                const result = await metricModelApi.queryByModelId(
-                    PRODUCT_INVENTORY_MODEL_ID,
-                    {
-                        instant: true,
-                        start: timeRange.start,
-                        end: timeRange.end,
-                        analysis_dimensions: PRODUCT_INVENTORY_DIMENSIONS,
-                    },
+                // ── 第一步：不传维度，查询模型获取 model.analysis_dimensions ─
+                const firstResult = await metricModelApi.queryByModelId(
+                    modelId,
+                    { instant: true, start: timeRange.start, end: timeRange.end },
                     { includeModel: true }
                 );
 
-                // 检查组件是否已卸载
-                if (!isMounted || abortController.signal.aborted) {
-                    console.log('[Product Inventory Agent] Request cancelled');
-                    return;
+                if (!isMounted) return;
+
+                // 从模型信息中提取有效的分析维度，只保留需要的字段
+                const rawDims = firstResult.model?.analysis_dimensions ?? [];
+                const allDims: string[] = rawDims.map((d) =>
+                    typeof d === 'string' ? d : (d as { name: string }).name
+                ).filter(Boolean);
+
+                // material_name 在底层 SQL 视图中跨多表存在（Column is ambiguous），不能用作维度
+                // 数量查询只用无歧义的编码 + 数量字段
+                const NEEDED_DIMS = ['material_code', 'inventory_qty', 'available_inventory_qty'];
+                const validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
+
+                console.log('[产品库存智能体] 全部维度:', allDims, '使用维度:', validDims);
+
+                // ── 第二步：若有有效维度则用其下钻，否则使用第一步结果 ───
+                let result = firstResult;
+                if (validDims.length > 0) {
+                    result = await metricModelApi.queryByModelId(
+                        modelId,
+                        {
+                            instant: true,
+                            start: timeRange.start,
+                            end: timeRange.end,
+                            analysis_dimensions: validDims,
+                        },
+                        { includeModel: false, ignoringHcts: true }
+                    );
+                    if (!isMounted) return;
                 }
 
-                // 转换 API 数据为组件期望的格式
-                const transformedData: ProductInventoryResult[] = [];
+                console.log('[产品库存智能体] 指标模型返回数据条数:', result.datas?.length ?? 0);
+
+                // ── 第三步：建立名称映射 ──
+                // 由于产品库存模型的 material_name 字段在底层 SQL 有歧义，单独查询也会报错，
+                // 这里我们直接从本体数据加载产品基础信息，以建立准确的编号到名称的映射
+                const nameMap = new Map<string, string>();
+
+                try {
+                    const productData = await loadProductData();
+                    if (isMounted && productData) {
+                        const NIL_LIKE_NAME = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                        for (const p of productData) {
+                            const c = (p.productCode || '').trim();
+                            const n = (p.productName || '').trim();
+                            if (c && !NIL_LIKE_NAME.test(c) && n && !NIL_LIKE_NAME.test(n)) {
+                                nameMap.set(c, n);
+                            }
+                        }
+                    }
+                    console.log('[产品库存智能体] 从本体加载产品名称映射条数:', nameMap.size);
+                } catch (nameErr) {
+                    // 名称查询失败不影响库存数据显示，降级为显示编号
+                    console.warn('[产品库存智能体] 产品名称查询失败，降级显示编号:', nameErr);
+                }
+
+                // 使用 Map 按 code 合并，避免同一产品编码因多条 series 重复出现
+                const mergedMap = new Map<string, ProductInventoryResult>();
 
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
-                        const materialCode = series.labels?.material_code || '';
-                        const materialName = series.labels?.material_name || '';
-                        // 获取 available_quantity
-                        let availableQuantity = 0;
+                        const labels = series.labels || {};
 
-                        // 优先从 labels 中获取（如果作为维度传递）
-                        if (series.labels?.available_quantity) {
-                            availableQuantity = parseFloat(series.labels.available_quantity) || 0;
-                        }
-                        // 其次从 values 中获取最新值（如果作为度量值）
-                        else if (series.values && series.values.length > 0) {
+                        // 自适应读取编码字段（优先 material_code，次之 product_code 等）
+                        const code = (
+                            labels.material_code ||
+                            labels.product_code ||
+                            labels.material_number ||
+                            ''
+                        ).trim();
+
+                        const name = (
+                            labels.material_name ||
+                            labels.product_name ||
+                            ''
+                        ).trim();
+
+                        // 过滤空值及后端返回的 nil 类字符串（"<nil>", "nil", "null" 等脏数据）
+                        const NIL_LIKE = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                        if (!code || NIL_LIKE.test(code)) continue;
+
+                        // 优先从 labels 中读取库存量，否则取 values 末尾最新值
+                        let availableQuantity = 0;
+                        const qtyFromLabel =
+                            labels.available_quantity ??
+                            labels.available_inventory_qty ??
+                            labels.inventory_qty ??
+                            null;
+                        if (qtyFromLabel !== null && qtyFromLabel !== undefined) {
+                            availableQuantity = parseFloat(String(qtyFromLabel)) || 0;
+                        } else if (series.values && series.values.length > 0) {
                             for (let i = series.values.length - 1; i >= 0; i--) {
                                 if (series.values[i] !== null) {
                                     availableQuantity = series.values[i]!;
@@ -77,58 +156,55 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
                             }
                         }
 
-                        transformedData.push({
-                            productCode: materialCode,
-                            productName: materialName,
-                            calculatedStock: Math.floor(availableQuantity),
-                            details: [],
-                        });
+                        const qty = Math.floor(availableQuantity);
+
+                        if (mergedMap.has(code)) {
+                            // 相同编码：累加库存量，name 取已有的（非空优先）
+                            const existing = mergedMap.get(code)!;
+                            existing.calculatedStock += qty;
+                            if (!existing.productName || existing.productName === code) {
+                                existing.productName = nameMap.get(code) || name || code;
+                            }
+                        } else {
+                            mergedMap.set(code, {
+                                productCode: code,
+                                // 优先使用第三步名称映射，其次 labels 里的 name，最后回退到 code
+                                productName: nameMap.get(code) || name || code,
+                                calculatedStock: qty,
+                                details: [],
+                            });
+                        }
                     }
                 }
 
+                const resultList: ProductInventoryResult[] = Array.from(mergedMap.values());
+
                 // 按库存量降序排序
-                transformedData.sort((a, b) => b.calculatedStock - a.calculatedStock);
+                resultList.sort((a, b) => b.calculatedStock - a.calculatedStock);
 
-                // 再次检查组件是否已卸载
-                if (!isMounted) {
-                    return;
-                }
-
-                setProducts(transformedData);
-                console.log('[Product Inventory Agent] Data fetched:', transformedData);
+                console.log('[产品库存智能体] 最终结果数量:', resultList.length);
+                if (!isMounted) return;
+                setProducts(resultList);
             } catch (err) {
-                // 忽略 AbortError
-                if (err instanceof Error && err.name === 'AbortError') {
-                    console.log('[Product Inventory Agent] Request aborted');
-                    return;
-                }
-
-                // 检查组件是否已卸载
-                if (!isMounted) {
-                    return;
-                }
-
-                console.error('[Product Inventory Agent] API call failed:', err);
+                if (!isMounted) return;
+                console.error('[产品库存智能体] 指标模型查询失败:', err);
                 setError(err instanceof Error ? err.message : '获取数据失败');
             } finally {
-                if (isMounted) {
-                    setLoading(false);
-                }
+                if (isMounted) setLoading(false);
             }
         }
 
         fetchData();
 
-        // 清理函数：取消未完成的请求
-        return () => {
-            isMounted = false;
-            abortController.abort();
-            console.log('[Product Inventory Agent] Cleanup: aborted request');
-        };
+        return () => { isMounted = false; };
     }, []);
 
     // 计算总库存
     const totalStock = products.reduce((sum, p) => sum + p.calculatedStock, 0);
+
+    // 分页计算
+    const totalPages = Math.ceil(products.length / PAGE_SIZE);
+    const pagedProducts = products.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
     if (loading) {
         return (
@@ -144,7 +220,7 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
             <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-center text-red-800">
                     <AlertTriangle className="w-5 h-5 mr-2" />
-                    <span>计算失败: {error}</span>
+                    <span>获取失败: {error}</span>
                 </div>
             </div>
         );
@@ -160,7 +236,7 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
                         产品库存智能体
                     </h3>
                     <p className="text-sm text-gray-500 mt-1">
-                        基于指标模型实时查询
+                        基于产品库存优化模型实时查询
                     </p>
                 </div>
             </div>
@@ -180,9 +256,14 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
 
             {/* 产品明细列表 */}
             <div className="space-y-3">
-                <div className="text-sm font-medium text-gray-700">产品明细</div>
+                <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium text-gray-700">产品明细</div>
+                    <div className="text-xs text-gray-400">
+                        共 {products.length} 个产品，第 {page}/{totalPages || 1} 页
+                    </div>
+                </div>
 
-                {products.map((product) => (
+                {pagedProducts.map((product) => (
                     <div
                         key={product.productCode}
                         className="bg-white rounded-lg border border-gray-200 p-4 hover:shadow-md transition-shadow"
@@ -232,10 +313,39 @@ const ProductInventoryAgent = ({ onNavigate }: Props) => {
                 ))}
             </div>
 
-            {/* 说明 */}
-            <div className="text-xs text-gray-500 bg-gray-50 rounded p-3">
-                💡 产品库存数据来自指标模型实时查询
-            </div>
+            {/* 分页控件 */}
+            {totalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-1">
+                    <button
+                        onClick={() => setPage(p => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                        上一页
+                    </button>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1).map(p => (
+                        <button
+                            key={p}
+                            onClick={() => setPage(p)}
+                            className={`w-8 h-8 text-sm rounded-lg border transition-colors ${p === page
+                                ? 'bg-indigo-600 border-indigo-600 text-white'
+                                : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                                }`}
+                        >
+                            {p}
+                        </button>
+                    ))}
+                    <button
+                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                        disabled={page === totalPages}
+                        className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                        下一页
+                    </button>
+                </div>
+            )}
+
+
         </div>
     );
 };

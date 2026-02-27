@@ -79,7 +79,7 @@ export async function loadProductEntities(forceReload: boolean = false): Promise
         }
 
         const response = await ontologyApi.queryObjectInstances(productConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 
@@ -128,7 +128,7 @@ export async function loadBOMEvents(forceReload: boolean = false): Promise<any[]
         }
 
         const response = await ontologyApi.queryObjectInstances(bomConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 
@@ -178,7 +178,7 @@ export async function loadInventoryEvents(forceReload: boolean = false): Promise
         }
 
         const response = await ontologyApi.queryObjectInstances(inventoryConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 
@@ -231,7 +231,7 @@ export async function loadSupplierEntities(forceReload: boolean = false): Promis
         }
 
         const response = await ontologyApi.queryObjectInstances(supplierConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 
@@ -307,7 +307,7 @@ export async function loadSalesOrderEvents(forceReload: boolean = false): Promis
         }
 
         const response = await ontologyApi.queryObjectInstances(orderConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 
@@ -359,7 +359,7 @@ export async function loadMaterialEntities(forceReload: boolean = false): Promis
         }
 
         const response = await ontologyApi.queryObjectInstances(materialConfig.objectTypeId, {
-            limit: 10000,
+            limit: 500,
             need_total: false,
         });
 

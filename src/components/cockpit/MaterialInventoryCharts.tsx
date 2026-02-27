@@ -5,13 +5,13 @@
  * 只展示TOP10数据以提高渲染性能
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { getMaterialInventorySummary } from '../../utils/cockpitDataService';
 import { useDimensionMetricData, useMetricData, latestValueTransform } from '../../hooks/useMetricData';
 import { Loader2, AlertTriangle, CheckCircle } from 'lucide-react';
 
 import { apiConfigService } from '../../services/apiConfigService';
+import { metricModelApi, createLastDaysRange } from '../../api';
 
 // 获取指标 ID 的辅助函数
 const getMetricIds = () => {
@@ -19,7 +19,7 @@ const getMetricIds = () => {
         const metrics = apiConfigService.getMetricModelConfigs();
         const stockMetric = metrics.find(m =>
             m.tags?.includes('material') &&
-            m.tags?.includes('inventory_data')
+            m.tags?.includes('optimization')
         );
         const stagnantMetric = metrics.find(m =>
             m.tags?.includes('material') &&
@@ -58,16 +58,89 @@ const MaterialInventoryCharts = () => {
         };
     }, []);
 
-    // 获取物料库存排名数据 - 只获取TOP10
-    const {
-        items: materialStockRankingItems,
-        loading: stockRankingLoading,
-        error: stockRankingError,
-    } = useDimensionMetricData(
-        METRIC_IDS.TOTAL_MATERIAL_STOCK,
-        ['material_name', 'inventory_data'],
-        { instant: true }
-    );
+    // 动态获取库存排名数据
+    const [materialStockRankingItems, setMaterialStockRankingItems] = useState<any[]>([]);
+    const [stockRankingLoading, setStockRankingLoading] = useState(true);
+    const [stockRankingError, setStockRankingError] = useState<string | null>(null);
+
+    useEffect(() => {
+        const fetchStockRankings = async () => {
+            setStockRankingLoading(true);
+            setStockRankingError(null);
+            try {
+                const modelId = METRIC_IDS.TOTAL_MATERIAL_STOCK;
+                const timeRange = createLastDaysRange(1);
+
+                // 第一步：获取模型维度信息
+                const firstResult = await metricModelApi.queryByModelId(
+                    modelId,
+                    { instant: true, start: timeRange.start, end: timeRange.end },
+                    { includeModel: true }
+                );
+
+                const rawDims = firstResult.model?.analysis_dimensions ?? [];
+                const allDims: string[] = rawDims.map((d: any) =>
+                    typeof d === 'string' ? d : d.name
+                ).filter(Boolean);
+
+                // 第二步：匹配合法维度
+                const NEEDED_DIMS = ['material_code', 'material_number', 'material_name', 'item_code', 'item_name', 'inventory_qty', 'available_inventory_qty', 'available_quantity'];
+                const validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
+
+                let result = firstResult;
+                if (validDims.length > 0) {
+                    result = await metricModelApi.queryByModelId(
+                        modelId,
+                        {
+                            instant: true,
+                            start: timeRange.start,
+                            end: timeRange.end,
+                            analysis_dimensions: validDims,
+                        },
+                        { includeModel: false, ignoringHcts: true }
+                    );
+                }
+
+                // 第三步：提取数据
+                const transformedItems: any[] = [];
+                if (result.datas && result.datas.length > 0) {
+                    for (const series of result.datas) {
+                        let latestValue: number | null = null;
+
+                        // 尝试从标签中获取库存数量（如果模型将数量作为维度返回）
+                        const labels = series.labels || {};
+                        const qtyFromLabel = labels.available_quantity ?? labels.available_inventory_qty ?? labels.inventory_qty ?? null;
+
+                        if (qtyFromLabel !== null && qtyFromLabel !== undefined) {
+                            latestValue = parseFloat(String(qtyFromLabel)) || 0;
+                        } else if (series.values && series.values.length > 0) {
+                            for (let i = series.values.length - 1; i >= 0; i--) {
+                                if (series.values[i] !== null) {
+                                    latestValue = series.values[i];
+                                    break;
+                                }
+                            }
+                        }
+
+                        transformedItems.push({
+                            labels: labels,
+                            value: latestValue,
+                        });
+                    }
+                }
+
+                setMaterialStockRankingItems(transformedItems);
+            } catch (err: any) {
+                console.error('Failed to fetch material stock ranking:', err);
+                setStockRankingError(err.message || '获取数据失败');
+            } finally {
+                setStockRankingLoading(false);
+            }
+        };
+
+        fetchStockRankings();
+    }, [METRIC_IDS.TOTAL_MATERIAL_STOCK]);
+
 
     // 获取呆滞物料数据
     const {
@@ -75,29 +148,50 @@ const MaterialInventoryCharts = () => {
         loading: stagnantLoading,
     } = useDimensionMetricData(
         METRIC_IDS.STAGNANT_MATERIALS,
-        ['item_name', 'warehouse_name'],
+        ['material_code', 'material_name', 'inventory_age'],
         { instant: true }
-    );
-
-    // 大脑模式：直接获取总库存量
-    const {
-        value: totalMaterialStockFromApi,
-        loading: totalMaterialStockLoading,
-    } = useMetricData(
-        METRIC_IDS.TOTAL_MATERIAL_STOCK,
-        {
-            instant: true,
-            transform: latestValueTransform,
-        }
     );
 
     // 计算总库存量
     const totalMaterialStock = useMemo(() => {
-        // 大脑模式：直接使用API返回的总量
-        return totalMaterialStockFromApi ?? summary.totalStock;
-    }, [totalMaterialStockFromApi, summary.totalStock]);
+        // 通过累加所有带维度的库存数据
+        if (materialStockRankingItems.length > 0) {
+            return materialStockRankingItems.reduce((sum, item) => sum + (item.value || 0), 0);
+        }
+        return summary.totalStock || 0;
+    }, [materialStockRankingItems, summary.totalStock]);
 
-    // 库存TOP10柱状图数据 - 优化：直接取前10
+    // 异步加载物料名称映射
+    const [materialNameMap, setMaterialNameMap] = useState<Map<string, string>>(new Map());
+
+    useEffect(() => {
+        const fetchMaterialData = async () => {
+            try {
+                // 利用 ontologyDataService 中的 loadMaterialEntities
+                const { loadMaterialEntities } = await import('../../services/ontologyDataService');
+                const materials = await loadMaterialEntities();
+                if (materials && materials.length > 0) {
+                    const map = new Map<string, string>();
+                    const NIL_LIKE = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                    for (const m of materials) {
+                        const code = (m.material_code || '').trim();
+                        const name = (m.material_name || '').trim();
+                        if (code && !NIL_LIKE.test(code) && name && !NIL_LIKE.test(name)) {
+                            map.set(code, name);
+                        }
+                    }
+                    setMaterialNameMap(map);
+                }
+            } catch (err) {
+                console.warn('[MaterialInventoryCharts] 无法加载物料主数据作为名称映射');
+            }
+        };
+        fetchMaterialData();
+    }, []);
+
+    const NIL_LIKE_REGEX = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+
+    // 库存TOP10柱状图数据 - 优化：直接取前10，并且如果API数据不完整，使用后备计算数据
     const top10StockData = useMemo(() => {
         if (stockRankingError || materialStockRankingItems.length === 0) {
             return summary.top10ByStock.slice(0, 10).map(item => ({
@@ -106,32 +200,92 @@ const MaterialInventoryCharts = () => {
                 stock: item.stock,
             }));
         }
-        // 只取前10条
-        return materialStockRankingItems
-            .slice(0, 10)
-            .map(item => {
-                const name = item.labels.material_name || item.labels.item_name || '未知物料';
-                return {
-                    name: name.length > 12 ? name.substring(0, 12) + '...' : name,
-                    fullName: name,
-                    stock: item.value ?? 0,
-                };
-            });
-    }, [materialStockRankingItems, stockRankingError, summary.top10ByStock]);
+
+        // 把数据聚合，以防同一个 code 出现多次
+        const aggregatedMap = new Map<string, { code: string, rawName: string, stock: number }>();
+
+        for (const item of materialStockRankingItems) {
+            const code = (item.labels.material_code || item.labels.item_code || item.labels.material_number || '').trim();
+            const defaultName = (item.labels.material_name || item.labels.item_name || '').trim();
+
+            // 没有 code 就跳过
+            if (!code || NIL_LIKE_REGEX.test(code)) continue;
+
+            const currStock = item.value ?? 0;
+            if (aggregatedMap.has(code)) {
+                aggregatedMap.get(code)!.stock += currStock;
+            } else {
+                aggregatedMap.set(code, { code, rawName: defaultName, stock: currStock });
+            }
+        }
+
+        // 按 stock 降序排
+        const sortedItems = Array.from(aggregatedMap.values()).sort((a, b) => b.stock - a.stock).slice(0, 10);
+
+        return sortedItems.map(item => {
+            let finalName = materialNameMap.get(item.code) || item.rawName || item.code;
+            if (NIL_LIKE_REGEX.test(finalName)) {
+                finalName = item.code || '未知物料';
+            }
+            return {
+                name: finalName.length > 12 ? finalName.substring(0, 12) + '...' : finalName,
+                fullName: finalName,
+                stock: Math.floor(item.stock),
+            };
+        });
+    }, [materialStockRankingItems, stockRankingError, summary.top10ByStock, materialNameMap]);
 
     // 呆滞物料数据 - 只取TOP10
     const stagnantMaterials = useMemo(() => {
-        return stagnantMaterialItems
-            .filter(item => (item.value ?? 0) > 115)
-            .sort((a, b) => (b.value ?? 0) - (a.value ?? 0))
+        const aggregatedMap = new Map<string, { code: string, rawName: string, age: number, warehouse: string }>();
+
+        console.log("[DEBUG] Stagnant Material Items Count:", stagnantMaterialItems.length);
+        if (stagnantMaterialItems.length > 0) {
+            console.log("[DEBUG] Sample Stagnant Material Item:", stagnantMaterialItems[0]);
+        }
+
+        for (const item of stagnantMaterialItems) {
+            const code = (item.labels.material_code || item.labels.item_code || item.labels.material_number || '').trim();
+            const defaultName = (item.labels.item_name || item.labels.material_name || '').trim();
+
+            // 库龄可能作为维度传回，如果不存在则使用指标值
+            const mappedAge = Number(item.labels.inventory_age);
+            const age = (!isNaN(mappedAge) && mappedAge > 0) ? mappedAge : (item.value ?? 0);
+
+            if (!code || NIL_LIKE_REGEX.test(code)) continue;
+
+            // 同样物料取最大库龄
+            if (aggregatedMap.has(code)) {
+                if (age > aggregatedMap.get(code)!.age) {
+                    aggregatedMap.get(code)!.age = age;
+                }
+            } else {
+                aggregatedMap.set(code, {
+                    code,
+                    rawName: defaultName,
+                    age,
+                    warehouse: item.labels.warehouse_name || '缺省仓库' // 当前模型中未提供仓库维度
+                });
+            }
+        }
+
+        return Array.from(aggregatedMap.values())
+            .filter(item => item.age > 90) // > 90天算呆滞
+            .sort((a, b) => b.age - a.age)
             .slice(0, 10)
-            .map(item => ({
-                name: (item.labels.item_name || '未知').substring(0, 10),
-                fullName: item.labels.item_name || '未知物料',
-                age: item.value ?? 0,
-                warehouse: item.labels.warehouse_name || '未知仓库',
-            }));
-    }, [stagnantMaterialItems]);
+            .map(item => {
+                let finalName = materialNameMap.get(item.code) || item.rawName || item.code;
+                if (NIL_LIKE_REGEX.test(finalName)) {
+                    finalName = item.code || '未知物料';
+                }
+                return {
+                    name: finalName.length > 10 ? finalName.substring(0, 10) + '...' : finalName,
+                    fullName: finalName,
+                    age: item.age,
+                    warehouse: item.warehouse,
+                };
+            });
+    }, [stagnantMaterialItems, materialNameMap]);
 
     // 呆滞物料数量
     const stagnantCount = stagnantMaterials.length;
@@ -139,8 +293,16 @@ const MaterialInventoryCharts = () => {
 
     // 物料种类数量
     const totalMaterialTypes = useMemo(() => {
-        return materialStockRankingItems.length;
-    }, [materialStockRankingItems.length]);
+        // 使用去重后的 code 数作为物料种类数
+        const codes = new Set<string>();
+        for (const item of materialStockRankingItems) {
+            const code = (item.labels.material_code || item.labels.item_code || item.labels.material_number || '').trim();
+            if (code && !NIL_LIKE_REGEX.test(code)) {
+                codes.add(code);
+            }
+        }
+        return codes.size || materialStockRankingItems.length;
+    }, [materialStockRankingItems]);
 
     // 库存状态分布
     const stockDistribution = useMemo(() => {

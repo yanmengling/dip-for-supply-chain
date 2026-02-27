@@ -1,160 +1,189 @@
 /**
- * Material Inventory Panel
- * 
- * Displays material inventory summary including total count, stagnant materials,
- * top 10 materials by stock, and optimization recommendations.
+ * Material Inventory Panel (Cockpit/Agent Network 视图)
+ *
+ * 通过指标模型 API 获取物料库存明细数据：
+ * 从配置中心配置的"物料库存优化模型"（mm_material_inventory_optimization）查询。
+ * 按物料编码合并后分页展示编码、名称、库存量和状态。
  */
 
-import { useMemo } from 'react';
-import { Box, ArrowRight, Loader2 } from 'lucide-react';
-import { getMaterialInventorySummary } from '../../utils/cockpitDataService';
-import { materialsData, materialStocksData } from '../../utils/entityConfigService';
-import { calculateMaterialLogicRules } from '../../utils/logicRuleService';
-import { generateMaterialRecommendations } from '../../utils/recommendationService';
-import { useMetricData, useDimensionMetricData, latestValueTransform } from '../../hooks/useMetricData';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowRight, Box, CheckCircle, Loader2, Search } from 'lucide-react';
+import { metricModelApi, createLastDaysRange } from '../../api/metricModelApi';
 import { apiConfigService } from '../../services/apiConfigService';
 
-// 获取指标 ID 的辅助函数
-const getMetricIds = () => {
-  try {
-    const metrics = apiConfigService.getMetricModelConfigs();
+// ============================================================================
+// 配置
+// ============================================================================
 
-    // 查找物料库存量指标 (标签: material, inventory_data)
-    const stockMetric = metrics.find(m =>
-      m.tags?.includes('material') &&
-      m.tags?.includes('inventory_data')
-    );
+const getMaterialInventoryModelId = () =>
+  apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58ihclg5lk40hvh48mg';
 
-    const typeMetric = metrics.find(m => m.tags?.includes('material') && m.tags?.includes('count'));
+/** 分析维度（物料库存模型中 material_name 无歧义，可直接使用） */
+const QUERY_DIMS = [
+  'material_code',
+  'material_name',
+  'available_inventory_qty',
+  'inventory_qty',
+];
 
-    return {
-      // 物料库存量
-      TOTAL_MATERIAL_STOCK: stockMetric?.modelId || 'd58je8lg5lk40hvh48n0',
-      // 其他指标
-      TOTAL_MATERIAL_TYPES: typeMetric?.modelId || 'd58ihclg5lk40hvh48mg',
-      STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
-    };
-  } catch (error) {
-    console.warn('[MaterialInventoryPanel] Failed to load metric IDs, using defaults');
-    return {
-      TOTAL_MATERIAL_STOCK: 'd58je8lg5lk40hvh48n0',
-      TOTAL_MATERIAL_TYPES: 'd58ihclg5lk40hvh48mg',
-      STAGNANT_MATERIALS: 'd58jomlg5lk40hvh48o0',
-    };
-  }
-};
+// ============================================================================
+// 类型
+// ============================================================================
+
+interface MaterialItem {
+  materialCode: string;
+  materialName: string;
+  currentStock: number;
+  status: '正常' | '缺货';
+}
+
+// ============================================================================
+// 主组件
+// ============================================================================
 
 interface Props {
   onNavigate?: (view: string) => void;
 }
 
 const MaterialInventoryPanel = ({ onNavigate }: Props) => {
-  // 动态获取指标 ID
-  const currentMetricIds = useMemo(() => getMetricIds(), []);
+  const [materials, setMaterials] = useState<MaterialItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
 
-  const summary = {
-    totalTypes: 0,
-    totalStock: 0,
-    top10ByStock: [],
-    stagnantCount: 0,
-    stagnantPercentage: 0,
-    stagnantDetails: [],
-  };
+  useEffect(() => {
+    let isMounted = true;
 
+    async function fetchData() {
+      try {
+        setLoading(true);
+        setError(null);
 
+        const modelId = getMaterialInventoryModelId();
+        const timeRange = createLastDaysRange(1);
 
+        // ── 第一步：获取模型维度列表 ──────────────────────────────────
+        const firstResult = await metricModelApi.queryByModelId(
+          modelId,
+          { instant: true, start: timeRange.start, end: timeRange.end },
+          { includeModel: true }
+        );
+        if (!isMounted) return;
 
+        const rawDims = firstResult.model?.analysis_dimensions ?? [];
+        const allDims: string[] = rawDims.map((d) =>
+          typeof d === 'string' ? d : (d as { name: string }).name
+        ).filter(Boolean);
 
-  // 从真实 API 获取物料总种类数（item_type=Material 的数量）
-  // 对 Hook 选项进行 memo，避免每次 render 传入新对象导致 useEffect 触发
-  const materialTypesOptions = useMemo(() => ({
-    instant: true,
-    transform: latestValueTransform,
-  }), []);
+        const validDims = QUERY_DIMS.filter(d => allDims.includes(d));
 
-  const {
-    value: totalMaterialTypesFromApi,
-    loading: totalMaterialTypesLoading,
-    error: totalMaterialTypesError,
-  } = useMetricData(currentMetricIds.TOTAL_MATERIAL_TYPES, materialTypesOptions);
+        // ── 第二步：按维度下钻，获取物料明细 ─────────────────────────
+        let result = firstResult;
+        if (validDims.length > 0) {
+          result = await metricModelApi.queryByModelId(
+            modelId,
+            {
+              instant: true,
+              start: timeRange.start,
+              end: timeRange.end,
+              analysis_dimensions: validDims,
+            },
+            { includeModel: false, ignoringHcts: true }
+          );
+          if (!isMounted) return;
+        }
 
-  // 调试：打印API调用结果
-  if (import.meta.env.DEV) {
-    console.log('[MaterialInventoryPanel] API调用结果:', {
-      modelId: currentMetricIds.TOTAL_MATERIAL_TYPES,
-    });
-  }
+        // ── 合并：按 material_code 去重并累加库存 ──────────────────
+        const NIL_LIKE = /^(<nil>|nil|null|undefined|none)$/i;
+        const mergedMap = new Map<string, MaterialItem>();
 
-  // 使用 API 数据，如果失败则回退到 mock 数据
-  const totalMaterialTypes = totalMaterialTypesFromApi ?? summary.totalTypes;
+        for (const series of result.datas ?? []) {
+          const labels = series.labels || {};
 
-  // 在供应链大脑模式下，直接获取总库存量（API不支持维度分析）
-  // 在Mock模式下，通过维度分析获取详细数据
-  const stockOptions = useMemo(() => ({
-    instant: true,
-    transform: latestValueTransform,
-  }), []);
+          const code = (
+            labels.material_code ||
+            labels.product_code ||
+            labels.material_number ||
+            ''
+          ).trim();
 
-  const {
-    value: totalMaterialStockFromApi,
-    loading: totalMaterialStockLoading,
-    error: totalMaterialStockError,
-  } = useMetricData(
-    currentMetricIds.TOTAL_MATERIAL_STOCK,
-    stockOptions
-  );
+          const name = (
+            labels.material_name ||
+            labels.product_name ||
+            ''
+          ).trim();
 
-  // 从真实 API 获取物料库存排名
-  // Mock模式：按 item_name 分组
-  // 大脑模式：按 material_name 和 inventory_data 分组
-  const rankingDimensions = useMemo(() => ['material_code', 'material_name', 'inventory_data'], []);
-  const rankingOptions = useMemo(() => ({ instant: true }), []);
+          if (!code || NIL_LIKE.test(code)) continue;
 
-  const {
-    items: materialStockRankingItems,
-    loading: materialStockRankingLoading,
-    error: materialStockRankingError,
-  } = useDimensionMetricData(
-    currentMetricIds.TOTAL_MATERIAL_STOCK,
-    rankingDimensions,
-    rankingOptions
-  );
+          // 读取库存量
+          let qty = 0;
+          const qtyFromLabel =
+            labels.available_inventory_qty ??
+            labels.inventory_qty ??
+            null;
+          if (qtyFromLabel !== null && qtyFromLabel !== undefined) {
+            qty = parseFloat(String(qtyFromLabel)) || 0;
+          } else if (series.values && series.values.length > 0) {
+            for (let i = series.values.length - 1; i >= 0; i--) {
+              if (series.values[i] !== null) {
+                qty = series.values[i]!;
+                break;
+              }
+            }
+          }
 
-  // 计算总库存量
-  // 计算总库存量
-  const totalMaterialStock = useMemo(() => {
-    // 大脑模式：直接使用API返回的总量
-    return totalMaterialStockFromApi ?? summary.totalStock;
-  }, [totalMaterialStockFromApi, summary.totalStock]);
+          const stock = Math.floor(qty);
 
-  // 取前10名
-  const top10MaterialStockItems = materialStockRankingItems.slice(0, 10);
+          if (mergedMap.has(code)) {
+            const existing = mergedMap.get(code)!;
+            existing.currentStock += stock;
+            if (!existing.materialName || existing.materialName === code) {
+              existing.materialName = name || code;
+            }
+          } else {
+            mergedMap.set(code, {
+              materialCode: code,
+              materialName: name || code,
+              currentStock: stock,
+              status: stock > 0 ? '正常' : '缺货',
+            });
+          }
+        }
 
+        const list: MaterialItem[] = Array.from(mergedMap.values()).map(m => ({
+          ...m,
+          status: m.currentStock > 0 ? '正常' : '缺货',
+        }));
 
-  // 从真实 API 获取呆滞物料详细情况（只在Mock模式下）
-  // 过滤出库龄超过115天的物料，并按库龄降序排序
-  const stagnantMaterials = useMemo(() => {
-    // 大脑模式：没有详细数据，返回空数组
-    return [];
+        list.sort((a, b) => b.currentStock - a.currentStock);
+
+        if (isMounted) setMaterials(list);
+      } catch (err) {
+        if (!isMounted) return;
+        console.error('[物料库存组件] 查询失败:', err);
+        setError(err instanceof Error ? err.message : '获取数据失败');
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+
+    fetchData();
+    return () => { isMounted = false; };
   }, []);
 
-  // 计算呆滞物料统计
-  const stagnantStats = useMemo(() => {
-    // 大脑模式：直接返回0
-    return { count: 0, percentage: 0 };
-  }, []);
+  // 搜索过滤
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return materials;
+    return materials.filter(m =>
+      m.materialCode.toLowerCase().includes(q) ||
+      m.materialName.toLowerCase().includes(q)
+    );
+  }, [materials, search]);
 
-  // Calculate recommendations for all materials
-  const allRecommendations = useMemo(() => {
-    const recommendations = new Set<string>();
-    materialsData.forEach(material => {
-      const stock = materialStocksData.find(ms => ms.materialCode === material.materialCode);
-      const rules = calculateMaterialLogicRules(material, stock);
-      const materialRecs = generateMaterialRecommendations(rules);
-      materialRecs.forEach(rec => recommendations.add(rec));
-    });
-    return Array.from(recommendations);
-  }, []);
+  // 取排名前 10 的物料（因为 materials 之前已经按库存降序排序过了）
+  const top10 = filtered.slice(0, 10);
+  const totalStock = materials.reduce((s, m) => s + m.currentStock, 0);
 
   const handleViewDetails = () => {
     if (onNavigate) {
@@ -163,9 +192,13 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow">
-      <div className="p-6 border-b border-slate-200 flex items-center justify-between">
-        <h2 className="text-lg font-semibold text-slate-800">物料库存智能体</h2>
+    <div className="bg-white rounded-lg shadow flex flex-col h-full overflow-hidden">
+      {/* 顶栏 */}
+      <div className="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+          <Box className="text-amber-600" size={20} />
+          物料库存智能体
+        </h2>
         <button
           onClick={handleViewDetails}
           className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
@@ -174,118 +207,82 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
           <ArrowRight size={14} />
         </button>
       </div>
-      <div className="p-6 space-y-6">
-        {/* Summary Stats */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="p-4 bg-slate-50 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <Box className="text-slate-600" size={20} />
-              <span className="text-sm text-slate-600">总种类数</span>
-            </div>
-            {totalMaterialTypesLoading ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="animate-spin text-slate-400" size={20} />
-                <span className="text-sm text-slate-400">加载中...</span>
-              </div>
-            ) : totalMaterialTypesError ? (
-              <div>
-                <p className="text-2xl font-bold text-red-600">Error</p>
-                <p className="text-xs text-red-500 mt-1">加载失败</p>
-              </div>
-            ) : (
-              <p className="text-2xl font-bold text-slate-800">{totalMaterialTypes}</p>
-            )}
+
+      <div className="p-4 sm:p-6 space-y-4 flex-1 flex flex-col">
+        {/* 统计横幅 */}
+        {loading ? (
+          <div className="flex justify-center p-4">
+            <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
           </div>
-          <div className="p-4 bg-slate-50 rounded-lg">
-            <div className="flex items-center gap-2 mb-2">
-              <Box className="text-slate-600" size={20} />
-              <span className="text-sm text-slate-600">总库存量</span>
-            </div>
-            {totalMaterialStockLoading ? (
-              <div className="flex items-center gap-2">
-                <Loader2 className="animate-spin text-slate-400" size={20} />
-                <span className="text-sm text-slate-400">加载中...</span>
-              </div>
-            ) : totalMaterialStockError ? (
-              <div>
-                <p className="text-2xl font-bold text-red-600">Error</p>
-                <p className="text-xs text-red-500 mt-1">
-                  {totalMaterialStockError || '加载失败'}
-                </p>
-              </div>
-            ) : (
-              <p className="text-2xl font-bold text-slate-800">{totalMaterialStock?.toLocaleString() ?? 0}个</p>
-            )}
+        ) : error ? (
+          <div className="p-3 bg-red-50 text-red-600 rounded flex items-center gap-2 text-sm">
+            <AlertTriangle size={16} /> {error}
           </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-slate-50 rounded-lg p-3">
+              <div className="text-xs text-slate-500 mb-1">总库存量</div>
+              <div className="text-2xl font-bold text-slate-800">{totalStock.toLocaleString()}</div>
+            </div>
+            <div className="bg-slate-50 rounded-lg p-3">
+              <div className="text-xs text-slate-500 mb-1">总物料种数</div>
+              <div className="text-2xl font-bold text-slate-800">{materials.length.toLocaleString()}</div>
+            </div>
+          </div>
+        )}
+
+        {/* 搜索 */}
+        <div className="relative mt-2">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={15} />
+          <input
+            type="text"
+            placeholder="搜索物料编码或名称..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-400 bg-gray-50"
+          />
         </div>
 
-        {/* Stagnant Materials - 使用真实 API 数据 */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-slate-700">呆滞物料情况</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-red-600 font-medium">
-                0种 (0.0%)
-              </span>
-            </div>
-          </div>
-          <div className="space-y-2 max-h-32 overflow-y-auto">
-            <div className="text-sm text-slate-400 p-2">
-              暂无详细数据
-            </div>
-          </div>
+        <div className="flex items-center justify-between mt-4 mb-2">
+          <div className="text-sm font-medium text-slate-700">库存量排名前十</div>
+          <div className="text-xs text-slate-400">共 {filtered.length} 种物料</div>
         </div>
 
-        {/* Top 10 by Stock - 使用真实 API 数据 */}
-        <div>
-          <h3 className="text-sm font-semibold text-slate-700 mb-3">库存量排名前十</h3>
-          <div className="space-y-2">
-            {materialStockRankingLoading ? (
-              <div className="flex items-center gap-2 p-4">
-                <Loader2 className="animate-spin text-slate-400" size={20} />
-                <span className="text-sm text-slate-400">加载中...</span>
-              </div>
-            ) : materialStockRankingError ? (
-              <div className="text-sm text-red-500 p-2 bg-red-50 rounded">
-                数据加载失败: {materialStockRankingError || '未知错误'}
-              </div>
-            ) : top10MaterialStockItems.length > 0 ? (
-              // 使用真实 API 数据
-              top10MaterialStockItems.map((item, index) => {
-                // 尝试多个可能的字段名
-                const materialCode = item.labels.material_code
-                  || item.labels.item_code
-                  || item.labels.code
-                  || '';
-
-                const materialName = item.labels.material_name
-                  || item.labels.inventory_data
-                  || item.labels.item_name
-                  || '未知物料';
-
-                return (
-                  <div key={index} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                    <div className="flex-1">
-                      <div className="text-xs text-slate-500 font-mono">{materialCode}</div>
-                      <div className="text-sm text-slate-700">{materialName}</div>
+        {/* 列表区域 */}
+        <div className="flex-1 overflow-y-auto min-h-[220px]">
+          {top10.length > 0 ? (
+            <div className="space-y-2">
+              {top10.map(m => (
+                <div key={m.materialCode} className="p-3 bg-white border border-slate-100 rounded-lg shadow-sm hover:border-amber-200 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1 pr-2">
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="font-semibold text-slate-800 text-sm">{m.materialName}</h4>
+                        {m.status === '正常' ? (
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                        ) : (
+                          <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                        )}
+                      </div>
+                      <div className="text-xs font-mono text-slate-500">
+                        {m.materialCode}
+                      </div>
                     </div>
-                    <span className="text-sm font-medium text-slate-800">{item.value ?? 0}个</span>
+                    <div className="text-right">
+                      <div className="text-lg font-bold text-slate-700">{m.currentStock}</div>
+                      <div className="text-[10px] text-slate-400">可用库存</div>
+                    </div>
                   </div>
-                );
-              })
-            ) : (
-              <div className="text-sm text-slate-400 p-2">暂无数据</div>
-            )}
-          </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            !loading && <div className="text-sm text-center text-slate-400 py-8">无物料记录</div>
+          )}
         </div>
-
-
       </div>
     </div>
   );
 };
 
 export default MaterialInventoryPanel;
-
-
-

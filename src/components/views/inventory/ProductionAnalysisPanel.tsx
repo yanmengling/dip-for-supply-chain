@@ -623,6 +623,26 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
         );
     }
 
+    // 检测是否有价格数据：所有成本值均为 0 说明单价未加载到
+    const hasNoPriceData = totalStagnantValue === 0 &&
+        analysisResult.newProcurementCosts.every(v => v === 0) &&
+        analysisResult.replenishmentCosts.every(v => v === 0);
+
+    if (hasNoPriceData) {
+        return (
+            <div className="flex items-center justify-center h-96">
+                <div className="text-center space-y-2">
+                    <AlertTriangle size={48} className="text-amber-400 mx-auto" />
+                    <p className="text-slate-700 font-medium">暂无价格数据</p>
+                    <p className="text-sm text-slate-500">
+                        库存对象和物料对象中均未找到单价字段（unit_price / unit_cost 等），<br />
+                        无法计算补料金额和呆滞价值，折线图无法显示。
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="space-y-6 p-4">
             {/* 关键指标卡片 - 使用分析得出的最优生产节点 */}

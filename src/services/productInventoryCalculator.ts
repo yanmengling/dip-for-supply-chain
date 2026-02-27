@@ -153,14 +153,14 @@ export async function loadProductData(): Promise<ProductInfo[]> {
         const rawData = response.entries || [];
 
         return rawData.map(item => {
-            const productCode = item.product_code ?? item.item_code ?? item.productCode ?? item.itemCode ?? item.product_id ?? item.item_id ?? item.productId ?? item.itemId ?? '';
+            const productCode = item.material_number ?? item.product_code ?? item.item_code ?? item.productCode ?? item.itemCode ?? item.product_id ?? item.item_id ?? item.productId ?? item.itemId ?? item.code ?? '';
 
             return {
                 productCode: String(productCode),
-                productName: item.product_name ?? item.item_name ?? item.productName ?? item.itemName ?? '',
-                productModel: item.product_model ?? item.productModel ?? '',
-                productSeries: item.product_series ?? item.productSeries ?? '',
-                productType: item.product_type ?? item.productType ?? '',
+                productName: item.material_name ?? item.product_name ?? item.item_name ?? item.productName ?? item.itemName ?? item.name ?? '',
+                productModel: item.product_model ?? item.productModel ?? item.model ?? '',
+                productSeries: item.product_series ?? item.productSeries ?? item.series ?? '',
+                productType: item.product_type ?? item.productType ?? item.type ?? '',
                 amount: parseFloat(item.amount ?? 0),
             };
         });

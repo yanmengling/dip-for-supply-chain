@@ -132,6 +132,8 @@ export interface QueryOptions {
   fillNull?: boolean;
   /** 过滤模式 */
   filterMode?: 'normal' | 'error' | 'ignore';
+  /** 是否忽略高基查询保护（默认 false，传 true 可绕过高基数限制） */
+  ignoringHcts?: boolean;
 }
 
 // ============================================================================
@@ -166,6 +168,10 @@ class MetricModelApiService {
     }
     if (options?.filterMode) {
       params.set('filter_mode', options.filterMode);
+    }
+
+    if (options?.ignoringHcts) {
+      params.set('ignoring_hcts', 'true');
     }
 
     const queryString = params.toString();

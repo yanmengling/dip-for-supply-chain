@@ -18,10 +18,11 @@ import {
     ArrowLeftRight,
     Loader2,
     BarChart3,
-    Calculator
+    Calculator,
+    Search
 } from 'lucide-react';
 import type { BOMNode, ProductBOMTree, ProductionAnalysisResult } from '../../../services/bomInventoryService';
-import { loadAllBOMTrees, calculateProductionAnalysis } from '../../../services/bomInventoryService';
+import { loadProductList, loadSingleBOMTree, calculateProductionAnalysis } from '../../../services/bomInventoryService';
 import { ProductionAnalysisPanel } from './ProductionAnalysisPanel';
 import { GlobalOptimizationPanel } from './GlobalOptimizationPanel';
 import { Globe } from 'lucide-react';
@@ -262,7 +263,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 
 export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isEmbedded = false }) => {
     const [loading, setLoading] = useState(true);
+    const [loadingBom, setLoadingBom] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [products, setProducts] = useState<any[]>([]);
     const [bomTrees, setBomTrees] = useState<ProductBOMTree[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<string>('');
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -270,6 +273,17 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
     // 阶段二：Tab切换和生产分析状态
     const [activeTab, setActiveTab] = useState<'bom' | 'analysis' | 'global'>('bom');
     const [analysisResult, setAnalysisResult] = useState<ProductionAnalysisResult | null>(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
+    const filteredProducts = useMemo(() => {
+        if (!searchQuery.trim()) return products;
+        const lowerQuery = searchQuery.toLowerCase();
+        return products.filter(p =>
+            p.product_name?.toLowerCase().includes(lowerQuery) ||
+            p.product_code?.toLowerCase().includes(lowerQuery)
+        );
+    }, [products, searchQuery]);
 
     // 加载数据
     useEffect(() => {
@@ -277,23 +291,28 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
             try {
                 setLoading(true);
                 setError(null);
-                console.log('[BOMInventoryTree] 开始加载数据...');
+                console.log('[BOMInventoryTree] 开始加载产品列表...');
 
-                const trees = await loadAllBOMTrees();
+                const productList = await loadProductList();
 
-                if (!trees || trees.length === 0) {
-                    console.warn('[BOMInventoryTree] 未加载到任何BOM树数据');
+                if (!productList || productList.length === 0) {
+                    console.warn('[BOMInventoryTree] 未加载到任何产品数据');
                     setError('未找到产品数据，请检查API配置');
                     return;
                 }
 
-                console.log('[BOMInventoryTree] 成功加载', trees.length, '个产品BOM树');
-                setBomTrees(trees);
+                console.log('[BOMInventoryTree] 成功加载', productList.length, '个产品');
+                setProducts(productList);
 
-                // 默认展开根节点并选中第一个产品
-                if (trees.length > 0) {
-                    setExpandedNodes(new Set([trees[0].rootNode.id]));
-                    setSelectedProduct(trees[0].productCode);
+                // 选中第一个产品
+                if (productList.length > 0) {
+                    const firstProduct = productList[0];
+                    // 传入完整的 _raw 对象和主键信息，与手动选择保持一致
+                    const rawIdentity = firstProduct._raw ? {
+                        ...firstProduct._raw,
+                        __primaryKeys: firstProduct._primaryKeys || []
+                    } : undefined;
+                    await handleSelectProduct(firstProduct.product_code, rawIdentity);
                 }
             } catch (err) {
                 console.error('[BOMInventoryTree] 加载失败:', err);
@@ -317,7 +336,41 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
             }
         };
 
+        // 定义 handleSelectProduct 以便内部调用
+        const handleSelectProduct = async (productCode: string, identity?: any) => {
+            setSelectedProduct(productCode);
+
+            // 检查是否已经加载过这个产品的BOM树
+            setBomTrees(prevTrees => {
+                const existingTree = prevTrees.find(t => t.productCode === productCode);
+                if (existingTree) {
+                    setExpandedNodes(new Set([existingTree.rootNode.id]));
+                    return prevTrees;
+                }
+                return prevTrees; // 未改变
+            });
+
+            try {
+                setLoadingBom(true);
+                const tree = await loadSingleBOMTree(productCode, identity);
+                if (tree) {
+                    setBomTrees(prev => {
+                        if (!prev.find(t => t.productCode === productCode)) {
+                            return [...prev, tree];
+                        }
+                        return prev;
+                    });
+                    setExpandedNodes(new Set([tree.rootNode.id]));
+                }
+            } catch (err) {
+                console.error('加载单一BOM树失败:', err);
+            } finally {
+                setLoadingBom(false);
+            }
+        };
+
         loadData();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // 当前选中的产品BOM树
@@ -326,16 +379,63 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
     }, [bomTrees, selectedProduct]);
 
     // 切换产品时展开根节点，并退出全局模式
-    const handleSelectProduct = (productCode: string) => {
+    const handleSelectProduct = async (productCode: string) => {
         setSelectedProduct(productCode);
-        const tree = bomTrees.find(t => t.productCode === productCode);
-        if (tree) {
-            setExpandedNodes(new Set([tree.rootNode.id]));
-        }
 
         // 如果当前在全局模式，切换回BOM分析模式
         if (activeTab === 'global') {
             setActiveTab('bom');
+        }
+
+        const existingTree = bomTrees.find(t => t.productCode === productCode);
+        if (existingTree) {
+            setExpandedNodes(new Set([existingTree.rootNode.id]));
+            return;
+        }
+
+        const product = products.find(p => p.product_code === productCode);
+
+        if (!product) {
+            console.error('[BOMInventoryTree] 未找到产品:', productCode);
+            return;
+        }
+
+        console.log('[BOMInventoryTree] 选中产品:', {
+            code: product.product_code,
+            name: product.product_name,
+            hasRaw: !!product._raw,
+            hasPrimaryKeys: !!product._primaryKeys,
+            primaryKeys: product._primaryKeys
+        });
+
+        try {
+            setLoadingBom(true);
+            // Pass the _raw object annotated with __primaryKeys so the BOM loader can build
+            // the correct unique_identities payload using the object type's primary key fields
+            const rawIdentity = product._raw ? {
+                ...product._raw,
+                __primaryKeys: product._primaryKeys || []
+            } : undefined;
+
+            console.log('[BOMInventoryTree] 构建的 rawIdentity:', {
+                isDefined: !!rawIdentity,
+                keys: rawIdentity ? Object.keys(rawIdentity).filter(k => !k.startsWith('_')) : []
+            });
+
+            const tree = await loadSingleBOMTree(productCode, rawIdentity);
+            if (tree) {
+                setBomTrees(prev => {
+                    if (!prev.find(t => t.productCode === productCode)) {
+                        return [...prev, tree];
+                    }
+                    return prev;
+                });
+                setExpandedNodes(new Set([tree.rootNode.id]));
+            }
+        } catch (err) {
+            console.error('加载单一BOM树失败:', err);
+        } finally {
+            setLoadingBom(false);
         }
     };
 
@@ -416,229 +516,312 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
             </div>
 
 
-            {/* 产品选择 Tab - 只在非全局模式显示 */}
-            {activeTab !== 'global' && (
-                <div className="flex-shrink-0 flex items-center gap-2 px-6 py-3 border-b border-slate-200 bg-white">
-                    {bomTrees.map(tree => {
-                        const code = tree.productCode;
-                        const isSelected = selectedProduct === code;
+            {/* 主内容区域 - 相对定位容器，用于悬浮下拉 */}
+            <div className="flex flex-col flex-1 min-h-0 relative z-0">
+                {/* 产品选择 Tab - 只在非全局模式显示 */}
+                {activeTab !== 'global' && (
+                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white z-10">
+                        <div className="flex items-center gap-4 relative">
+                            <h4 className="text-sm font-bold text-slate-800">当前产品:</h4>
 
-                        return (
+                            {/* Dropdown 触发按钮 */}
                             <button
-                                key={code}
-                                onClick={() => handleSelectProduct(code)}
-                                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${isSelected
-                                    ? 'bg-indigo-600 text-white shadow-md'
-                                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                                    }`}
+                                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                                className="flex items-center justify-between w-[320px] px-3 py-2 bg-white border border-slate-300 rounded-lg shadow-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                             >
-                                <div className="flex flex-col items-start">
-                                    <span>{code}</span>
-                                    {tree && (
-                                        <span className={`text-xs ${isSelected ? 'text-indigo-200' : 'text-slate-400'}`}>
-                                            {tree.totalMaterials} 物料
-                                        </span>
-                                    )}
+                                <div className="flex items-center gap-2 truncate">
+                                    <Package size={16} className="text-indigo-500 flex-shrink-0" />
+                                    <span className="truncate">{selectedProduct ? products.find(p => p.product_code === selectedProduct)?.product_name || selectedProduct : '选择产品...'}</span>
                                 </div>
+                                <ChevronDown size={16} className={`text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
                             </button>
-                        );
-                    })}
 
-                    {/* 全局组合优化按钮 - 放在最右边 */}
-                    <button
-                        onClick={() => handleTabChange('global')}
-                        className={`ml-auto px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200`}
-                    >
-                        <Globe size={16} />
-                        全局组合优化
-                    </button>
-                </div>
-            )}
+                            {/* 悬浮下拉面板 */}
+                            {isDropdownOpen && (
+                                <div className="absolute top-full left-[80px] mt-2 w-[480px] bg-white/95 backdrop-blur-md rounded-xl shadow-2xl border border-slate-200 z-[100] flex flex-col overflow-hidden">
+                                    <div className="p-3 border-b border-slate-200/50 bg-white/50">
+                                        <div className="relative">
+                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                                            <input
+                                                type="text"
+                                                value={searchQuery}
+                                                onChange={(e) => setSearchQuery(e.target.value)}
+                                                placeholder="搜索产品名称或编码..."
+                                                className="w-full pl-9 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-white/80 transition-colors"
+                                                autoFocus
+                                            />
+                                        </div>
+                                    </div>
 
-            {/* 全局模式标题栏 */}
-            {activeTab === 'global' && (
-                <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-amber-50">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
-                            <Globe className="text-white" size={20} />
+                                    <div className="max-h-[400px] overflow-y-auto w-full">
+                                        {filteredProducts.length > 0 ? (
+                                            <div className="divide-y divide-slate-100 flex flex-col">
+                                                {filteredProducts.map(product => {
+                                                    const code = product.product_code;
+                                                    const isSelected = selectedProduct === code;
+                                                    const tree = bomTrees.find(t => t.productCode === code);
+
+                                                    return (
+                                                        <label
+                                                            key={code}
+                                                            className={`flex items-start gap-4 p-4 cursor-pointer hover:bg-indigo-50/30 transition-colors ${isSelected ? 'bg-indigo-50/50' : 'bg-transparent'}`}
+                                                        >
+                                                            <div className="pt-1">
+                                                                <input
+                                                                    type="radio"
+                                                                    name="product-selector"
+                                                                    value={code}
+                                                                    checked={isSelected}
+                                                                    onChange={() => {
+                                                                        handleSelectProduct(code);
+                                                                        setIsDropdownOpen(false);
+                                                                    }}
+                                                                    className="w-4 h-4 text-indigo-600 border-slate-300 focus:ring-indigo-500 mt-1 cursor-pointer"
+                                                                />
+                                                            </div>
+                                                            <div className="flex-1 flex flex-col min-w-0">
+                                                                <div className="flex items-center justify-between">
+                                                                    <span className="text-sm font-bold text-slate-800 truncate" title={product.product_name}>
+                                                                        {product.product_name}
+                                                                    </span>
+                                                                    {tree && (
+                                                                        <span className="text-xs text-slate-400 font-medium">
+                                                                            {tree.totalMaterials} 物料
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                                <span className="text-xs text-slate-500 mt-1 truncate" title={code}>
+                                                                    {code}
+                                                                </span>
+                                                            </div>
+                                                        </label>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="p-8 text-center text-slate-500 text-sm">
+                                                未找到匹配的产品
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="px-4 py-2 border-t border-slate-200/50 bg-slate-50/80 text-xs text-slate-500 font-medium flex-shrink-0">
+                                        共 {filteredProducts.length} 个产品
+                                    </div>
+                                </div>
+                            )}
                         </div>
-                        <div>
-                            <h3 className="text-lg font-semibold text-slate-800">全局组合优化</h3>
-                            <p className="text-sm text-amber-700">跨产品库存优化分析</p>
-                        </div>
-                    </div>
-                    <button
-                        onClick={() => setActiveTab('bom')}
-                        className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg>
-                        返回单品分析
-                    </button>
-                </div>
-            )}
 
-            {/* 功能切换 Tabs - 只在非全局模式下显示 */}
-            {activeTab !== 'global' && (
-                <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 bg-white px-6">
-                    <div className="flex">
+                        {/* 全局组合优化按钮 - 放右上角 */}
                         <button
-                            onClick={() => handleTabChange('bom')}
-                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'bom'
-                                ? 'border-indigo-600 text-indigo-600'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
-                                }`}
+                            onClick={() => handleTabChange('global')}
+                            className="px-4 py-1.5 rounded-lg text-sm font-medium transition-all flex items-center gap-2 bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200"
                         >
-                            <Layers size={16} />
-                            BOM库存分析
-                        </button>
-                        <button
-                            onClick={() => handleTabChange('analysis')}
-                            className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'analysis'
-                                ? 'border-indigo-600 text-indigo-600'
-                                : 'border-transparent text-slate-500 hover:text-slate-700'
-                                }`}
-                        >
-                            <BarChart3 size={16} />
-                            生产数量分析
+                            <Globe size={16} />
+                            全局组合优化
                         </button>
                     </div>
+                )}
 
-                    {/* 展开/折叠按钮 - 只在BOM模式显示 */}
-                    {activeTab === 'bom' && (
-                        <div className="flex items-center gap-2">
+                {/* 主界面区 */}
+                <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-white">
+                    {/* 全局模式标题栏 */}
+                    {activeTab === 'global' && (
+                        <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-slate-200 bg-amber-50">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+                                    <Globe className="text-white" size={20} />
+                                </div>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-slate-800">全局组合优化</h3>
+                                    <p className="text-sm text-amber-700">跨产品库存优化分析</p>
+                                </div>
+                            </div>
                             <button
-                                onClick={handleExpandAll}
-                                className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
+                                onClick={() => setActiveTab('bom')}
+                                className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors"
                             >
-                                展开全部
-                            </button>
-                            <button
-                                onClick={handleCollapseAll}
-                                className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
-                            >
-                                折叠全部
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                                </svg>
+                                返回单品分析
                             </button>
                         </div>
                     )}
-                </div>
-            )}
 
-            {activeTab === 'global' ? (
-                <div className="flex-1 overflow-auto bg-slate-50">
-                    <GlobalOptimizationPanel
-                        bomTrees={bomTrees}
-                        loading={loading}
-                    />
-                </div>
-            ) : activeTab === 'analysis' ? (
-                <div className="flex-1 overflow-auto bg-slate-50">
-                    <ProductionAnalysisPanel
-                        analysisResult={analysisResult}
-                        loading={loading}
-                    />
-                </div>
-            ) : (
-                <>
-                    {/* 库存概况 */}
-                    {currentTree && (
-                        <div className="flex items-center gap-6 px-6 py-3 border-b border-slate-200 bg-slate-50">
-                            <div className="flex items-center gap-2">
-                                <Package size={16} className="text-slate-400" />
-                                <span className="text-sm text-slate-600">涉及物料</span>
-                                <span className="text-sm font-semibold text-slate-800">{currentTree.totalMaterials} 种</span>
-                            </div>
-                            <div className="h-4 w-px bg-slate-300" />
-                            <div className="flex items-center gap-2">
-                                <span className="text-sm text-slate-600">库存总额</span>
-                                <span className="text-sm font-semibold text-indigo-600">{formatCurrency(currentTree.totalInventoryValue)}</span>
-                            </div>
-                            <div className="h-4 w-px bg-slate-300" />
-                            <div className="flex items-center gap-2">
-                                <AlertTriangle size={14} className="text-red-500" />
-                                <span className="text-sm text-slate-600">呆滞物料</span>
-                                <span className="text-sm font-semibold text-red-600">{currentTree.stagnantCount} 种</span>
-                            </div>
-                            <div className="h-4 w-px bg-slate-300" />
-                            <div className="flex items-center gap-2">
-                                <AlertTriangle size={14} className="text-amber-500" />
-                                <span className="text-sm text-slate-600">库存不足</span>
-                                <span className="text-sm font-semibold text-amber-600">{currentTree.insufficientCount} 种</span>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* 表头 */}
-                    <div className="grid grid-cols-[1fr_60px_80px_90px_60px_70px_50px] bg-slate-100 border-b border-slate-200 text-xs font-medium text-slate-600 sticky top-0 z-10">
-                        <div className="px-4 py-2">物料/组件</div>
-                        <div className="flex items-center justify-center py-2">单耗</div>
-                        <div className="flex items-center justify-center py-2">库存数量</div>
-                        <div className="flex items-center justify-center py-2">库存金额</div>
-                        <div className="flex items-center justify-center py-2">库龄</div>
-                        <div className="flex items-center justify-center py-2">状态</div>
-                        <div className="flex items-center justify-center py-2">替代</div>
-                    </div>
-
-                    {/* 内容区域 */}
-                    <div className="flex-1 overflow-auto">
-                        {loading ? (
-                            <div className="flex flex-col items-center justify-center h-64 gap-4">
-                                <Loader2 size={40} className="text-indigo-500 animate-spin" />
-                                <div className="text-center">
-                                    <p className="text-lg font-medium text-slate-700">正在加载BOM数据...</p>
-                                    <p className="text-sm text-slate-500 mt-2">这可能需要1-2分钟，请耐心等待</p>
-                                    <p className="text-xs text-slate-400 mt-1">提示: 打开浏览器控制台 (F12) 查看详细进度</p>
-                                </div>
-                            </div>
-                        ) : error ? (
-                            <div className="flex flex-col items-center justify-center h-64 gap-4">
-                                <AlertTriangle size={32} className="text-red-500" />
-                                <p className="text-slate-600">{error}</p>
+                    {/* 功能切换 Tabs - 只在非全局模式下显示 */}
+                    {activeTab !== 'global' && (
+                        <div className="flex-shrink-0 flex items-center justify-between border-b border-slate-200 bg-white px-6">
+                            <div className="flex">
                                 <button
-                                    onClick={() => window.location.reload()}
-                                    className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100"
+                                    onClick={() => handleTabChange('bom')}
+                                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'bom'
+                                        ? 'border-indigo-600 text-indigo-600'
+                                        : 'border-transparent text-slate-500 hover:text-slate-700'
+                                        }`}
                                 >
-                                    <RefreshCw size={14} />
-                                    重试
+                                    <Layers size={16} />
+                                    BOM库存分析
+                                </button>
+                                <button
+                                    onClick={() => handleTabChange('analysis')}
+                                    className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'analysis'
+                                        ? 'border-indigo-600 text-indigo-600'
+                                        : 'border-transparent text-slate-500 hover:text-slate-700'
+                                        }`}
+                                >
+                                    <BarChart3 size={16} />
+                                    生产数量分析
                                 </button>
                             </div>
-                        ) : currentTree ? (
-                            <TreeNode
-                                node={currentTree.rootNode}
-                                level={0}
-                                expandedNodes={expandedNodes}
-                                onToggleExpand={handleToggleExpand}
-                            />
-                        ) : (
-                            <div className="flex items-center justify-center h-64 text-slate-500">
-                                暂无数据
-                            </div>
-                        )}
-                    </div>
 
-                    {/* 图例 */}
-                    <div className="flex items-center gap-6 px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs">
-                        <span className="text-slate-500">图例:</span>
-                        <div className="flex items-center gap-1">
-                            <CheckCircle size={12} className="text-green-600" />
-                            <span className="text-slate-600">充足</span>
+                            {/* 展开/折叠按钮 - 只在BOM模式显示 */}
+                            {activeTab === 'bom' && (
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        onClick={handleExpandAll}
+                                        className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
+                                    >
+                                        展开全部
+                                    </button>
+                                    <button
+                                        onClick={handleCollapseAll}
+                                        className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-slate-100 rounded hover:bg-slate-200 transition-colors"
+                                    >
+                                        折叠全部
+                                    </button>
+                                </div>
+                            )}
                         </div>
-                        <div className="flex items-center gap-1">
-                            <AlertTriangle size={12} className="text-amber-600" />
-                            <span className="text-slate-600">不足</span>
+                    )}
+
+                    {activeTab === 'global' ? (
+                        <div className="flex-1 overflow-auto bg-slate-50">
+                            <GlobalOptimizationPanel
+                                bomTrees={bomTrees}
+                                loading={loading}
+                            />
                         </div>
-                        <div className="flex items-center gap-1">
-                            <XCircle size={12} className="text-red-600" />
-                            <span className="text-slate-600">呆滞</span>
+                    ) : activeTab === 'analysis' ? (
+                        <div className="flex-1 overflow-auto bg-slate-50">
+                            <ProductionAnalysisPanel
+                                analysisResult={analysisResult}
+                                loading={loading}
+                            />
                         </div>
-                        <div className="flex items-center gap-1">
-                            <ArrowLeftRight size={12} className="text-purple-600" />
-                            <span className="text-slate-600">替代料</span>
-                        </div>
-                    </div>
-                </>
-            )}
+                    ) : (
+                        <>
+                            {/* 库存概况 */}
+                            {currentTree && (
+                                <div className="flex items-center gap-6 px-6 py-3 border-b border-slate-200 bg-slate-50">
+                                    <div className="flex items-center gap-2">
+                                        <Package size={16} className="text-slate-400" />
+                                        <span className="text-sm text-slate-600">涉及物料</span>
+                                        <span className="text-sm font-semibold text-slate-800">{currentTree.totalMaterials} 种</span>
+                                    </div>
+                                    <div className="h-4 w-px bg-slate-300" />
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-sm text-slate-600">库存总额</span>
+                                        <span className="text-sm font-semibold text-indigo-600">{formatCurrency(currentTree.totalInventoryValue)}</span>
+                                    </div>
+                                    <div className="h-4 w-px bg-slate-300" />
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle size={14} className="text-red-500" />
+                                        <span className="text-sm text-slate-600">呆滞物料</span>
+                                        <span className="text-sm font-semibold text-red-600">{currentTree.stagnantCount} 种</span>
+                                    </div>
+                                    <div className="h-4 w-px bg-slate-300" />
+                                    <div className="flex items-center gap-2">
+                                        <AlertTriangle size={14} className="text-amber-500" />
+                                        <span className="text-sm text-slate-600">库存不足</span>
+                                        <span className="text-sm font-semibold text-amber-600">{currentTree.insufficientCount} 种</span>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* 表头 */}
+                            <div className="grid grid-cols-[1fr_60px_80px_90px_60px_70px_50px] bg-slate-100 border-b border-slate-200 text-xs font-medium text-slate-600 sticky top-0 z-10">
+                                <div className="px-4 py-2">物料/组件</div>
+                                <div className="flex items-center justify-center py-2">单耗</div>
+                                <div className="flex items-center justify-center py-2">库存数量</div>
+                                <div className="flex items-center justify-center py-2">库存金额</div>
+                                <div className="flex items-center justify-center py-2">库龄</div>
+                                <div className="flex items-center justify-center py-2">状态</div>
+                                <div className="flex items-center justify-center py-2">替代</div>
+                            </div>
+
+                            {/* 内容区域 */}
+                            <div className="flex-1 overflow-auto">
+                                {loading ? (
+                                    <div className="flex flex-col items-center justify-center h-64 gap-4">
+                                        <Loader2 size={40} className="text-indigo-500 animate-spin" />
+                                        <div className="text-center">
+                                            <p className="text-lg font-medium text-slate-700">正在加载产品列表...</p>
+                                            <p className="text-sm text-slate-500 mt-2">请稍等...</p>
+                                        </div>
+                                    </div>
+                                ) : loadingBom ? (
+                                    <div className="flex flex-col items-center justify-center h-64 gap-4">
+                                        <Loader2 size={40} className="text-indigo-500 animate-spin" />
+                                        <div className="text-center">
+                                            <p className="text-lg font-medium text-slate-700">正在按需加载产品 {selectedProduct} 的 BOM 数据...</p>
+                                            <p className="text-sm text-slate-500 mt-2">这可能需要几十秒的时间</p>
+                                        </div>
+                                    </div>
+                                ) : error ? (
+                                    <div className="flex flex-col items-center justify-center h-64 gap-4">
+                                        <AlertTriangle size={32} className="text-red-500" />
+                                        <p className="text-slate-600">{error}</p>
+                                        <button
+                                            onClick={() => window.location.reload()}
+                                            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-indigo-600 bg-indigo-50 rounded-lg hover:bg-indigo-100"
+                                        >
+                                            <RefreshCw size={14} />
+                                            重试
+                                        </button>
+                                    </div>
+                                ) : currentTree ? (
+                                    <TreeNode
+                                        node={currentTree.rootNode}
+                                        level={0}
+                                        expandedNodes={expandedNodes}
+                                        onToggleExpand={handleToggleExpand}
+                                    />
+                                ) : products.length > 0 ? (
+                                    <div className="flex items-center justify-center h-64 text-slate-500 flex-col gap-2">
+                                        <Package size={48} className="text-slate-300" />
+                                        <p>请选择一个产品以加载其结构</p>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center justify-center h-64 text-slate-500">
+                                        暂无数据
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 图例 */}
+                            <div className="flex items-center gap-6 px-6 py-3 border-t border-slate-200 bg-slate-50 text-xs">
+                                <span className="text-slate-500">图例:</span>
+                                <div className="flex items-center gap-1">
+                                    <CheckCircle size={12} className="text-green-600" />
+                                    <span className="text-slate-600">充足</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <AlertTriangle size={12} className="text-amber-600" />
+                                    <span className="text-slate-600">不足</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <XCircle size={12} className="text-red-600" />
+                                    <span className="text-slate-600">呆滞</span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <ArrowLeftRight size={12} className="text-purple-600" />
+                                    <span className="text-slate-600">替代料</span>
+                                </div>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
         </div>
     );
 };

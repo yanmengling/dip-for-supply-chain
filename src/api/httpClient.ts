@@ -122,14 +122,13 @@ class HttpClient {
       }
       errorDetails = errorData;
 
-      // 🔍 添加详细错误日志以便调试
-      console.error('[HTTP Client] ❌ API 错误详情:', {
+      // 🔍 完整错误日志（不截断）
+      console.error('[HTTP Client] ❌ API 错误完整响应体:', JSON.stringify(errorData, null, 2));
+      console.error('[HTTP Client] ❌ API 错误摘要:', {
         url: response.url,
         status: response.status,
-        statusText: response.statusText,
         errorCode,
         errorMessage,
-        errorDetails: JSON.stringify(errorDetails).substring(0, 500)
       });
     } catch {
       // JSON 解析失败，使用默认错误信息

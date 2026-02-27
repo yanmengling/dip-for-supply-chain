@@ -7,16 +7,25 @@ import { apiConfigService } from '../../../services/apiConfigService';
 // 指标模型 ID 和分析维度配置
 const getProductInventoryModelId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
 
-// 请求指标模型中实际存在的维度字段
+// 请求指标模型中实际存在的维度字段候选名单
 const PRODUCT_INVENTORY_DIMENSIONS = [
     'material_code',          // 物料编码
+    'item_code',
     'material_name',          // 物料名称
+    'item_name',
     'available_quantity',     // 可用库存数量
+    'available_inventory_qty',
+    'inventory_qty',
     'inventory_age',          // 库存库龄
+    'storage_age',
     'inventory_data',         // 库存数据
     'last_inbound_time',      // 最后入库时间
+    'inbound_date',
     'safety_stock',           // 安全库存
     'update_time',            // 更新时间
+    'spec_model',
+    'warehouse',
+    'stock_status'
 ];
 
 // 组件内部使用的产品数据类型
@@ -62,31 +71,62 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 setError(null);
 
                 const timeRange = createLastDaysRange(1);
+                const modelId = getProductInventoryModelId();
 
-
-                const result = await metricModelApi.queryByModelId(
-                    getProductInventoryModelId(),
-                    {
-                        instant: true,
-                        start: timeRange.start,
-                        end: timeRange.end,
-                        analysis_dimensions: PRODUCT_INVENTORY_DIMENSIONS,
-                    },
+                // ── 第一步：由于底层维度经常发生变化，并且 material_name 可能存在歧义 ——
+                // 先进行一次无对应维度的查询，由服务端返回合法的 analysis_dimensions
+                const firstResult = await metricModelApi.queryByModelId(
+                    modelId,
+                    { instant: true, start: timeRange.start, end: timeRange.end },
                     { includeModel: true }
                 );
 
-                // 转换 API 数据为组件期望的格式
-                const transformedData: ProductData[] = [];
+                const rawDims = firstResult.model?.analysis_dimensions ?? [];
+                const allDims: string[] = rawDims.map((d: any) =>
+                    typeof d === 'string' ? d : d.name
+                ).filter(Boolean);
+
+                // 根据目前能够处理的候选维度，过滤出该模型实际支持的维度，并剔除可能引发歧义的名称字段进行下钻
+                const validDims = PRODUCT_INVENTORY_DIMENSIONS.filter(d => allDims.includes(d) && !d.includes('name'));
+
+                // ── 第二步：若有有效维度则用其下钻，否则使用第一步盲查的结果 ───
+                let result = firstResult;
+                if (validDims.length > 0) {
+                    result = await metricModelApi.queryByModelId(
+                        modelId,
+                        {
+                            instant: true,
+                            start: timeRange.start,
+                            end: timeRange.end,
+                            analysis_dimensions: validDims,
+                        },
+                        { includeModel: false, ignoringHcts: true }
+                    );
+                }
+
+                // 合并 Map 中按 Code 去重的数据，转换 API 数据为组件期望格式
+                const mergedMap = new Map<string, ProductData>();
 
                 if (result.datas && result.datas.length > 0) {
                     for (const series of result.datas) {
-                        const materialCode = series.labels?.material_code || '';
-                        const materialName = series.labels?.material_name || '';
+                        const labels = series.labels || {};
+                        const materialCode = (labels.material_code || labels.item_code || labels.product_code || '').trim();
+                        // 因为我们在查询维度里排除了含有 'name' 的字段，这里尝试获取可能存在的别名，获取不到则默认使用编码
+                        const materialName = (labels.material_name || labels.item_name || materialCode).trim();
+
+                        const NIL_LIKE = /^(\<nil\>|nil|null|undefined|none)$/i;
+                        if (!materialCode || NIL_LIKE.test(materialCode)) continue;
 
                         // 提取库存数量
                         let availableQuantity = 0;
                         if (series.labels?.available_quantity) {
                             availableQuantity = parseFloat(series.labels.available_quantity) || 0;
+                        } else if (series.labels?.available_inventory_qty) {
+                            availableQuantity = parseFloat(series.labels.available_inventory_qty) || 0;
+                        } else if (series.labels?.inventory_qty) {
+                            availableQuantity = parseFloat(series.labels.inventory_qty) || 0;
+                        } else if (series.labels?.inventory_data) {
+                            availableQuantity = parseFloat(series.labels.inventory_data) || 0;
                         } else if (series.values && series.values.length > 0) {
                             for (let i = series.values.length - 1; i >= 0; i--) {
                                 if (series.values[i] !== null) {
@@ -97,18 +137,9 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                         }
 
                         // 提取其他可用字段
-                        const inventoryAge = series.labels?.inventory_age ? parseFloat(series.labels.inventory_age) : undefined;
-                        const lastInboundTime = series.labels?.last_inbound_time || undefined;
-                        const safetyStock = series.labels?.safety_stock ? parseFloat(series.labels.safety_stock) : undefined;
-                        const updateTime = series.labels?.update_time || undefined;
-
-                        // 注意：当前指标模型不包含以下字段，未来可能会补充
-                        // - sales_status (销售状态)
-                        // - locked_quantity (锁定库存)
-                        // - in_transit_quantity (在途库存)
-                        // - scrapped_quantity (报废库存)
-                        // - turnover_days (周转天数)
-                        // - last_outbound_date (最后出库日期)
+                        const inventoryAgeStr = series.labels?.inventory_age || series.labels?.storage_age || undefined;
+                        const inventoryAge = inventoryAgeStr ? parseFloat(inventoryAgeStr) : undefined;
+                        const lastInboundTime = series.labels?.last_inbound_time || series.labels?.inbound_date || undefined;
 
                         const totalStock = Math.floor(availableQuantity);
 
@@ -130,21 +161,30 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                             inventoryStatus = '慢动';
                         }
 
-                        transformedData.push({
-                            productId: materialCode,
-                            productName: materialName,
-                            stockQuantity: totalStock,
-                            inventoryStatus,
-                            salesStatus: undefined, // 当前指标模型不包含此字段
-                            inventoryDistribution: undefined, // 当前指标模型不包含分布数据
-                            turnoverDays: inventoryAge, // 使用库存库龄代替周转天数
-                            standardTurnoverDays: undefined, // 当前指标模型不包含此字段
-                            lastInboundDate: lastInboundTime, // 使用最后入库时间
-                            lastOutboundDate: undefined, // 当前指标模型不包含此字段
-                        });
+                        if (mergedMap.has(materialCode)) {
+                            const existing = mergedMap.get(materialCode)!;
+                            existing.stockQuantity += totalStock;
+                            if (existing.productName === existing.productId && materialName !== materialCode) {
+                                existing.productName = materialName;
+                            }
+                        } else {
+                            mergedMap.set(materialCode, {
+                                productId: materialCode,
+                                productName: materialName,
+                                stockQuantity: totalStock,
+                                inventoryStatus,
+                                salesStatus: undefined,
+                                inventoryDistribution: undefined,
+                                turnoverDays: inventoryAge,
+                                standardTurnoverDays: undefined,
+                                lastInboundDate: lastInboundTime,
+                                lastOutboundDate: undefined,
+                            });
+                        }
                     }
                 }
 
+                const transformedData = Array.from(mergedMap.values());
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.stockQuantity - a.stockQuantity);
 

@@ -11,7 +11,7 @@
 import { useState, useEffect } from 'react';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
 import { fetchLegalRisks } from '../../services/legalRiskService';
-import { loadSupplierPerformanceScores, loadSupplierEntities } from '../../services/ontologyDataService';
+import { loadSupplierScorecard } from '../../services/supplierDataLoader';
 import { loadSupplierList } from '../../services/supplierDataLoader';
 import RiskBadge from './RiskBadge';
 import SupplierSelector from './SupplierSelector';
@@ -66,107 +66,14 @@ const Supplier360Scorecard = ({
     const loadScorecardData = async () => {
       setLoading(true);
       try {
-        // 大脑模式：使用供应链数据
-        // 如果DIP数据找不到，继续尝试Mock数据
-        console.warn('DIP scorecard not found, falling back to mock data');
-
-        // Mock模式：使用原有数据
-        const [supplierPerformances, supplierEntities] = await Promise.all([
-          loadSupplierPerformanceScores(true), // Force reload
-          loadSupplierEntities(true)
-        ]);
-
-        const supplierEntity = supplierEntities.find(s => s.supplier_id === currentSupplierId);
-        const supplierPerf = supplierPerformances.find(p => p.supplier_id === currentSupplierId);
-
-        if (!supplierEntity) {
-          console.error('Supplier entity not found:', currentSupplierId);
+        // 从指标模型加载供应商评分卡（替代 ontologyDataService）
+        const scorecard = await loadSupplierScorecard(currentSupplierId);
+        if (scorecard) {
+          setScorecard(scorecard);
+        } else {
+          console.warn('[Supplier360Scorecard] No scorecard found for supplier:', currentSupplierId);
           setScorecard(null);
-          return;
         }
-
-        // Helper functions
-        const normalizeRiskLevel = (riskLevel: string | undefined): RiskLevel => {
-          if (!riskLevel) return 'low';
-          const normalized = riskLevel.toLowerCase().trim();
-          if (normalized === '低' || normalized === 'low') return 'low';
-          if (normalized === '中' || normalized === 'medium') return 'medium';
-          if (normalized === '高' || normalized === 'high') return 'high';
-          if (normalized === '严重' || normalized === 'critical') return 'critical';
-          return 'low';
-        };
-
-        const getRiskRatingFromLevel = (riskLevel: string): number => {
-          const normalized = riskLevel.toLowerCase().trim();
-          switch (normalized) {
-            case '低':
-            case 'low':
-              return 20;
-            case '中':
-            case 'medium':
-              return 50;
-            case '高':
-            case 'high':
-              return 80;
-            case '严重':
-            case 'critical':
-              return 95;
-            default:
-              return 50;
-          }
-        };
-
-        // Build scorecard from real data
-        const newScorecard: Supplier360ScorecardType = {
-          supplierId: currentSupplierId,
-          supplierName: supplierEntity.supplier_name,
-          evaluationDate: supplierPerf?.evaluation_date || new Date().toISOString().split('T')[0],
-          overallScore: supplierPerf ? parseFloat(supplierPerf.overall_score) : 85,
-          dimensions: {
-            onTimeDeliveryRate: supplierPerf ? parseFloat(supplierPerf.otif_rate) : 90,
-            qualityRating: supplierPerf ? parseFloat(supplierPerf.quality_score) : 85,
-            riskRating: supplierPerf ? getRiskRatingFromLevel(supplierPerf.risk_level) : 20,
-            onTimeDeliveryRate2: supplierPerf ? parseFloat(supplierPerf.delivery_score) : 90,
-            annualPurchaseAmount: supplierPerf ? parseFloat(supplierPerf.total_orders) : 0,
-            responseSpeed: supplierPerf ? parseFloat(supplierPerf.response_time_hours || '24') : 24,
-          },
-          riskAssessment: {
-            supplierId: currentSupplierId,
-            assessmentDate: supplierPerf?.evaluation_date || new Date().toISOString().split('T')[0],
-            overallRiskLevel: normalizeRiskLevel(supplierPerf?.risk_level || 'low'),
-            financialStatus: {
-              score: 85,
-              lastUpdated: new Date().toISOString(),
-            },
-            publicSentiment: {
-              score: 80,
-              source: 'manual',
-              lastUpdated: new Date().toISOString(),
-            },
-            productionAnomalies: {
-              count: 0,
-              severity: 'low',
-              source: 'manual',
-              lastUpdated: new Date().toISOString(),
-            },
-            legalRisks: {
-              score: 15,
-              source: 'auto',
-              lastUpdated: new Date().toISOString(),
-              risks: [],
-            },
-          },
-        };
-
-        console.log('✅ Built scorecard for', supplierEntity.supplier_name);
-        console.log('📊 Data:', {
-          overallScore: newScorecard.overallScore,
-          annualPurchaseAmount: newScorecard.dimensions.annualPurchaseAmount,
-          qualityRating: newScorecard.dimensions.qualityRating,
-          otifRate: newScorecard.dimensions.onTimeDeliveryRate,
-        });
-
-        setScorecard(newScorecard);
       } catch (error) {
         console.error('Failed to load scorecard data:', error);
         setScorecard(null);

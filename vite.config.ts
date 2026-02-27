@@ -48,7 +48,13 @@ export default defineConfig({
             console.error('[Vite Proxy] Ontology Query 代理错误:', err.message);
           });
           proxy.on('proxyReq', (proxyReq, req, _res) => {
-            console.log('[Vite Proxy] Ontology Query 请求:', req.url);
+            const override = proxyReq.getHeader('x-http-method-override') || proxyReq.getHeader('X-HTTP-Method-Override');
+            const cl = proxyReq.getHeader('content-length');
+            const ct = proxyReq.getHeader('content-type');
+            console.log('[Vite Proxy] Ontology Query 请求:', req.method, req.url,
+              '| X-HTTP-Method-Override:', override || '(无)',
+              '| Content-Type:', ct || '(无)',
+              '| Content-Length:', cl !== undefined ? cl : '(无)');
             proxyReq.setHeader('Connection', 'keep-alive');
           });
           proxy.on('proxyRes', (proxyRes, _req, _res) => {

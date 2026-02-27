@@ -1,356 +1,442 @@
 /**
- * Helper functions for hybrid BOM data loading
- * These functions provide optimized BOM data loading via logical properties
+ * Helper functions for BOM data loading
+ *
+ * 通过 Ontology API queryObjectInstances 直接查询 BOM、库存、物料对象实例，
+ * 与 planningV2DataService 保持一致，不依赖逻辑算子（/properties 端点）。
+ *
+ * 数据来源：
+ *   - BOM 结构：supplychain_hd0202_bom（按 bom_material_code == productCode 过滤，取最新版本）
+ *   - 库存数据：supplychain_hd0202_inventory（按 material_code in [...] 过滤，分批查询）
+ *   - 物料单价：supplychain_hd0202_material（按 material_code in [...] 过滤，分批查询）
  */
 
 import { ontologyApi } from '../api/ontologyApi';
 import type { ProductBOMTree, BOMNode, StockStatus } from './bomInventoryService';
 
-// Re-export these from bomInventoryService to avoid circular dependency issues
-// These will be imported from bomInventoryService when this module is used
+// Dependencies injected from bomInventoryService to avoid circular imports
 let getObjectTypeId: (entityType: string, defaultId: string) => string;
-let DEFAULT_IDS: { products: string; };
+let DEFAULT_IDS: { products: string; bom: string; inventory: string; material: string; };
 
-// Initialize function to set dependencies from bomInventoryService
 export function initHelpers(deps: {
     getObjectTypeId: (entityType: string, defaultId: string) => string;
-    DEFAULT_IDS: { products: string; };
+    DEFAULT_IDS: { products: string; bom: string; inventory: string; material: string; };
 }) {
     getObjectTypeId = deps.getObjectTypeId;
     DEFAULT_IDS = deps.DEFAULT_IDS;
 }
 
-/**
- * 递归映射后端节点到前端 BOMNode 结构
- */
-// 用于为空 code 的节点生成唯一 ID
-let unknownNodeCounter = 0;
+// 批量分片大小（与 planningV2DataService 保持一致）
+const BATCH_CHUNK_SIZE = 50;
 
-function mapBackendNodeToFrontend(backendNode: any, parentCode: string | null): BOMNode {
-    const id = crypto.randomUUID(); // Generate unique ID for every node
-
-    // 兼容 material_number (从日志看是产品编码的实际字段)
-    let code = String(backendNode.code || backendNode.product_code || backendNode.material_code || backendNode.material_number || '').trim();
-
-    // 🔑 修复：为空 code 的节点生成唯一标识符
-    if (!code) {
-        // keep the original logic for code generation if needed for display, but strictly rely on id for keys
-        code = `UNKNOWN_${++unknownNodeCounter}`;
-        console.warn('[BOM服务] ⚠️ 发现空 code 的节点，已生成唯一ID:', code, '节点名称:', backendNode.name || backendNode.material_name);
+function chunkArray<T>(arr: T[], size: number): T[][] {
+    const chunks: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+        chunks.push(arr.slice(i, i + size));
     }
-
-    const children = Array.isArray(backendNode.children)
-        ? backendNode.children.map((child: any) => mapBackendNodeToFrontend(child, code))
-        : [];
-
-    const substitutes = Array.isArray(backendNode.substitutes)
-        ? backendNode.substitutes.map((sub: any) => {
-            // 替代料也是节点，但有一些特殊标志
-            const subNode = mapBackendNodeToFrontend(sub, code);
-            subNode.isSubstitute = true;
-            subNode.primaryMaterialCode = code;
-            return subNode;
-        })
-        : [];
-
-    // 映射库存状态
-    let stockStatus: StockStatus = 'unknown';
-    const backendStatus = backendNode.stock_status;
-    if (backendStatus === 'sufficient' || backendStatus === 'insufficient' || backendStatus === 'stagnant') {
-        stockStatus = backendStatus;
-    }
-
-    return {
-        id: id,
-        code: code,
-        name: String(backendNode.name || backendNode.material_name || 'Unknown Material'),
-        level: Number(backendNode.level || 0),
-        quantity: Number(backendNode.quantity || 0),
-        unit: String(backendNode.unit || '个'),
-        isLeaf: children.length === 0,
-        parentCode: parentCode,
-        children: children,
-
-        // 库存信息
-        currentStock: Number(backendNode.current_stock || 0),
-        availableStock: Number(backendNode.available_stock || 0),
-        stockStatus: stockStatus,
-        storageDays: Number(backendNode.storage_days || 0),
-        unitPrice: Number(backendNode.unit_price || 0),
-
-        // 替代料信息
-        isSubstitute: false,
-        alternativeGroup: null,
-        primaryMaterialCode: null,
-        substitutes: substitutes
-    };
+    return chunks;
 }
 
-/**
- * 通过 product_bom 逻辑属性加载BOM数据（优化方式）
- * @returns 包含产品和BOM树的对象，如果失败返回 null
- */
-export async function loadBOMDataViaLogicProperty() {
+// ============================================================================
+// 产品列表
+// ============================================================================
+
+export async function loadProductList() {
     try {
-        console.log('[BOM服务] 🚀 尝试通过 product_bom 逻辑属性加载数据...');
-        const startTime = Date.now();
-
-        // 重置空节点计数器
-        unknownNodeCounter = 0;
-
         const productObjectTypeId = getObjectTypeId('product', DEFAULT_IDS.products);
-        console.log('[BOM服务] 📌 使用的产品对象类型ID:', productObjectTypeId);
-
-        // Debug: Inspect logic property definition and get primary keys
-        let identityKey = 'product_code'; // 默认使用 product_code
-        try {
-            console.log(`[BOM服务] 🔍 正在检查 ${productObjectTypeId} 的逻辑属性定义...`);
-            const objectTypeRaw = await ontologyApi.getObjectType(productObjectTypeId, true);
-            // 类型断言，因为 getObjectType 返回的是 any 或者 ObjectType
-            const objectType = objectTypeRaw as any;
-
-            if (objectType && objectType.logic_properties) {
-                const bomProp = objectType.logic_properties.find((p: any) => p.name === 'product_bom');
-                if (bomProp) {
-                    console.log('[BOM服务] 📋 product_bom 定义:', JSON.stringify(bomProp, null, 2));
-                } else {
-                    console.warn('[BOM服务] ⚠️ 未找到 product_bom 逻辑属性定义');
-                }
-            }
-
-            // 🔑 关键修复：获取 primary_keys 以正确构建 unique_identities
-            if (objectType && objectType.primary_keys && objectType.primary_keys.length > 0) {
-                identityKey = objectType.primary_keys[0];
-                console.log(`[BOM服务] 🔑 使用对象类型的主键: ${identityKey}`);
-            } else {
-                console.log(`[BOM服务] ⚠️ 未找到 primary_keys，使用默认值: ${identityKey}`);
-            }
-        } catch (e) {
-            console.warn('[BOM服务] ⚠️ 无法获取对象类型定义:', e);
-        }
-
-        // 首先加载所有产品实例以获取产品列表
         const productsResponse = await ontologyApi.queryObjectInstances(productObjectTypeId, {
-            limit: 50, // Reduce to avoid 500 Error
-            include_type_info: false, // Simplify response to reduce backend load
+            limit: 200,
+            include_type_info: true,
             include_logic_params: false
         });
 
-        const products = (productsResponse.entries || []).map((item: any) => ({
-            // 兼容不同的字段名: material_number 是产品编码的实际字段名
+        const responseData = productsResponse as any;
+        const primaryKeys: string[] = responseData.object_type?.primary_keys || [];
+        console.log('[BOM服务] 产品对象类主键:', primaryKeys);
+
+        const entries = productsResponse.entries || responseData.datas || [];
+        const products = entries.map((item: any) => ({
             product_code: String(item.product_code || item.material_number || '').trim(),
-            material_number: String(item.material_number || item.product_code || '').trim(),
-            // material_name 是产品名称的实际映射字段
             product_name: String(item.product_name || item.material_name || '').trim(),
             product_model: String(item.product_model || '').trim(),
-            // 保留原始数据以便使用正确的主键字段
-            _raw: item
-        }));
+            _raw: item,
+            _primaryKeys: primaryKeys
+        })).filter((p: any) => p.product_code);
 
-        if (products.length === 0) {
-            console.warn('[BOM服务] ⚠️ 未找到产品数据');
-            return null;
+        console.log(`[BOM服务] 产品列表: ${products.length} 个`);
+        return products;
+    } catch (e) {
+        console.error('[BOM服务] 获取产品列表失败:', e);
+        return [];
+    }
+}
+
+// ============================================================================
+// BOM 树构建工具
+// ============================================================================
+
+/**
+ * 从平面 BOM 记录列表构建 BOM 树
+ *
+ * 字段映射（与 planningV2DataService 返回的 BOMRecord 一致）：
+ *   parent_material_code -> 父件编码
+ *   material_code        -> 子件编码
+ *   material_name        -> 子件名称
+ *   standard_usage       -> 单耗数量
+ */
+function buildTreeFromFlatRecords(productCode: string, records: any[]): BOMNode {
+    if (records.length > 0) {
+        console.log('[BOM服务] BOM 记录字段:', Object.keys(records[0]));
+        console.log('[BOM服务] 前2条记录示例:', JSON.stringify(records.slice(0, 2), null, 2));
+    }
+
+    // 构建 childMap: parent_code -> 子件记录列表
+    const childMap: Record<string, any[]> = {};
+    for (const r of records) {
+        const parentCode = String(r.parent_material_code || r.parent_code || '').trim();
+        if (!parentCode) continue;
+        if (!childMap[parentCode]) childMap[parentCode] = [];
+        childMap[parentCode].push(r);
+    }
+
+    // 按 material_code 建索引，用于读取库存/单价等附加字段
+    const recordByCode = new Map<string, any>();
+    for (const r of records) {
+        const code = String(r.material_code || r.child_code || '').trim();
+        if (code && !recordByCode.has(code)) recordByCode.set(code, r);
+    }
+
+    function buildNode(
+        code: string,
+        name: string,
+        level: number,
+        parentCode: string | null,
+        quantity: number,
+        visited: Set<string>
+    ): BOMNode {
+        if (visited.has(code)) {
+            console.warn(`[BOM服务] 循环引用，跳过: ${code}`);
+            return makeEmptyNode(code, name, level, parentCode, quantity);
         }
+        visited.add(code);
 
-        console.log(`[BOM服务] 📦 加载了 ${products.length} 个产品`);
-
-        // 构建 unique_identities 用于查询逻辑属性
-        // 🔑 关键修复：使用动态的 identityKey（从 primary_keys 获取）并使用对应的字段值
-        const uniqueIdentities = products
-            .filter(p => {
-                // 根据 identityKey 检查对应的字段是否存在
-                const fieldValue = p._raw[identityKey] || (p as any)[identityKey];
-                return !!fieldValue;
+        const childRecords = childMap[code] || [];
+        const children = childRecords
+            .map((child: any) => {
+                const childCode = String(child.material_code || child.child_code || '').trim();
+                const childName = String(child.material_name || child.child_name || '').trim();
+                const childQty = parseFloat(String(child.standard_usage || child.child_quantity || '1')) || 1;
+                return buildNode(childCode, childName, level + 1, code, childQty, new Set(visited));
             })
-            .map(p => {
-                // 使用原始数据中的字段值，确保字段名和值都匹配
-                const fieldValue = String(p._raw[identityKey] || (p as any)[identityKey] || '').trim();
-                return {
-                    [identityKey]: fieldValue
-                };
+            .filter((c: BOMNode) => c.code);
+
+        visited.delete(code);
+
+        // 库存和单价在 enrichNodes 阶段填充，这里初始化为 0
+        let stockStatus: StockStatus = 'unknown';
+
+        return {
+            id: crypto.randomUUID(),
+            code, name: name || code,
+            level, quantity, unit: '个',
+            isLeaf: children.length === 0,
+            parentCode, children,
+            currentStock: 0, availableStock: 0,
+            stockStatus, storageDays: 0, unitPrice: 0,
+            isSubstitute: false, alternativeGroup: null, primaryMaterialCode: null, substitutes: []
+        };
+    }
+
+    return buildNode(productCode, productCode, 0, null, 1, new Set());
+}
+
+function makeEmptyNode(code: string, name: string, level: number, parentCode: string | null, quantity: number): BOMNode {
+    return {
+        id: crypto.randomUUID(), code, name: name || code,
+        level, quantity, unit: '个', isLeaf: true, parentCode,
+        children: [], currentStock: 0, availableStock: 0,
+        stockStatus: 'unknown' as StockStatus, storageDays: 0, unitPrice: 0,
+        isSubstitute: false, alternativeGroup: null, primaryMaterialCode: null, substitutes: []
+    };
+}
+
+/** 统计树的汇总数据 */
+function calcTreeStats(node: BOMNode, stats: { totalValue: number; stagnantCount: number; insufficientCount: number }) {
+    if (node.level > 0) {
+        if (node.stockStatus === 'stagnant') stats.stagnantCount++;
+        if (node.stockStatus === 'insufficient') stats.insufficientCount++;
+        stats.totalValue += node.currentStock * node.unitPrice;
+    }
+    for (const child of node.children) calcTreeStats(child, stats);
+}
+
+function countNodes(node: BOMNode): number {
+    return 1 + node.children.reduce((sum, c) => sum + countNodes(c), 0);
+}
+
+/** 收集 BOM 树中所有子件物料编码（跳过根节点） */
+function collectMaterialCodes(node: BOMNode): string[] {
+    const codes = new Set<string>();
+    function traverse(n: BOMNode) {
+        if (n.level > 0 && n.code) codes.add(n.code);
+        n.children.forEach(traverse);
+    }
+    traverse(node);
+    return Array.from(codes);
+}
+
+// ============================================================================
+// 库存查询（分批，与 planningV2DataService 保持一致）
+// ============================================================================
+
+interface InventoryEntry {
+    currentStock: number;
+    availableStock: number;
+    storageDays: number;
+    unitPrice: number;   // 库存对象中的单价（ERP 系统通常在库存记录里携带标准成本）
+}
+
+async function fetchInventoryMap(
+    materialCodes: string[]
+): Promise<Map<string, InventoryEntry>> {
+    const map = new Map<string, InventoryEntry>();
+    if (materialCodes.length === 0) return map;
+
+    try {
+        const typeId = getObjectTypeId('inventory', DEFAULT_IDS.inventory);
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        console.log(`[BOM服务] 查询库存: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批`);
+
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(typeId, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [{ operation: 'in', field: 'material_code', value: chunk }]
+                },
+                limit: 5000,
+                need_total: false,
             });
+            const records = response.entries || (response as any).datas || [];
 
-        if (uniqueIdentities.length === 0) {
-            console.warn('[BOM服务] ⚠️ 所有产品的编码都为空，无法查询BOM');
-            return { products, preBuiltTrees: [] };
-        }
+            for (const r of records) {
+                const code = String(r.material_code || '').trim();
+                if (!code) continue;
 
-        // 查询 product_bom 逻辑属性值
-        console.log('[BOM服务] 📊 查询 product_bom 逻辑属性值...', uniqueIdentities.length, '个');
-        console.log('[BOM服务] 🔍 使用的 identityKey:', identityKey);
-        console.log('[BOM服务] 📝 示例 unique_identity:', uniqueIdentities[0]);
-
-        // 获取当前的知识网络ID，确保没有前导空格
-        const knId = ontologyApi.getKnowledgeNetworkId().trim();
-        console.log('[BOM服务] 🌐 使用的知识网络ID:', knId);
-
-        // 🔑 关键修复：算子逻辑属性需要 dynamic_params
-        // 根据错误信息，至少需要提供 cache 参数
-        // Batching requests to avoid "Sandbox pool full"
-        const BATCH_SIZE = 5; // 每批只处理5个产品,避免后端过载
-        const totalItems = uniqueIdentities.length;
-        const allPropertyValues: Record<string, any> = {};
-
-        console.log(`[BOM服务] 开始分批加载数据,总数: ${totalItems}, 每批: ${BATCH_SIZE}`);
-
-        for (let i = 0; i < totalItems; i += BATCH_SIZE) {
-            const batchIdentities = uniqueIdentities.slice(i, i + BATCH_SIZE);
-            const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
-            const totalBatches = Math.ceil(totalItems / BATCH_SIZE);
-
-            console.log(`[BOM服务] 正在加载第 ${batchNumber}/${totalBatches} 批 (${batchIdentities.length} 个)...`);
-
-            try {
-                // Prepare product codes for this batch to tell the backend script to only fetch these
-                const batchProductCodes = batchIdentities
-                    .map(id => id[identityKey])
-                    .filter(code => code); // Ensure no empty codes
-
-                const batchResponse = await ontologyApi.queryObjectPropertyValues(
-                    productObjectTypeId,
-                    {
-                        unique_identities: batchIdentities,
-                        properties: ['product_bom'],
-                        dynamic_params: {
-                            product_bom: {
-                                cache: true,
-                                knowledge_network_id: knId,
-                                // Pass product_codes to the backend script to avoid fetching ALL products
-                                // logic property usually receives these parameters in the event object
-                                product_codes: batchProductCodes
-                            }
-                        }
-                    }
+                const currentStock   = Number(r.inventory_qty          ?? r.inventory_data    ?? r.current_stock ?? 0);
+                const availableStock = Number(r.available_inventory_qty ?? r.available_quantity ?? currentStock);
+                const storageDays    = r.inbound_date
+                    ? Math.floor((Date.now() - new Date(r.inbound_date).getTime()) / 86_400_000)
+                    : Number(r.inventory_age ?? r.storage_days ?? 0);
+                // 库存对象里通常携带标准成本/单价，尝试多个可能字段名
+                const unitPrice = Number(
+                    r.unit_price ?? r.unit_cost ?? r.standard_cost ??
+                    r.standard_price ?? r.move_price ?? r.price ?? 0
                 );
 
-                // Merge batch results
-                if (batchResponse) {
-                    Object.assign(allPropertyValues, batchResponse);
+                if (map.has(code)) {
+                    const e = map.get(code)!;
+                    e.currentStock   += currentStock;
+                    e.availableStock += availableStock;
+                    e.storageDays = Math.max(e.storageDays, storageDays);
+                    // 取第一条非零价格（多仓库时价格应一致）
+                    if (e.unitPrice === 0 && unitPrice > 0) e.unitPrice = unitPrice;
+                } else {
+                    map.set(code, { currentStock, availableStock, storageDays, unitPrice });
                 }
-
-                // 添加延迟以避免后端过载
-                // 除了最后一批,每批之间等待500ms
-                if (i + BATCH_SIZE < totalItems) {
-                    console.log(`[BOM服务] 等待500ms后继续下一批...`);
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-
-            } catch (batchError) {
-                console.error(`[BOM服务] ⚠️ 第 ${batchNumber} 批加载失败:`, batchError);
-                // Continue to next batch instead of failing completely? 
-                // For now, let's log and continue, maybe some partial data is better than none.
             }
         }
 
-        const propertyValuesResponse = allPropertyValues;
+        const withPrice = Array.from(map.values()).filter(e => e.unitPrice > 0).length;
+        console.log(`[BOM服务] 有效库存物料: ${map.size} 个，其中有单价: ${withPrice} 个`);
+    } catch (e) {
+        console.error('[BOM服务] 查询库存失败:', e);
+    }
+    return map;
+}
 
-        // 解析响应数据
-        // 🔑 关键修复：API可能返回 datas 或 entries 字段
-        const responseData = (propertyValuesResponse as any).datas || propertyValuesResponse.entries || [];
-        console.log(`[BOM服务] 📊 收到 ${responseData.length} 个产品的BOM数据`);
+// ============================================================================
+// 物料单价查询（分批）
+// ============================================================================
 
-        // 检查返回的数据结构
-        const preBuiltTrees: ProductBOMTree[] = [];
-        // Track processed product codes to avoid duplicates
-        const processedProductCodes = new Set<string>();
+async function fetchUnitPriceMap(materialCodes: string[]): Promise<Map<string, number>> {
+    const map = new Map<string, number>();
+    if (materialCodes.length === 0) return map;
 
-        for (const entry of responseData) {
-            const productBomData = entry.product_bom;
+    try {
+        const typeId = getObjectTypeId('material', DEFAULT_IDS.material);
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        console.log(`[BOM服务] 查询物料单价: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批`);
 
-            if (!productBomData) {
-                console.warn('[BOM服务] ⚠️ Entry中没有 product_bom 数据:', JSON.stringify(entry).substring(0, 200));
-                continue;
-            }
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(typeId, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [{ operation: 'in', field: 'material_code', value: chunk }]
+                },
+                limit: 5000,
+                need_total: false,
+            });
+            const records = response.entries || (response as any).datas || [];
 
-            // 🔍 检查算子执行状态
-            if (productBomData.result) {
-                const resultCode = productBomData.result.code;
-                const resultMessage = productBomData.result.message;
-                const stdout = productBomData.stdout || '';
-
-                if (resultCode !== 0 || stdout.includes('失败') || stdout.includes('Error')) {
-                    console.error('[BOM服务] ❌ 算子执行失败:', {
-                        code: resultCode,
-                        message: resultMessage,
-                        stdout: stdout.substring(0, 500)
-                    });
-                }
-            }
-
-            // 情况A: 后端直接返回构建好的树结构
-            // 🔑 关键修复：实际路径是 productBomData.result.data.trees（算子返回格式）
-            const trees = productBomData.result?.data?.trees || productBomData.data?.trees;
-
-            if (trees && Array.isArray(trees)) {
-                // 处理每个返回的树
-                for (const treeData of trees) {
-                    if (treeData.root_node) {
-                        try {
-                            // Determine product code
-                            const productCode = String(treeData.product_code || treeData.material_number || '').trim();
-
-                            // 🛑 De-duplication check
-                            if (productCode && processedProductCodes.has(productCode)) {
-                                continue;
-                            }
-
-                            // If code is empty, we can't reliably deduplicate by code, but we should try to process it
-                            // However, empty code products are problematic anyway.
-
-                            const rootNode = mapBackendNodeToFrontend(treeData.root_node, null);
-
-                            // 读取统计信息
-                            const stats = treeData.statistics || {};
-
-                            const tree: ProductBOMTree = {
-                                // 🔑 关键修复：优先使用 product_code（用户提示的字段）
-                                productCode: productCode,
-                                productName: String(treeData.product_name || treeData.material_name || ''),
-                                productModel: '', // 后端可能没返回模型，使用空字符串
-                                rootNode: rootNode,
-                                totalMaterials: Number(stats.total_materials || 0),
-                                totalInventoryValue: Number(stats.total_inventory_value || 0),
-                                stagnantCount: Number(stats.stagnant_count || 0),
-                                insufficientCount: Number(stats.insufficient_count || 0)
-                            };
-
-                            preBuiltTrees.push(tree);
-
-                            if (productCode) {
-                                processedProductCodes.add(productCode);
-                            }
-
-                        } catch (e) {
-                            console.error('[BOM服务] 解析树结构失败:', e);
-                        }
-                    }
-                }
-            } else {
-                // 尝试打印实际的数据结构以便调试
-                console.warn('[BOM服务] ⚠️ product_bom 数据结构不符合预期:', JSON.stringify(productBomData).substring(0, 500));
+            for (const r of records) {
+                const code = String(r.material_code || '').trim();
+                const price = Number(r.unit_price ?? r.unit_cost ?? r.standard_price ?? 0);
+                if (code) map.set(code, price);
             }
         }
 
-        const elapsed = Date.now() - startTime;
-        console.log(`[BOM服务] ✅ 通过逻辑属性加载完成 (耗时 ${(elapsed / 1000).toFixed(2)}s)`);
+        console.log(`[BOM服务] 有单价物料: ${map.size} 个`);
+    } catch (e) {
+        console.error('[BOM服务] 查询物料单价失败:', e);
+    }
+    return map;
+}
 
-        if (preBuiltTrees.length > 0) {
-            console.log(`[BOM服务] 🌳 解析到 ${preBuiltTrees.length} 个预构建BOM树`);
-            return {
-                products,
-                preBuiltTrees
-            };
-        } else {
-            // 如果上面两种都没有，可能是解析路径不对，打印一下第一个entry结构方便调试
-            if (responseData.length > 0) {
-                console.warn('[BOM服务] ⚠️ 未识别的数据结构，首个Entry示例:', JSON.stringify(responseData[0]).substring(0, 500));
-            }
-            // 返回空树而不是null，表明请求成功但无数据，或者保持null表明"未找到有效数据"
+// ============================================================================
+// 节点数据填充
+// ============================================================================
+
+/** 将库存和单价填充到 BOM 树节点，并更新 stockStatus */
+function enrichNodes(
+    node: BOMNode,
+    inventoryMap: Map<string, InventoryEntry>,
+    priceMap: Map<string, number>
+): void {
+    const inv = inventoryMap.get(node.code);
+
+    if (inv) {
+        node.currentStock   = inv.currentStock;
+        node.availableStock = inv.availableStock;
+        node.storageDays    = inv.storageDays;
+    }
+
+    // 单价优先级：material对象 > inventory对象 > 节点原有值
+    // material 对象的 unit_price 更权威（采购价/成本价），inventory 作为兜底
+    const priceFromMaterial  = priceMap.get(node.code) ?? 0;
+    const priceFromInventory = inv?.unitPrice ?? 0;
+    const resolvedPrice = priceFromMaterial > 0
+        ? priceFromMaterial
+        : priceFromInventory > 0
+            ? priceFromInventory
+            : node.unitPrice;
+    if (resolvedPrice > 0) node.unitPrice = resolvedPrice;
+
+    if (node.level > 0) {
+        if (node.storageDays > 90)       node.stockStatus = 'stagnant';
+        else if (node.currentStock > 0)  node.stockStatus = 'sufficient';
+        else                             node.stockStatus = 'insufficient';
+    }
+
+    for (const child of node.children) enrichNodes(child, inventoryMap, priceMap);
+}
+
+// ============================================================================
+// 主入口：直接查询 BOM 对象实例（与 planningV2DataService 保持一致）
+// ============================================================================
+
+/**
+ * 通过 queryObjectInstances 直接查询 BOM 对象实例，构建单一产品的完整 BOM 树。
+ *
+ * 流程：
+ *   1. 从产品对象的 identity 中取出真实主键字段值，作为 bom_material_code 的过滤条件
+ *   2. 查询 BOM 对象（bom_material_code == primaryKeyValue），取最新 bom_version
+ *   3. 用平面记录构建 BOM 树（buildTreeFromFlatRecords）
+ *   4. 并行查询库存 + 物料单价（分批，每批 50 个物料）
+ *   5. 将库存/单价填充到树节点（enrichNodes）
+ */
+export async function loadSingleBOMTreeViaQueryInstances(
+    productCode: string,
+    identity?: any
+): Promise<ProductBOMTree | null> {
+    const t0 = Date.now();
+    try {
+        const bomTypeId = getObjectTypeId('bom', DEFAULT_IDS.bom);
+
+        // ── Step 1: 从产品对象的真实主键字段取值 ────────────────────────────
+        // identity 由 loadProductList 传入，包含 _raw（原始字段）和 __primaryKeys（主键字段名列表）
+        // 例：primaryKeyField = 'material_number'，则取 identity.material_number 的值
+        const primaryKeyFields: string[] = identity?.__primaryKeys || [];
+        const primaryKeyField = primaryKeyFields[0] || '';
+        const bomFilterValue = (primaryKeyField && identity?.[primaryKeyField])
+            ? String(identity[primaryKeyField]).trim()
+            : productCode;   // 无 identity 时降级使用 productCode
+
+        console.log(
+            `[BOM服务] 加载 BOM 数据: productCode=${productCode}，` +
+            `主键字段=${primaryKeyField || '(无，使用productCode)'}，` +
+            `bom过滤值=${bomFilterValue}，对象类型=${bomTypeId}`
+        );
+
+        // ── Step 2: 查询该产品下所有 BOM 记录 ───────────────────────────────
+        const response = await ontologyApi.queryObjectInstances(bomTypeId, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { operation: '==', field: 'bom_material_code', value: bomFilterValue }
+                ]
+            },
+            limit: 10000,
+            need_total: false,
+        });
+
+        const allRecords = response.entries || (response as any).datas || [];
+        console.log(`[BOM服务] BOM 原始记录: ${allRecords.length} 条`);
+
+        if (allRecords.length === 0) {
+            console.warn(`[BOM服务] 未找到产品 ${bomFilterValue} 的 BOM 数据`);
             return null;
         }
 
+        // ── Step 3: 取最新 BOM 版本（字典序最大即最新，与 planningV2DataService 逻辑一致）──
+        const latestVersion = allRecords.reduce(
+            (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max),
+            ''
+        );
+        const records = latestVersion
+            ? allRecords.filter((r: any) => r.bom_version === latestVersion)
+            : allRecords;
+        console.log(`[BOM服务] 最新版本 "${latestVersion}"，过滤后: ${records.length} 条`);
+
+        // ── Step 4: 构建 BOM 树 ──────────────────────────────────────────────
+        // 必须用 bomFilterValue 作为根节点编码，因为 BOM 记录中 parent_material_code
+        // 存的是产品对象的真实主键值（如 material_number），而非 UI 层用的 productCode
+        const rootNode = buildTreeFromFlatRecords(bomFilterValue, records);
+
+        // ── Step 5: 并行查询库存 + 单价 ─────────────────────────────────────
+        const materialCodes = collectMaterialCodes(rootNode);
+        console.log(`[BOM服务] 并行查询库存 + 单价，物料数: ${materialCodes.length}`);
+        const [inventoryMap, priceMap] = await Promise.all([
+            fetchInventoryMap(materialCodes),
+            fetchUnitPriceMap(materialCodes),
+        ]);
+
+        // ── Step 6: 填充库存/单价到节点 ─────────────────────────────────────
+        enrichNodes(rootNode, inventoryMap, priceMap);
+
+        // ── Step 7: 汇总统计 ─────────────────────────────────────────────────
+        const stats = { totalValue: 0, stagnantCount: 0, insufficientCount: 0 };
+        calcTreeStats(rootNode, stats);
+        const totalMaterials = countNodes(rootNode) - 1; // 去掉根节点
+
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+        console.log(
+            `[BOM服务] ✅ 完成 (${elapsed}s)，子件数: ${totalMaterials}，` +
+            `库存覆盖: ${inventoryMap.size}/${materialCodes.length}，` +
+            `有单价: ${priceMap.size}/${materialCodes.length}`
+        );
+
+        return {
+            productCode,
+            productName: productCode, // 由调用方根据产品列表补充
+            productModel: '',
+            rootNode,
+            totalMaterials,
+            totalInventoryValue: stats.totalValue,
+            stagnantCount: stats.stagnantCount,
+            insufficientCount: stats.insufficientCount,
+        };
+
     } catch (error) {
-        console.error('[BOM服务] ❌ 通过逻辑属性加载失败:', error);
+        console.error('[BOM服务] ❌ BOM 查询失败:', error);
         return null;
     }
 }

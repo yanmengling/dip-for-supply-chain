@@ -15,9 +15,8 @@
 // 类型定义
 // ============================================================================
 
-import { ontologyApi } from '../api/ontologyApi';
 import { apiConfigService } from './apiConfigService';
-import { loadBOMDataViaLogicProperty, initHelpers } from './bomInventoryHelpers';
+import { loadProductList, loadSingleBOMTreeViaQueryInstances, initHelpers } from './bomInventoryHelpers';
 
 /**
  * 获取对象类型ID配置
@@ -48,6 +47,9 @@ export const getObjectTypeId = (entityType: string, defaultId: string) => {
 // 默认ID作为后备（更新为新的有效 ID）
 export const DEFAULT_IDS = {
     products: 'supplychain_hd0202_product',
+    bom: 'supplychain_hd0202_bom',
+    inventory: 'supplychain_hd0202_inventory',
+    material: 'supplychain_hd0202_material',
 };
 
 // 初始化帮助函数
@@ -57,7 +59,7 @@ initHelpers({
 });
 
 // ============================================================================
-// 数据加载 - 已迁移至 bomInventoryHelpers（通过 loadBOMDataViaLogicProperty）
+// 数据加载 - 已迁移至 bomInventoryHelpers（直接查询 BOM 对象实例）
 // ============================================================================
 export interface ProductRaw {
     product_code: string;
@@ -130,44 +132,32 @@ export interface ProductBOMTree {
  * 解析替代料关??
  * 根据 alternative_group ??alternative_part 字段识别主料和替代料
  */
-// Initialize helpers with dependencies
-initHelpers({ getObjectTypeId, DEFAULT_IDS });
+// Removed loadAllBOMTrees as it is no longer used
 
 /**
- * 加载所有数据并构建BOM树
+ * 加载单个产品的BOM树
  */
-export async function loadAllBOMTrees(): Promise<ProductBOMTree[]> {
-    console.log('='.repeat(60));
-    console.log('[BOM服务] 🚀 开始加载所有BOM树...');
-    console.log('='.repeat(60));
-    const totalStartTime = Date.now();
-
-    // 尝试使用逻辑属性加载（1次API调用）
-    const optimizedData = await loadBOMDataViaLogicProperty();
-
-    if (optimizedData && optimizedData.preBuiltTrees && optimizedData.preBuiltTrees.length > 0) {
-        console.log(`[BOM服务] ✅ 使用后端预构建的BOM树 (${optimizedData.preBuiltTrees.length} 个)`);
-        const trees = optimizedData.preBuiltTrees.sort((a, b) => a.productCode.localeCompare(b.productCode));
-
-        const totalElapsed = Date.now() - totalStartTime;
-        console.log('='.repeat(60));
-        console.log(`[BOM服务] 🏁 完成加载: ${trees.length} 个产品BOM树 (总耗时 ${(totalElapsed / 1000).toFixed(2)}s)`);
-        console.log('='.repeat(60));
-
-        return trees;
+export async function loadSingleBOMTree(productCode: string, identity?: any): Promise<ProductBOMTree | null> {
+    const tree = await loadSingleBOMTreeViaQueryInstances(productCode, identity);
+    if (tree && identity) {
+        // 用 identity 中的产品名称补充树的 productName
+        const productName = String(
+            (identity as any).material_name ||
+            (identity as any).product_name ||
+            productCode
+        ).trim();
+        if (productName && productName !== productCode) {
+            tree.productName = productName;
+            if (tree.rootNode) {
+                tree.rootNode.name = productName;
+            }
+        }
     }
-
-    console.error('[BOM服务] ❌ 加载失败或无数据');
-    return [];
+    return tree;
 }
 
-/**
- * 加载单个产品的BOM??
- */
-export async function loadSingleBOMTree(productCode: string): Promise<ProductBOMTree | null> {
-    const allTrees = await loadAllBOMTrees();
-    return allTrees.find(t => t.productCode === productCode) || null;
-}
+// 导出产品列表加载函数
+export { loadProductList };
 
 // ============================================================================
 // 阶段二：生产数量分析 (MRP运算逻辑)
@@ -249,8 +239,10 @@ function calculateMRPCosts(
     // 待处理队??{ code, qty }
     const queue: { code: string; qty: number }[] = [];
 
-    // 初始需求：成品的数??
-    queue.push({ code: productCode, qty: quantity });
+    // 初始需求：成品的数量
+    // 用 rootNode.code（= bomFilterValue，产品真实主键值）而非 productCode（UI编码），
+    // 确保与 bomNodeMap 中的索引 key 保持一致
+    queue.push({ code: bomData.rootNode.code, qty: quantity });
 
     let totalReplenishmentCost = 0;
     let totalProcurementCost = 0;
@@ -485,12 +477,14 @@ export function calculateProductionAnalysis(productBOM: ProductBOMTree): Product
         node.substitutes.forEach(extractInv);
     }
     extractInv(productBOM.rootNode);
-    // 关键修正：生产分析应该分??制??过程，不应扣??产成??本身的库存??
-    // 即：我们要计??利用原材料能做多少个"，而不??现有库存+能做多少????
-    if (inventoryMap.has(productBOM.productCode)) {
-        inventoryMap.delete(productBOM.productCode);
+    // 关键修正：生产分析是制造过程，不应扣减产成品本身的库存
+    // 即：我们计算"利用原材料能做多少套"，而非"现有库存+能做多少套"
+    // 用 rootNode.code（产品真实主键值）删除，与 extractInv 的索引 key 保持一致
+    const rootCode = productBOM.rootNode.code;
+    if (inventoryMap.has(rootCode)) {
+        inventoryMap.delete(rootCode);
     }
-    console.log(`[生产分析] 提取库存快照: ${inventoryMap.size} 个 (已排除成品本身)`);
+    console.log(`[生产分析] 提取库存快照: ${inventoryMap.size} 个 (已排除成品本身 ${rootCode})`);
 
     // 1. 计算最大可生产数量
     const maxProducible = findMaxProducible(productBOM.productCode, productBOM, inventoryMap);
