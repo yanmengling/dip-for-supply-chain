@@ -10,13 +10,10 @@
 
 import { useState, useEffect } from 'react';
 import { RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer } from 'recharts';
-import { fetchLegalRisks } from '../../services/legalRiskService';
 import { loadSupplierScorecard } from '../../services/supplierDataLoader';
-import { loadSupplierList } from '../../services/supplierDataLoader';
 import RiskBadge from './RiskBadge';
 import SupplierSelector from './SupplierSelector';
 import type { Supplier360Scorecard as Supplier360ScorecardType } from '../../types/ontology';
-import type { LegalRisk, RiskLevel } from '../../types/ontology';
 
 
 interface Supplier360ScorecardProps {
@@ -35,9 +32,6 @@ const Supplier360Scorecard = ({
 
 
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(supplierId || null);
-  const [legalRisks, setLegalRisks] = useState<LegalRisk[]>([]);
-  const [loadingLegalRisks, setLoadingLegalRisks] = useState(false);
-  const [legalRisksError, setLegalRisksError] = useState<string | null>(null);
   const [scorecard, setScorecard] = useState<Supplier360ScorecardType | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -84,31 +78,6 @@ const Supplier360Scorecard = ({
 
     loadScorecardData();
   }, [currentSupplierId]);
-
-  // Load legal risks when supplier changes
-  useEffect(() => {
-    if (currentSupplierId && scorecard) {
-      const loadLegalRisks = async () => {
-        setLoadingLegalRisks(true);
-        setLegalRisksError(null);
-        try {
-          const risks = await fetchLegalRisks(currentSupplierId);
-          setLegalRisks(risks);
-        } catch (error) {
-          console.error('Failed to fetch legal risks:', error);
-          setLegalRisksError('获取法律风险数据失败，使用缓存数据');
-          setLegalRisks(scorecard.riskAssessment.legalRisks.risks);
-        } finally {
-          setLoadingLegalRisks(false);
-        }
-      };
-
-      loadLegalRisks();
-    } else if (scorecard) {
-      // Initialize with cached data
-      setLegalRisks(scorecard.riskAssessment.legalRisks.risks);
-    }
-  }, [currentSupplierId, scorecard]);
 
   // Calculate overall score excluding annualPurchaseAmount
   const calculateOverallScore = () => {
@@ -171,7 +140,7 @@ const Supplier360Scorecard = ({
   }
 
   const overallScore = calculateOverallScore();
-  const currentLegalRisks = legalRisks.length > 0 ? legalRisks : scorecard.riskAssessment.legalRisks.risks;
+  const currentLegalRisks = scorecard.riskAssessment.legalRisks.risks;
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
@@ -272,19 +241,11 @@ const Supplier360Scorecard = ({
           <div className="border border-slate-200 rounded-lg p-3">
             <div className="flex items-center justify-between mb-1">
               <div className="text-sm font-semibold text-slate-700">法律风险</div>
-              <div className="flex items-center gap-2">
-                {loadingLegalRisks && (
-                  <div className="text-xs text-slate-400">加载中...</div>
-                )}
-                <div className="text-xs text-slate-500">
-                  {new Date(scorecard.riskAssessment.legalRisks.lastUpdated).toLocaleDateString()}
-                </div>
+              <div className="text-xs text-slate-500">
+                {new Date(scorecard.riskAssessment.legalRisks.lastUpdated).toLocaleDateString()}
               </div>
             </div>
             <div className="text-xl font-bold text-slate-800">{scorecard.riskAssessment.legalRisks.score}</div>
-            {legalRisksError && (
-              <div className="text-xs text-amber-600 mt-0.5">{legalRisksError}</div>
-            )}
             <div className="text-xs text-slate-500 mt-0.5">
               风险项: {currentLegalRisks.length} 个
             </div>

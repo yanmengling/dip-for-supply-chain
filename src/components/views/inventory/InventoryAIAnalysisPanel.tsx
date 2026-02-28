@@ -36,14 +36,21 @@ function getInventoryWorkflowDagId(): string {
     return '602192728104683735';
 }
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _INV_AI_CACHE_TTL = 3 * 60 * 1000;
+let _invAiCache: { markdown: string; analysis: string[] } | null = null;
+let _invAiCacheTime = 0;
+
 // Inventory AI Analysis Panel - 库存优化专用AI分析面板
 
 const InventoryAIAnalysisPanel = () => {
+    const _initValid =
+        !!(_invAiCache && Date.now() - _invAiCacheTime < _INV_AI_CACHE_TTL);
 
     // ============ AI 分析报告状态 ============
-    const [brainModeAnalysis, setBrainModeAnalysis] = useState<string[]>([]);
-    const [brainModeMarkdown, setBrainModeMarkdown] = useState<string>(''); // Raw markdown for rendering
-    const [brainModeLoading, setBrainModeLoading] = useState(false);
+    const [brainModeAnalysis, setBrainModeAnalysis] = useState<string[]>(_initValid ? _invAiCache!.analysis : []);
+    const [brainModeMarkdown, setBrainModeMarkdown] = useState<string>(_initValid ? _invAiCache!.markdown : ''); // Raw markdown for rendering
+    const [brainModeLoading, setBrainModeLoading] = useState(!_initValid);
     const [isTriggering, setIsTriggering] = useState(false);
     const [fetchTrigger, setFetchTrigger] = useState(0); // Used to trigger refetch
 
@@ -56,6 +63,17 @@ const InventoryAIAnalysisPanel = () => {
         let isActive = true;
 
         const fetchAnalysis = async () => {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求
+            const now = Date.now();
+            if (_invAiCache && now - _invAiCacheTime < _INV_AI_CACHE_TTL) {
+                if (isActive) {
+                    setBrainModeMarkdown(_invAiCache.markdown);
+                    setBrainModeAnalysis(_invAiCache.analysis);
+                    setBrainModeLoading(false);
+                }
+                return;
+            }
+
             try {
                 setBrainModeLoading(true);
 
@@ -185,10 +203,15 @@ const InventoryAIAnalysisPanel = () => {
 
                         console.log('[InventoryAIAnalysisPanel] Extracted analysis text:', analysisText.substring(0, 200) + '...');
 
+                        // 写入模块级缓存
+                        const analysisLines = analysisText.split('\n').filter(line => line.trim().length > 0);
+                        _invAiCache = { markdown: analysisText, analysis: analysisLines };
+                        _invAiCacheTime = Date.now();
+
                         // Store raw markdown for rendering
                         setBrainModeMarkdown(analysisText);
                         // Split by newline for Word export
-                        setBrainModeAnalysis(analysisText.split('\n').filter(line => line.trim().length > 0));
+                        setBrainModeAnalysis(analysisLines);
                     } else {
                         console.warn('[InventoryAIAnalysisPanel] No nodes found in execution detail');
                         setBrainModeMarkdown('未找到工作流节点数据');
@@ -235,6 +258,9 @@ const InventoryAIAnalysisPanel = () => {
             setIsTriggering(true);
             setBrainModeMarkdown('');
             setBrainModeAnalysis([]);
+            // 清除缓存，强制重新获取
+            _invAiCache = null;
+            _invAiCacheTime = 0;
 
             // 1. Trigger workflow
             console.log('[InventoryAIAnalysisPanel] Triggering workflow...');

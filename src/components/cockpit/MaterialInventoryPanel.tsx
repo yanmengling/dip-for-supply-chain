@@ -18,6 +18,11 @@ import { apiConfigService } from '../../services/apiConfigService';
 const getMaterialInventoryModelId = () =>
   apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58ihclg5lk40hvh48mg';
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _MAT_CACHE_TTL = 3 * 60 * 1000;
+let _matCache: MaterialItem[] | null = null;
+let _matCacheTime = 0;
+
 /** 分析维度（物料库存模型中 material_name 无歧义，可直接使用） */
 const QUERY_DIMS = [
   'material_code',
@@ -46,8 +51,10 @@ interface Props {
 }
 
 const MaterialInventoryPanel = ({ onNavigate }: Props) => {
-  const [materials, setMaterials] = useState<MaterialItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const _initValid =
+    !!(_matCache && Date.now() - _matCacheTime < _MAT_CACHE_TTL);
+  const [materials, setMaterials] = useState<MaterialItem[]>(_initValid ? _matCache! : []);
+  const [loading, setLoading] = useState(!_initValid);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
@@ -55,6 +62,13 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
     let isMounted = true;
 
     async function fetchData() {
+      // 命中模块级缓存则直接渲染，跳过所有 API 请求
+      const now = Date.now();
+      if (_matCache && now - _matCacheTime < _MAT_CACHE_TTL) {
+        if (isMounted) { setMaterials(_matCache); setLoading(false); }
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -156,6 +170,10 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
         }));
 
         list.sort((a, b) => b.currentStock - a.currentStock);
+
+        // 写入模块级缓存
+        _matCache = list;
+        _matCacheTime = Date.now();
 
         if (isMounted) setMaterials(list);
       } catch (err) {

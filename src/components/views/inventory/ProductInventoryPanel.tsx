@@ -50,14 +50,21 @@ interface ProductData {
     lastOutboundDate?: string;
 }
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _PROD_INV_CACHE_TTL = 3 * 60 * 1000;
+let _prodInvCache: ProductData[] | null = null;
+let _prodInvCacheTime = 0;
+
 interface Props {
     // Props 变为可选，组件内部自行获取数据
     onNavigate?: (view: string) => void;
 }
 
 export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
-    const [products, setProducts] = useState<ProductData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const _initValid =
+        !!(_prodInvCache && Date.now() - _prodInvCacheTime < _PROD_INV_CACHE_TTL);
+    const [products, setProducts] = useState<ProductData[]>(_initValid ? _prodInvCache! : []);
+    const [loading, setLoading] = useState(!_initValid);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const itemsPerPage = 8;
@@ -66,6 +73,14 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
     // 从 API 获取数据
     useEffect(() => {
         async function fetchData() {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求
+            const now = Date.now();
+            if (_prodInvCache && now - _prodInvCacheTime < _PROD_INV_CACHE_TTL) {
+                setProducts(_prodInvCache);
+                setLoading(false);
+                return;
+            }
+
             try {
                 setLoading(true);
                 setError(null);
@@ -187,6 +202,10 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 const transformedData = Array.from(mergedMap.values());
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.stockQuantity - a.stockQuantity);
+
+                // 写入模块级缓存
+                _prodInvCache = transformedData;
+                _prodInvCacheTime = Date.now();
 
                 setProducts(transformedData);
             } catch (err) {

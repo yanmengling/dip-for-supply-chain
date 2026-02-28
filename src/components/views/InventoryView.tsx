@@ -36,6 +36,13 @@ import { apiConfigService } from '../../services/apiConfigService';
 const getProductInventoryMetricId = () => apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
 const getMaterialInventoryMetricId = () => apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58je8lg5lk40hvh48n0';
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _INV_VIEW_CACHE_TTL = 3 * 60 * 1000;
+let _allProductsCache: any[] | null = null;
+let _allProductsCacheTime = 0;
+let _matDimsCache: string[] | null = null;
+let _matDimsCacheTime = 0;
+
 interface Props {
   toggleCopilot?: () => void;
 }
@@ -46,14 +53,23 @@ const InventoryView = ({ toggleCopilot }: Props) => {
 
 
 
-  const [products, setProducts] = useState<any[]>([]);
+  const _prodValid = !!(_allProductsCache && Date.now() - _allProductsCacheTime < _INV_VIEW_CACHE_TTL);
+  const [products, setProducts] = useState<any[]>(_prodValid ? _allProductsCache! : []);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     const calculate = async () => {
+      // 命中模块级缓存则直接使用
+      const now = Date.now();
+      if (_allProductsCache && now - _allProductsCacheTime < _INV_VIEW_CACHE_TTL) {
+        setProducts(_allProductsCache);
+        return;
+      }
       try {
         setLoading(true);
         const results = await calculateAllProductInventory();
+        _allProductsCache = results;
+        _allProductsCacheTime = Date.now();
         setProducts(results);
       } catch (err) {
         console.error(err);
@@ -65,11 +81,19 @@ const InventoryView = ({ toggleCopilot }: Props) => {
   }, []);
 
   // --- Data Fetching Logic (Materials) ---
-  const [materialAvailableDimensions, setMaterialAvailableDimensions] = useState<string[]>([]);
-  const [materialModelLoading, setMaterialModelLoading] = useState(true);
+  const _matDimsValid = !!(_matDimsCache && Date.now() - _matDimsCacheTime < _INV_VIEW_CACHE_TTL);
+  const [materialAvailableDimensions, setMaterialAvailableDimensions] = useState<string[]>(_matDimsValid ? _matDimsCache! : []);
+  const [materialModelLoading, setMaterialModelLoading] = useState(!_matDimsValid);
 
   useEffect(() => {
     const fetchMaterialModelInfo = async () => {
+      // 命中模块级缓存则直接使用
+      const now = Date.now();
+      if (_matDimsCache && now - _matDimsCacheTime < _INV_VIEW_CACHE_TTL) {
+        setMaterialAvailableDimensions(_matDimsCache);
+        setMaterialModelLoading(false);
+        return;
+      }
       try {
         const metricId = getMaterialInventoryMetricId();
         const validation = await validateMetricModel(metricId);
@@ -88,6 +112,8 @@ const InventoryView = ({ toggleCopilot }: Props) => {
           const dimensions = result.model.analysis_dimensions.map((dim: Label | string) =>
             typeof dim === 'string' ? dim : dim.name
           );
+          _matDimsCache = dimensions;
+          _matDimsCacheTime = Date.now();
           setMaterialAvailableDimensions(dimensions);
         } else {
           setMaterialAvailableDimensions(['item_id', 'item_code', 'item_name', 'warehouse_name']);

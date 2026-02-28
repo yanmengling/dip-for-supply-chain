@@ -10,30 +10,42 @@
  * - Principle 4: No simulation mode in V2 - data isolation not applicable
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Package, Truck, Users, TrendingUp, Settings,
-  Brain, Database, Calendar
+  Brain, Database, Calendar, Loader2
 } from 'lucide-react';
 import logoIcon from './assets/logo.svg';
-import SupplierEvaluationPage from './components/supplier-evaluation/SupplierEvaluationPage';
-import { ProductSupplyOptimizationPage } from './components/product-supply-optimization/ProductSupplyOptimizationPage';
 import { CopilotSidebar } from './components/shared/CopilotSidebar';
 import type { CopilotMessage } from './components/shared/CopilotSidebar';
-import CockpitView from './components/views/CockpitView';
-import SearchView from './components/views/SearchView';
-import InventoryView from './components/views/InventoryView';
-import DeliveryViewEnhanced from './components/views/DeliveryViewEnhanced';
-import PlanningView from './components/views/PlanningView';
-import PlanningViewV2 from './components/views/PlanningViewV2';
 import { getCopilotConfig } from './utils/copilotConfig';
 import type { CopilotSidebarProps } from './components/shared/CopilotSidebar';
 import { useHeaderHeight } from './hooks/useHeaderHeight';
 import { useConversation } from './hooks/useConversation';
-import ConfigBackendLayout from './components/config-backend/ConfigBackendLayout';
-import { populateEntityConfigs } from './utils/entityConfigService';
-import { initializeEntityData } from './utils/entityConfigService';
+import { populateEntityConfigs, initializeEntityData } from './utils/entityConfigService';
 import { navigationConfigService } from './services/navigationConfigService';
+
+// ── 页面级懒加载（按需拆包，首屏只加载当前视图代码）─────────────────────────
+const CockpitView            = lazy(() => import('./components/views/CockpitView'));
+const SearchView             = lazy(() => import('./components/views/SearchView'));
+const PlanningView           = lazy(() => import('./components/views/PlanningView'));
+const PlanningViewV2         = lazy(() => import('./components/views/PlanningViewV2'));
+const InventoryView          = lazy(() => import('./components/views/InventoryView'));
+const DeliveryViewEnhanced   = lazy(() => import('./components/views/DeliveryViewEnhanced'));
+const SupplierEvaluationPage = lazy(() => import('./components/supplier-evaluation/SupplierEvaluationPage'));
+const ProductSupplyOptimizationPage = lazy(() =>
+  import('./components/product-supply-optimization/ProductSupplyOptimizationPage')
+    .then(m => ({ default: m.ProductSupplyOptimizationPage }))
+);
+const ConfigBackendLayout    = lazy(() => import('./components/config-backend/ConfigBackendLayout'));
+
+/** 页面切换时的加载占位 */
+const PageFallback = () => (
+  <div className="flex items-center justify-center h-64 text-slate-400 gap-2">
+    <Loader2 className="animate-spin" size={20} />
+    <span className="text-sm">加载中...</span>
+  </div>
+);
 
 // Full navigation items (icons and labels)
 const ALL_NAV_ITEMS = [
@@ -219,27 +231,29 @@ const SupplyChainAppContent = () => {
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden flex flex-col">
-        {currentView === 'config' ? (
-          <div className="h-full">
-            <ConfigBackendLayout onBack={() => setCurrentView('cockpit')} />
-          </div>
-        ) : currentView === 'planningV2' ? (
-          <div className="flex-1 overflow-y-auto">
-            <PlanningViewV2 />
-          </div>
-        ) : (
-          <div className="flex-1 overflow-y-auto">
-            <div className="max-w-6xl mx-auto px-6 py-8">
-              {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
-              {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
-              {currentView === 'planning' && <PlanningView />}
-              {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
-              {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
-              {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}
-              {currentView === 'evaluation' && <SupplierEvaluationPage toggleCopilot={() => setCopilotOpen(true)} />}
+        <Suspense fallback={<PageFallback />}>
+          {currentView === 'config' ? (
+            <div className="h-full">
+              <ConfigBackendLayout onBack={() => setCurrentView('cockpit')} />
             </div>
-          </div>
-        )}
+          ) : currentView === 'planningV2' ? (
+            <div className="flex-1 overflow-y-auto">
+              <PlanningViewV2 />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-6xl mx-auto px-6 py-8">
+                {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'planning' && <PlanningView />}
+                {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'evaluation' && <SupplierEvaluationPage toggleCopilot={() => setCopilotOpen(true)} />}
+              </div>
+            </div>
+          )}
+        </Suspense>
       </div>
 
       {/* Copilot Sidebar */}

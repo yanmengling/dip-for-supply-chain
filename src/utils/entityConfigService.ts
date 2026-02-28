@@ -25,10 +25,8 @@ import {
   loadProductEntities,
   loadInventoryEvents,
   loadBOMEvents,
-  loadSupplierEntities,
   loadMaterialEntities,
   loadMaterialProcurementEvents,
-  loadSupplierPerformanceScores,
   loadSalesOrderEvents
 } from '../services/ontologyDataService';
 
@@ -470,23 +468,19 @@ export const populateEntityConfigs = async (): Promise<void> => {
       pEntities,
       invEvents,
       bomEvents,
-      sEntities,
       mEntities,
       procEvents,
-      perfScores,
       salesOrders
     ] = await Promise.all([
       loadProductEntities(),
       loadInventoryEvents(),
       loadBOMEvents(),
-      loadSupplierEntities(),
       loadMaterialEntities(),
       loadMaterialProcurementEvents(),
-      loadSupplierPerformanceScores(),
       loadSalesOrderEvents()
     ]);
 
-    console.log(`Loaded Ontology Data: ${pEntities.length} products, ${sEntities.length} suppliers, ${mEntities.length} materials`);
+    console.log(`Loaded Ontology Data: ${pEntities.length} products, ${mEntities.length} materials`);
 
     // Map Products
     productsData.length = 0;
@@ -542,17 +536,7 @@ export const populateEntityConfigs = async (): Promise<void> => {
       });
     });
 
-    // If no procurement events, fallback to just supplier entities (without specific material info)
-    if (suppliersData.length === 0 && sEntities.length > 0) {
-      sEntities.forEach(s => {
-        suppliersData.push({
-          supplierId: s.supplier_id,
-          supplierName: s.supplier_name,
-          materialCode: 'UNKNOWN',
-          materialName: 'Unknown Material'
-        });
-      });
-    }
+    // Supplier entities are now loaded via supplierDataLoader (mm_supplier_count metric model)
 
     // Map Orders
     ordersData.length = 0;
@@ -569,33 +553,8 @@ export const populateEntityConfigs = async (): Promise<void> => {
       });
     });
 
-    // Map Supplier Scorecards
+    // Supplier 360 scorecards are now loaded via supplierDataLoader (mm_supplier_count metric model)
     supplier360ScorecardsData.length = 0;
-    perfScores.forEach(s => {
-      supplier360ScorecardsData.push({
-        supplierId: s.supplier_id,
-        supplierName: s.supplier_name,
-        evaluationDate: s.evaluation_date,
-        overallScore: parseFloat(s.overall_score),
-        dimensions: {
-          qualityRating: parseFloat(s.quality_score),
-          onTimeDeliveryRate: parseFloat(s.otif_rate),
-          responseSpeed: parseFloat(s.service_score),
-          riskRating: 10,
-          onTimeDeliveryRate2: parseFloat(s.delivery_score),
-          annualPurchaseAmount: 1000000
-        },
-        riskAssessment: {
-          supplierId: s.supplier_id,
-          assessmentDate: s.evaluation_date,
-          financialStatus: { score: 80, lastUpdated: s.evaluation_date },
-          publicSentiment: { score: 80, source: 'manual', lastUpdated: s.evaluation_date },
-          productionAnomalies: { count: 0, severity: 'low', source: 'manual', lastUpdated: s.evaluation_date },
-          legalRisks: { score: 0, source: 'auto', lastUpdated: s.evaluation_date, risks: [] },
-          overallRiskLevel: 'low'
-        }
-      });
-    });
 
     // Map Main Material Suppliers
     mainMaterialSuppliersData.length = 0;

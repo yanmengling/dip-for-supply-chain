@@ -257,15 +257,22 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     );
 };
 
+// ── 产品列表模块级缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _BOM_PRODUCTS_CACHE_TTL = 3 * 60 * 1000;
+let _bomProductsCache: any[] | null = null;
+let _bomProductsCacheTime = 0;
+
 // ============================================================================
 // 主组件
 // ============================================================================
 
 export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isEmbedded = false }) => {
-    const [loading, setLoading] = useState(true);
+    const _initValid =
+        !!(_bomProductsCache && Date.now() - _bomProductsCacheTime < _BOM_PRODUCTS_CACHE_TTL);
+    const [loading, setLoading] = useState(!_initValid);
     const [loadingBom, setLoadingBom] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [products, setProducts] = useState<any[]>([]);
+    const [products, setProducts] = useState<any[]>(_initValid ? _bomProductsCache! : []);
     const [bomTrees, setBomTrees] = useState<ProductBOMTree[]>([]);
     const [selectedProduct, setSelectedProduct] = useState<string>('');
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
@@ -288,6 +295,24 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
     // 加载数据
     useEffect(() => {
         const loadData = async () => {
+            // 命中模块级缓存则跳过 loadProductList 请求
+            const now = Date.now();
+            if (_bomProductsCache && now - _bomProductsCacheTime < _BOM_PRODUCTS_CACHE_TTL) {
+                console.log('[BOMInventoryTree] 使用缓存的产品列表:', _bomProductsCache.length, '个产品');
+                setProducts(_bomProductsCache);
+                setLoading(false);
+                // 仍需加载第一个产品的 BOM 树（组件级 bomTrees 每次重新挂载都会重置）
+                if (_bomProductsCache.length > 0) {
+                    const firstProduct = _bomProductsCache[0];
+                    const rawIdentity = firstProduct._raw ? {
+                        ...firstProduct._raw,
+                        __primaryKeys: firstProduct._primaryKeys || []
+                    } : undefined;
+                    await handleSelectProduct(firstProduct.product_code, rawIdentity);
+                }
+                return;
+            }
+
             try {
                 setLoading(true);
                 setError(null);
@@ -302,6 +327,9 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
                 }
 
                 console.log('[BOMInventoryTree] 成功加载', productList.length, '个产品');
+                // 写入模块级缓存
+                _bomProductsCache = productList;
+                _bomProductsCacheTime = Date.now();
                 setProducts(productList);
 
                 // 选中第一个产品

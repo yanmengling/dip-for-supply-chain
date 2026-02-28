@@ -137,6 +137,78 @@ export interface QueryOptions {
 }
 
 // ============================================================================
+// 模块级 API 请求缓存（in-flight + 结果缓存）
+// ============================================================================
+
+interface ApiCacheItem {
+  /** 请求 Promise（in-flight 期间和完成后均保留，用于去重和结果复用） */
+  promise: Promise<MetricQueryResult>;
+  /** 缓存时间戳 */
+  timestamp: number;
+}
+
+interface ApiBatchCacheItem {
+  promise: Promise<MetricQueryResult[]>;
+  timestamp: number;
+}
+
+/** 单模型请求缓存 */
+const _apiCache = new Map<string, ApiCacheItem>();
+/** 批量模型请求缓存 */
+const _apiBatchCache = new Map<string, ApiBatchCacheItem>();
+/** 缓存有效期：30 秒（覆盖页面切换时间窗口） */
+const API_CACHE_TTL = 3 * 60 * 1000; // 3 分钟
+
+/**
+ * 将时间戳对齐到 TTL 窗口边界，确保同一窗口内的请求共用同一缓存 key。
+ * 例如 TTL=3min，则 0~179s 的请求 key 相同，180s 后进入新窗口。
+ */
+function _alignTimestamp(ts: number): number {
+  return Math.floor(ts / API_CACHE_TTL) * API_CACHE_TTL;
+}
+
+function _buildCacheKey(
+  modelId: string,
+  request: MetricQueryRequest,
+  options?: QueryOptions
+): string {
+  // 对齐时间戳，消除毫秒级差异导致的缓存穿透
+  const alignedRequest = {
+    ...request,
+    start: _alignTimestamp(request.start),
+    end: _alignTimestamp(request.end),
+  };
+  return `${modelId}|${JSON.stringify(alignedRequest)}|${JSON.stringify(options ?? {})}`;
+}
+
+function _getFromCache(key: string): Promise<MetricQueryResult> | null {
+  const item = _apiCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > API_CACHE_TTL) {
+    _apiCache.delete(key);
+    return null;
+  }
+  return item.promise;
+}
+
+function _getFromBatchCache(key: string): Promise<MetricQueryResult[]> | null {
+  const item = _apiBatchCache.get(key);
+  if (!item) return null;
+  if (Date.now() - item.timestamp > API_CACHE_TTL) {
+    _apiBatchCache.delete(key);
+    return null;
+  }
+  return item.promise;
+}
+
+/** 清除所有 API 缓存（供手动刷新场景使用） */
+export function clearApiCache(): void {
+  _apiCache.clear();
+  _apiBatchCache.clear();
+  if (import.meta.env.DEV) console.log('[metricModelApi] Cache cleared');
+}
+
+// ============================================================================
 // API 服务类
 // ============================================================================
 
@@ -193,6 +265,9 @@ class MetricModelApiService {
   /**
    * 根据指标模型 ID 查询指标数据
    *
+   * 内置 30 秒 in-flight + 结果缓存：相同参数的并发请求共享同一个 Promise，
+   * 请求完成后结果在 30 秒内可复用，避免页面切换时重复请求。
+   *
    * @param modelId - 指标模型 ID
    * @param request - 查询请求参数
    * @param options - 查询选项
@@ -202,15 +277,35 @@ class MetricModelApiService {
     request: MetricQueryRequest,
     options?: QueryOptions
   ): Promise<MetricQueryResult> {
-    const url = `${this.baseUrl}/metric-models/${modelId}${this.buildQueryParams(options)}`;
+    const cacheKey = _buildCacheKey(modelId, request, options);
+    const cached = _getFromCache(cacheKey);
+    if (cached) {
+      if (import.meta.env.DEV) {
+        console.log(`[metricModelApi] Cache hit: ${modelId}`);
+      }
+      return cached;
+    }
 
-    // 使用 POST + X-HTTP-Method-Override: GET 的方式
-    const response = await httpClient.postAsGet<MetricQueryResult>(url, request);
-    return response.data;
+    const url = `${this.baseUrl}/metric-models/${modelId}${this.buildQueryParams(options)}`;
+    const promise = httpClient.postAsGet<MetricQueryResult>(url, request)
+      .then(r => r.data)
+      .catch(err => {
+        // 请求失败时清除缓存，允许下次重试
+        _apiCache.delete(cacheKey);
+        throw err;
+      });
+
+    _apiCache.set(cacheKey, { promise, timestamp: Date.now() });
+    if (import.meta.env.DEV) {
+      console.log(`[metricModelApi] Fetch: ${modelId}`);
+    }
+    return promise;
   }
 
   /**
    * 批量查询多个指标模型（使用逗号分隔的 ID）
+   *
+   * 同样具备 30 秒 in-flight + 结果缓存。
    *
    * @param modelIds - 指标模型 ID 数组
    * @param requests - 查询请求参数数组（与 ID 顺序对应）
@@ -229,11 +324,26 @@ class MetricModelApiService {
       );
     }
 
+    const cacheKey = `batch|${modelIds.join(',')}|${JSON.stringify(requests)}|${JSON.stringify(options ?? {})}`;
+    const cached = _getFromBatchCache(cacheKey);
+    if (cached) {
+      if (import.meta.env.DEV) {
+        console.log(`[metricModelApi] Batch cache hit: ${modelIds.join(',')}`);
+      }
+      return cached;
+    }
+
     const ids = modelIds.join(',');
     const url = `${this.baseUrl}/metric-models/${ids}${this.buildQueryParams(options)}`;
+    const promise = httpClient.postAsGet<MetricQueryResult[]>(url, requests)
+      .then(r => r.data)
+      .catch(err => {
+        _apiBatchCache.delete(cacheKey);
+        throw err;
+      });
 
-    const response = await httpClient.postAsGet<MetricQueryResult[]>(url, requests);
-    return response.data;
+    _apiBatchCache.set(cacheKey, { promise, timestamp: Date.now() });
+    return promise;
   }
 
   /**

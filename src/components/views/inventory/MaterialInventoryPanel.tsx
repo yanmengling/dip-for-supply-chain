@@ -49,14 +49,21 @@ interface MaterialData {
     lastOutboundTime?: string;
 }
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _MAT_INV_CACHE_TTL = 3 * 60 * 1000;
+let _matInvCache: MaterialData[] | null = null;
+let _matInvCacheTime = 0;
+
 interface Props {
     // Props 变为可选，组件内部自行获取数据
     onNavigate?: (view: string) => void;
 }
 
 export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
-    const [materials, setMaterials] = useState<MaterialData[]>([]);
-    const [loading, setLoading] = useState(true);
+    const _initValid =
+        !!(_matInvCache && Date.now() - _matInvCacheTime < _MAT_INV_CACHE_TTL);
+    const [materials, setMaterials] = useState<MaterialData[]>(_initValid ? _matInvCache! : []);
+    const [loading, setLoading] = useState(!_initValid);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const itemsPerPage = 8;
@@ -65,6 +72,14 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
     // 从 API 获取数据
     useEffect(() => {
         async function fetchData() {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求
+            const now = Date.now();
+            if (_matInvCache && now - _matInvCacheTime < _MAT_INV_CACHE_TTL) {
+                setMaterials(_matInvCache);
+                setLoading(false);
+                return;
+            }
+
             try {
                 setLoading(true);
                 setError(null);
@@ -185,6 +200,10 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 const transformedData = Array.from(mergedMap.values());
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.currentStock - a.currentStock);
+
+                // 写入模块级缓存
+                _matInvCache = transformedData;
+                _matInvCacheTime = Date.now();
 
                 setMaterials(transformedData);
             } catch (err) {

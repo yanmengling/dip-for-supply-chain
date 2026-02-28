@@ -9,8 +9,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getMainMaterialsFromSupplierData } from '../../services/materialService';
-import type { MainMaterialSupplier } from '../../types/ontology';
+import { loadSupplier360Scorecards } from '../../services/supplierDataLoader';
 import RiskBadge from './RiskBadge';
 import { AlertCircle, ArrowRight } from 'lucide-react';
 
@@ -26,17 +25,24 @@ const MainMaterialSupplierPanel = ({
 }: MainMaterialSupplierPanelProps) => {
 
 
-  const [materials, setMaterials] = useState<MainMaterialSupplier[]>([]);
+  const [materials, setMaterials] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [limit] = useState(5);
 
-  // 根据模式加载数据
   useEffect(() => {
     const loadMaterials = async () => {
       setLoading(true);
       try {
-        const materialsData = await getMainMaterialsFromSupplierData();
-        const data = materialsData.slice(0, limit);
+        const scorecards = await loadSupplier360Scorecards();
+        const data = scorecards.slice(0, 5).map((sc, idx) => ({
+          rank: idx + 1,
+          supplierId: sc.supplierId,
+          supplierName: sc.supplierName,
+          qualityRating: sc.dimensions.qualityRating,
+          riskRating: sc.dimensions.riskRating,
+          onTimeDeliveryRate: sc.dimensions.onTimeDeliveryRate,
+          annualPurchaseAmount: sc.dimensions.annualPurchaseAmount,
+          riskCoefficient: sc.dimensions.riskRating,
+        }));
         setMaterials(data);
       } catch (error) {
         console.error('Failed to load main materials:', error);
@@ -47,7 +53,7 @@ const MainMaterialSupplierPanel = ({
     };
 
     loadMaterials();
-  }, [limit]);
+  }, []);
 
   if (loading) {
     return (
@@ -70,13 +76,13 @@ const MainMaterialSupplierPanel = ({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800">主要物料供应商</h2>
-        <div className="text-sm text-slate-500">显示前 {limit} 个物料（按年度采购额排序）</div>
+        <div className="text-sm text-slate-500">显示前 5 个供应商（按采购额排序）</div>
       </div>
 
       <div className="space-y-3">
         {materials.map((material) => (
           <div
-            key={`${material.materialCode}-${material.supplierId}`}
+            key={material.supplierId}
             className="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"
           >
             <div className="flex items-center gap-4 flex-1">
@@ -85,23 +91,19 @@ const MainMaterialSupplierPanel = ({
               </span>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <p className="font-medium text-slate-800">{material.materialName}</p>
-                  <span className="text-sm text-slate-500 font-mono">{material.materialCode}</span>
+                  <button
+                    onClick={() => onSupplierClick?.(material.supplierId)}
+                    className="font-medium text-indigo-600 hover:text-indigo-700 hover:underline"
+                  >
+                    {material.supplierName}
+                  </button>
+                  <span className="text-sm text-slate-500 font-mono">{material.supplierId}</span>
                   <RiskBadge
                     riskLevel={material.riskCoefficient >= 30 ? 'high' :
                       material.riskCoefficient >= 20 ? 'medium' : 'low'}
                   />
                 </div>
                 <p className="text-sm text-slate-600">
-                  供应商: <button
-                    onClick={() => onSupplierClick?.(material.supplierId)}
-                    className="text-indigo-600 hover:text-indigo-700 hover:underline font-medium"
-                  >
-                    {material.supplierName}
-                  </button>
-                  {' | '}
-                  库存量: {material.currentStock.toLocaleString()}
-                  {' | '}
                   质量评级: {material.qualityRating}
                   {' | '}
                   风险评级: {material.riskRating}
@@ -110,28 +112,10 @@ const MainMaterialSupplierPanel = ({
                   {' | '}
                   年度采购额: ¥{(material.annualPurchaseAmount / 10000).toFixed(0)}万
                 </p>
-                {material.qualityEvents.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {material.qualityEvents.slice(0, 3).map((event) => (
-                      <span
-                        key={event.eventId}
-                        className={`text-xs px-2 py-0.5 rounded ${event.severity === 'critical' ? 'bg-red-100 text-red-700' :
-                          event.severity === 'high' ? 'bg-orange-100 text-orange-700' :
-                            event.severity === 'medium' ? 'bg-amber-100 text-amber-700' :
-                              'bg-slate-100 text-slate-700'
-                          }`}
-                      >
-                        {event.eventType === 'defect' ? '缺陷' :
-                          event.eventType === 'delay' ? '延迟' :
-                            event.eventType === 'rejection' ? '拒收' : '投诉'}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
             <button
-              onClick={() => onSwitchSupplier?.(material.materialCode, material.supplierId)}
+              onClick={() => onSwitchSupplier?.(material.supplierId, material.supplierId)}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 whitespace-nowrap ml-4"
             >
               切换备选供应商

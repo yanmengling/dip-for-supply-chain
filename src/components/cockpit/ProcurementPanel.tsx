@@ -13,25 +13,45 @@ import { procurementService } from '../../services/procurementService';
 import type { ProcurementSummary } from '../../utils/cockpitDataService';
 import { generateProcurementRecommendations } from '../../utils/recommendationService';
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _PROCUREMENT_CACHE_TTL = 3 * 60 * 1000;
+let _procurementCache: ProcurementSummary | null = null;
+let _procurementCacheTime = 0;
+
+const _EMPTY_SUMMARY: ProcurementSummary = {
+  monthlyPlannedTotal: 0,
+  monthlyPurchasedTotal: 0,
+  monthlyInTransitTotal: 0,
+  top5Materials: [],
+};
+
 interface Props {
   onNavigate?: (view: string) => void;
 }
 
 const ProcurementPanel = ({ onNavigate: _onNavigate }: Props) => {
-  const [summary, setSummary] = useState<ProcurementSummary>({
-    monthlyPlannedTotal: 0,
-    monthlyPurchasedTotal: 0,
-    monthlyInTransitTotal: 0,
-    top5Materials: []
-  });
-
-  const [loading, setLoading] = useState<boolean>(true);
+  const _initValid =
+    !!(_procurementCache && Date.now() - _procurementCacheTime < _PROCUREMENT_CACHE_TTL);
+  const [summary, setSummary] = useState<ProcurementSummary>(
+    _initValid ? _procurementCache! : _EMPTY_SUMMARY
+  );
+  const [loading, setLoading] = useState<boolean>(!_initValid);
 
   useEffect(() => {
     const fetchData = async () => {
+      // 命中模块级缓存则直接渲染，跳过所有 API 请求
+      const now = Date.now();
+      if (_procurementCache && now - _procurementCacheTime < _PROCUREMENT_CACHE_TTL) {
+        setSummary(_procurementCache);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         const data = await procurementService.getProcurementSummary();
+        _procurementCache = data;
+        _procurementCacheTime = Date.now();
         setSummary(data);
       } catch (error) {
         console.error('Failed to fetch procurement summary:', error);

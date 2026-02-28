@@ -16,6 +16,11 @@ interface EnrichedDeliveryOrder extends DeliveryOrder {
 }
 import OrderDetailModal from './OrderDetailModal';
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _DELIVERY_CACHE_TTL = 3 * 60 * 1000;
+let _deliveryCache: DeliveryOrder[] | null = null;
+let _deliveryCacheTime = 0;
+
 
 
 interface Props {
@@ -24,8 +29,10 @@ interface Props {
 
 const DeliveryViewEnhanced = (_props: Props) => {
   // 数据状态
-  const [allOrders, setAllOrders] = useState<DeliveryOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const _initValid =
+    !!(_deliveryCache && Date.now() - _deliveryCacheTime < _DELIVERY_CACHE_TTL);
+  const [allOrders, setAllOrders] = useState<DeliveryOrder[]>(_initValid ? _deliveryCache! : []);
+  const [loading, setLoading] = useState(!_initValid);
   const [error, setError] = useState<string | null>(null);
 
   // 筛选和搜索状态
@@ -52,10 +59,21 @@ const DeliveryViewEnhanced = (_props: Props) => {
   // 加载数据 - 根据模式切换数据源
   useEffect(() => {
     const fetchData = async () => {
+      // 命中模块级缓存则直接渲染，跳过所有 API 请求
+      const now = Date.now();
+      if (_deliveryCache && now - _deliveryCacheTime < _DELIVERY_CACHE_TTL) {
+        setAllOrders(_deliveryCache);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
         // 根据模式加载对应数据
         const orders = await loadDeliveryOrders();
+        // 写入模块级缓存
+        _deliveryCache = orders;
+        _deliveryCacheTime = Date.now();
         setAllOrders(orders);
         setError(null);
         // 模式切换时重置分页
@@ -69,7 +87,6 @@ const DeliveryViewEnhanced = (_props: Props) => {
       }
     };
 
-    fetchData();
     fetchData();
   }, []);
 

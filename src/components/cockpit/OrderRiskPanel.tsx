@@ -17,21 +17,38 @@ import {
 import { loadDeliveryOrders, calculateDeliveryStats } from '../../services/deliveryDataService';
 import type { DeliveryOrder } from '../../types/ontology';
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _ORDER_CACHE_TTL = 3 * 60 * 1000;
+let _orderCache: DeliveryOrder[] | null = null;
+let _orderCacheTime = 0;
+
 
 interface Props {
   onNavigate?: (view: string) => void;
 }
 
 const OrderRiskPanel = ({ onNavigate }: Props) => {
-  const [orders, setOrders] = useState<DeliveryOrder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const _initValid =
+    !!(_orderCache && Date.now() - _orderCacheTime < _ORDER_CACHE_TTL);
+  const [orders, setOrders] = useState<DeliveryOrder[]>(_initValid ? _orderCache! : []);
+  const [loading, setLoading] = useState(!_initValid);
 
   // 加载订单数据
   useEffect(() => {
     async function fetchOrders() {
+      // 命中模块级缓存则直接渲染，跳过所有 API 请求
+      const now = Date.now();
+      if (_orderCache && now - _orderCacheTime < _ORDER_CACHE_TTL) {
+        setOrders(_orderCache);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       try {
         const data = await loadDeliveryOrders();
+        _orderCache = data;
+        _orderCacheTime = Date.now();
         setOrders(data);
       } catch (error) {
         console.error('Failed to load orders:', error);
@@ -39,7 +56,6 @@ const OrderRiskPanel = ({ onNavigate }: Props) => {
         setLoading(false);
       }
     }
-    fetchOrders();
     fetchOrders();
   }, []);
 

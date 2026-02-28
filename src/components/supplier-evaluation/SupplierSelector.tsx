@@ -9,9 +9,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getSuppliersByPurchaseAmount } from '../../services/supplierService';
 import type { Supplier } from '../../types/ontology';
-
 import { loadSupplierList } from '../../services/supplierDataLoader';
 
 interface SupplierSelectorProps {

@@ -11,9 +11,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getSupplierComparison } from '../../services/supplierService';
-import type { SupplierComparison } from '../../types/ontology';
-import RiskBadge from './RiskBadge';
+import { loadSupplierList } from '../../services/supplierDataLoader';
 import { X, Check, AlertTriangle } from 'lucide-react';
 
 interface SupplierComparisonModalProps {
@@ -24,6 +22,11 @@ interface SupplierComparisonModalProps {
   onConfirm: (newSupplierId: string) => void;
 }
 
+interface LocalComparison {
+  currentSupplier: { supplierId: string; supplierName: string; totalPurchaseAmount: number };
+  alternatives: Array<{ supplierId: string; supplierName: string; totalPurchaseAmount: number }>;
+}
+
 const SupplierComparisonModal = ({
   isOpen,
   onClose,
@@ -31,29 +34,39 @@ const SupplierComparisonModal = ({
   currentSupplierId,
   onConfirm,
 }: SupplierComparisonModalProps) => {
-  const [comparison, setComparison] = useState<SupplierComparison | null>(null);
+  const [comparison, setComparison] = useState<LocalComparison | null>(null);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState<1 | 2>(1);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && materialCode && currentSupplierId) {
-      console.log('SupplierComparisonModal: Loading comparison for', materialCode, currentSupplierId);
+    if (isOpen && currentSupplierId) {
       setLoading(true);
-      // Use getSupplierComparison directly
-      getSupplierComparison(currentSupplierId).then(data => {
-        console.log('SupplierComparisonModal: Received comparison data:', data);
-        setComparison(data);
+      loadSupplierList().then(suppliers => {
+        const current = suppliers.find(s => s.supplierId === currentSupplierId);
+        const alternatives = suppliers.filter(s => s.supplierId !== currentSupplierId);
+        setComparison({
+          currentSupplier: {
+            supplierId: currentSupplierId,
+            supplierName: current?.supplierName || currentSupplierId,
+            totalPurchaseAmount: current?.totalPurchaseAmount || 0,
+          },
+          alternatives: alternatives.map(s => ({
+            supplierId: s.supplierId,
+            supplierName: s.supplierName,
+            totalPurchaseAmount: s.totalPurchaseAmount || 0,
+          })),
+        });
         setLoading(false);
         setStep(1);
         setSelectedSupplierId(null);
       }).catch(error => {
-        console.error('SupplierComparisonModal: Failed to load supplier comparison:', error);
+        console.error('SupplierComparisonModal: Failed to load suppliers:', error);
         setComparison(null);
         setLoading(false);
       });
     }
-  }, [isOpen, materialCode, currentSupplierId]);
+  }, [isOpen, currentSupplierId]);
 
   if (!isOpen) return null;
 
@@ -96,24 +109,21 @@ const SupplierComparisonModal = ({
                 <div className="bg-slate-50 p-4 rounded-lg">
                   <div className="font-semibold text-slate-800">{comparison.currentSupplier.supplierName}</div>
                   <div className="text-sm text-slate-500 mt-1">
-                    {comparison.currentSupplier.materialName} ({comparison.currentSupplier.materialCode})
-                  </div>
-                  <div className="mt-2">
-                    <RiskBadge riskLevel={comparison.currentSupplier.scorecard.riskAssessment.overallRiskLevel} />
+                    年度采购额: ¥{(comparison.currentSupplier.totalPurchaseAmount / 10000).toFixed(0)}万
                   </div>
                 </div>
               </div>
 
               <div className="mb-6">
                 <div className="text-sm text-slate-500 mb-3">备选供应商</div>
-                {comparison.alternativeSuppliers.length === 0 ? (
+                {comparison.alternatives.length === 0 ? (
                   <div className="text-center py-8 text-slate-400">
                     <AlertTriangle className="mx-auto mb-2" size={24} />
                     <p>暂无备选供应商</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {comparison.alternativeSuppliers.map((alt) => (
+                    {comparison.alternatives.map((alt) => (
                       <div
                         key={alt.supplierId}
                         className="border border-slate-200 rounded-lg p-4 hover:border-indigo-300 hover:bg-indigo-50 transition-colors cursor-pointer"
@@ -122,10 +132,8 @@ const SupplierComparisonModal = ({
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <div className="font-semibold text-slate-800">{alt.supplierName}</div>
-                            <div className="text-sm text-slate-500 mt-1">{alt.recommendationReason}</div>
-                            <div className="mt-2 flex items-center gap-4 text-xs text-slate-600">
-                              <span>相似度: {alt.similarityScore}%</span>
-                              <RiskBadge riskLevel={alt.comparison.riskLevel} size="sm" />
+                            <div className="text-sm text-slate-500 mt-1">
+                              年度采购额: ¥{(alt.totalPurchaseAmount / 10000).toFixed(0)}万
                             </div>
                           </div>
                           <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">
@@ -137,15 +145,6 @@ const SupplierComparisonModal = ({
                   </div>
                 )}
               </div>
-
-              {comparison.affectedOrders.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                  <div className="text-sm font-semibold text-amber-800 mb-2">受影响订单</div>
-                  <div className="text-xs text-amber-700">
-                    {comparison.affectedOrders.length} 个订单可能受到影响
-                  </div>
-                </div>
-              )}
             </>
           ) : (
             <div className="space-y-6">
@@ -155,10 +154,9 @@ const SupplierComparisonModal = ({
                   <div>
                     <div className="font-semibold text-blue-800 mb-1">确认切换供应商</div>
                     <div className="text-sm text-blue-700">
-                      您即将将 {comparison.currentSupplier.materialName} 的供应商从{' '}
-                      <strong>{comparison.currentSupplier.supplierName}</strong> 切换为{' '}
+                      即将从 <strong>{comparison.currentSupplier.supplierName}</strong> 切换为{' '}
                       <strong>
-                        {comparison.alternativeSuppliers.find(a => a.supplierId === selectedSupplierId)?.supplierName}
+                        {comparison.alternatives.find(a => a.supplierId === selectedSupplierId)?.supplierName}
                       </strong>
                     </div>
                   </div>

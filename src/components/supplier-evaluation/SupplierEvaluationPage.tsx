@@ -14,8 +14,7 @@ import { MessageSquare } from 'lucide-react';
 import MainMaterialSupplierPanel from './MainMaterialSupplierPanel';
 import SupplierComparisonModal from './SupplierComparisonModal';
 import Supplier360Scorecard from './Supplier360Scorecard';
-import { getMainMaterialsFromSupplierData } from '../../services/materialService';
-import { supplier360ScorecardsData } from '../../utils/entityConfigService';
+import { loadSupplierList } from '../../services/supplierDataLoader';
 
 
 const SupplierEvaluationPage = ({ toggleCopilot }: { toggleCopilot?: () => void } = {}) => {
@@ -27,23 +26,14 @@ const SupplierEvaluationPage = ({ toggleCopilot }: { toggleCopilot?: () => void 
   const [comparisonSupplierId, setComparisonSupplierId] = useState<string | null>(null);
   const [_sourcingModalOpen, setSourcingModalOpen] = useState(false);
 
-  // Set default supplier on mount or mode change
+  // Set default supplier on mount
   useEffect(() => {
     const setDefaultSupplier = async () => {
-      // Load supplier data from API
-      const materialsData = await getMainMaterialsFromSupplierData();
-      const materials = materialsData.slice(0, 5);
-
-      if (materials.length > 0) {
-        // 如果已选供应商不在当前列表中（例如切换模式后），则重置为第一个
-        const currentSelectedInList = materials.some(m => m.supplierId === selectedSupplierId);
-
+      const suppliers = await loadSupplierList();
+      if (suppliers.length > 0) {
+        const currentSelectedInList = suppliers.some(s => s.supplierId === selectedSupplierId);
         if (!selectedSupplierId || !currentSelectedInList) {
-          const firstSupplierId = materials[0].supplierId;
-
-          if (materials.length > 0) {
-            setSelectedSupplierId(materials[0].supplierId);
-          }
+          setSelectedSupplierId(suppliers[0].supplierId);
         }
       }
     };
@@ -95,14 +85,9 @@ const SupplierEvaluationPage = ({ toggleCopilot }: { toggleCopilot?: () => void 
             supplierId={selectedSupplierId}
             onSupplierChange={handleSupplierClick}
             onSwitchSupplier={async () => {
-              // Find material code for this supplier
-              // Load supplier data
-              const materialsData = await getMainMaterialsFromSupplierData();
-              const materials = materialsData.slice(0, 5);
-              const material = materials.find(m => m.supplierId === selectedSupplierId);
-              if (material) {
-                setComparisonMaterialCode(material.materialCode);
-                setComparisonSupplierId(selectedSupplierId || '');
+              if (selectedSupplierId) {
+                setComparisonMaterialCode(selectedSupplierId);
+                setComparisonSupplierId(selectedSupplierId);
                 setComparisonModalOpen(true);
               }
             }}

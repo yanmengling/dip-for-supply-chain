@@ -18,7 +18,10 @@ import { loadProductData, type ProductInventoryResult } from '../../services/pro
 const getProductInventoryModelId = () =>
     apiConfigService.getMetricModelId('mm_product_inventory_optimization') || 'd58keb5g5lk40hvh48og';
 
-
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+const _PRODUCT_AGENT_CACHE_TTL = 3 * 60 * 1000;
+let _productAgentCache: ProductInventoryResult[] | null = null;
+let _productAgentCacheTime = 0;
 
 // ============================================================================
 // 主组件
@@ -32,8 +35,11 @@ interface Props {
 const PAGE_SIZE = 10;
 
 const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
-    const [products, setProducts] = useState<ProductInventoryResult[]>([]);
-    const [loading, setLoading] = useState(true);
+    const _initCached =
+        _productAgentCache && Date.now() - _productAgentCacheTime < _PRODUCT_AGENT_CACHE_TTL
+            ? _productAgentCache : null;
+    const [products, setProducts] = useState<ProductInventoryResult[]>(_initCached ?? []);
+    const [loading, setLoading] = useState(!_initCached);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
 
@@ -41,6 +47,16 @@ const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
         let isMounted = true;
 
         async function fetchData() {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求
+            const now = Date.now();
+            if (_productAgentCache && now - _productAgentCacheTime < _PRODUCT_AGENT_CACHE_TTL) {
+                if (isMounted) {
+                    setProducts(_productAgentCache);
+                    setLoading(false);
+                }
+                return;
+            }
+
             try {
                 setLoading(true);
                 setError(null);
@@ -183,6 +199,9 @@ const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
                 resultList.sort((a, b) => b.calculatedStock - a.calculatedStock);
 
                 console.log('[产品库存智能体] 最终结果数量:', resultList.length);
+                // 写入模块级缓存
+                _productAgentCache = resultList;
+                _productAgentCacheTime = Date.now();
                 if (!isMounted) return;
                 setProducts(resultList);
             } catch (err) {

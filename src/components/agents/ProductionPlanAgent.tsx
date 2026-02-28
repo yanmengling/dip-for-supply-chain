@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Loader2, BarChart3, AlertCircle } from 'lucide-react';
 import {
     loadProductionPlanData,
@@ -6,6 +6,13 @@ import {
     type ProductionPlan,
     type ProductionStats,
 } from '../../services/productionPlanCalculator';
+
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
+// 同时缓存 plans 和 stats，避免 calculateProductionStats 的额外 API 请求
+const _PLAN_CACHE_TTL = 3 * 60 * 1000;
+interface _PlanCacheEntry { plans: ProductionPlan[]; stats: ProductionStats }
+let _planCache: _PlanCacheEntry | null = null;
+let _planCacheTime = 0;
 
 /**
  * 格式化日期字符串显示
@@ -32,20 +39,42 @@ function formatDateString(dateStr: string): string {
 }
 
 export const ProductionPlanAgent = () => {
-    const [plans, setPlans] = useState<ProductionPlan[]>([]);
-    const [loading, setLoading] = useState(true);
+    const _initValid =
+        !!(_planCache && Date.now() - _planCacheTime < _PLAN_CACHE_TTL);
+    const [plans, setPlans] = useState<ProductionPlan[]>(_initValid ? _planCache!.plans : []);
+    const [stats, setStats] = useState<ProductionStats | null>(_initValid ? _planCache!.stats : null);
+    const [loading, setLoading] = useState(!_initValid);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         const loadData = async () => {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求（含 calculateProductionStats 的额外请求）
+            const now = Date.now();
+            if (_planCache && now - _planCacheTime < _PLAN_CACHE_TTL) {
+                setPlans(_planCache.plans);
+                setStats(_planCache.stats);
+                setLoading(false);
+                return;
+            }
+
             try {
                 setLoading(true);
                 const data = await loadProductionPlanData();
                 setPlans(data);
                 setError(null);
+
+                if (data.length > 0) {
+                    const calculatedStats = await calculateProductionStats(data);
+                    _planCache = { plans: data, stats: calculatedStats };
+                    _planCacheTime = Date.now();
+                    setStats(calculatedStats);
+                } else {
+                    setStats(null);
+                }
             } catch (err) {
                 console.error('[ProductionPlanAgent] 加载数据失败:', err);
                 setError('加载生产计划数据失败');
+                setStats(null);
             } finally {
                 setLoading(false);
             }
@@ -53,28 +82,6 @@ export const ProductionPlanAgent = () => {
 
         loadData();
     }, []);
-
-    // 计算统计数据（异步）
-    const [stats, setStats] = useState<ProductionStats | null>(null);
-
-    useEffect(() => {
-        if (plans.length === 0) {
-            setStats(null);
-            return;
-        }
-
-        const loadStats = async () => {
-            try {
-                const calculatedStats = await calculateProductionStats(plans);
-                setStats(calculatedStats);
-            } catch (error) {
-                console.error('[ProductionPlanAgent] 计算统计数据失败:', error);
-                setStats(null);
-            }
-        };
-
-        loadStats();
-    }, [plans]);
 
     if (loading) {
         return (

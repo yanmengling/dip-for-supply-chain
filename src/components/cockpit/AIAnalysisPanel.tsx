@@ -12,6 +12,11 @@ import { fetchWithAuth } from '../../api/httpClient';
 
 // AI Analysis Panel - 显示来自自动化工作流的AI分析报告
 
+// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重新请求）────────────────────
+const _AI_ANALYSIS_CACHE_TTL = 3 * 60 * 1000;
+let _aiAnalysisCache: string | null = null;
+let _aiAnalysisCacheTime = 0;
+
 /**
  * Get DAG ID from configuration service with fallback
  */
@@ -43,9 +48,14 @@ const AIAnalysisPanel = () => {
 
 
     // ============ AI 分析报告状态 ============
-    const [brainModeAnalysis, setBrainModeAnalysis] = useState<string[]>([]);
-    const [brainModeMarkdown, setBrainModeMarkdown] = useState<string>(''); // Raw markdown for rendering
-    const [brainModeLoading, setBrainModeLoading] = useState(false);
+    const _initMd =
+        _aiAnalysisCache && Date.now() - _aiAnalysisCacheTime < _AI_ANALYSIS_CACHE_TTL
+            ? _aiAnalysisCache : null;
+    const [brainModeAnalysis, setBrainModeAnalysis] = useState<string[]>(
+        _initMd ? _initMd.split('\n').filter(l => l.trim().length > 0) : []
+    );
+    const [brainModeMarkdown, setBrainModeMarkdown] = useState<string>(_initMd ?? ''); // Raw markdown for rendering
+    const [brainModeLoading, setBrainModeLoading] = useState(!_initMd);
     const [isTriggering, setIsTriggering] = useState(false);
     const [fetchTrigger, setFetchTrigger] = useState(0); // Used to trigger refetch
 
@@ -55,6 +65,17 @@ const AIAnalysisPanel = () => {
         let isActive = true;
 
         const fetchAnalysis = async () => {
+            // 命中模块级缓存则直接渲染，跳过所有 API 请求
+            const _now = Date.now();
+            if (_aiAnalysisCache && _now - _aiAnalysisCacheTime < _AI_ANALYSIS_CACHE_TTL) {
+                if (isActive) {
+                    setBrainModeMarkdown(_aiAnalysisCache);
+                    setBrainModeAnalysis(_aiAnalysisCache.split('\n').filter(l => l.trim().length > 0));
+                    setBrainModeLoading(false);
+                }
+                return;
+            }
+
             try {
                 setBrainModeLoading(true);
 
@@ -185,6 +206,10 @@ const AIAnalysisPanel = () => {
 
                         console.log('[AIAnalysisPanel] Extracted analysis text:', analysisText.substring(0, 200) + '...');
 
+                        // 写入模块级缓存
+                        _aiAnalysisCache = analysisText;
+                        _aiAnalysisCacheTime = Date.now();
+
                         // Store raw markdown for rendering
                         setBrainModeMarkdown(analysisText);
                         // Split by newline for Word export
@@ -235,6 +260,9 @@ const AIAnalysisPanel = () => {
     const regenerateAnalysis = useCallback(async () => {
         try {
             setIsTriggering(true);
+            // 清除模块级缓存，确保后续 fetchAnalysis 能真正重新请求
+            _aiAnalysisCache = null;
+            _aiAnalysisCacheTime = 0;
             setBrainModeMarkdown('');
             setBrainModeAnalysis([]);
 

@@ -20,11 +20,38 @@ interface RequestCacheItem {
   timestamp: number;
 }
 
-/** 全局请求缓存 Map */
+/** 全局请求缓存 Map（存储 Promise，用于去重并发请求） */
 const requestCache = new Map<string, RequestCacheItem>();
 
-/** 缓存有效期 (毫秒) */
-const CACHE_TTL = 5000; // 5秒内的重复请求使用缓存
+/** 已解析结果缓存（存储实际数据，用于同步初始化 hook 状态，消除 loading 闪烁） */
+interface ResolvedCacheItem {
+  result: MetricQueryResult;
+  timestamp: number;
+}
+const resolvedValueCache = new Map<string, ResolvedCacheItem>();
+
+/** 缓存有效期 (毫秒)
+ *  与 API 层（metricModelApi）的缓存对齐，覆盖页面切换的时间窗口。
+ *  即使快速在页面间来回切换，3 分钟内同参数的请求只发起一次。
+ */
+const CACHE_TTL = 3 * 60 * 1000; // 3 分钟
+
+/**
+ * 构建缓存 Key（将 start/end 对齐到 TTL 窗口，保证同一窗口内 key 稳定）
+ */
+function buildCacheKey(
+  modelId: string,
+  instant: boolean,
+  startRaw: number | undefined,
+  endRaw: number | undefined,
+  step: string,
+): string {
+  const alignedNow = Math.floor(Date.now() / CACHE_TTL) * CACHE_TTL;
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const s = startRaw !== undefined ? Math.floor(startRaw / CACHE_TTL) * CACHE_TTL : alignedNow - ONE_DAY;
+  const e = endRaw !== undefined ? Math.floor(endRaw / CACHE_TTL) * CACHE_TTL : alignedNow;
+  return `${modelId}-${instant}-${s}-${e}-${step}`;
+}
 
 /**
  * 清理过期的缓存
@@ -34,12 +61,15 @@ function cleanExpiredCache(): void {
   const keysToDelete: string[] = [];
 
   requestCache.forEach((item, key) => {
-    if (now - item.timestamp > CACHE_TTL) {
-      keysToDelete.push(key);
-    }
+    if (now - item.timestamp > CACHE_TTL) keysToDelete.push(key);
   });
-
   keysToDelete.forEach(key => requestCache.delete(key));
+
+  const resolvedKeysToDelete: string[] = [];
+  resolvedValueCache.forEach((item, key) => {
+    if (now - item.timestamp > CACHE_TTL) resolvedKeysToDelete.push(key);
+  });
+  resolvedKeysToDelete.forEach(key => resolvedValueCache.delete(key));
 }
 
 // 定期清理过期缓存 (每10秒)
@@ -226,10 +256,18 @@ export function useMetricData(
     transform = defaultTransform,
   } = options;
 
-  const [value, setValue] = useState<number | null>(null);
-  const [loading, setLoading] = useState(immediate);
+  // 同步读取已解析缓存，避免页面切换时的 loading 闪烁和重复请求
+  const _initKey = buildCacheKey(modelId, instant, start, end, step);
+  const _initResolved = resolvedValueCache.get(_initKey);
+  const _initValid = !!(_initResolved && Date.now() - _initResolved.timestamp < CACHE_TTL);
+  const _initValue = _initValid ? (transform ?? defaultTransform)(_initResolved!.result) : null;
+
+  const [value, setValue] = useState<number | null>(_initValue);
+  const [loading, setLoading] = useState(!_initValid && immediate);
   const [error, setError] = useState<string | null>(null);
-  const [rawData, setRawData] = useState<MetricQueryResult | undefined>();
+  const [rawData, setRawData] = useState<MetricQueryResult | undefined>(
+    _initValid ? _initResolved!.result : undefined
+  );
 
   // 使用 ref 存储 transform 函数，避免引用变化导致的无限循环
   const transformRef = useRef(transform);
@@ -260,23 +298,32 @@ export function useMetricData(
     abortControllerRef.current = new AbortController();
     const currentController = abortControllerRef.current;
 
-    // 默认时间范围：最近1天
     const now = Date.now();
-    const alignedEnd = Math.floor(now / 60000) * 60000;
+
+    // 生成缓存键（start/end 对齐到 TTL 窗口，保证同一窗口内 key 稳定）
+    const cacheKey = buildCacheKey(modelId, instantMemo, startMemo, endMemo, stepMemo);
+
+    // 计算实际查询时间范围（与 key 对齐，避免传给 API 的时间戳每次不同）
+    const alignedNow = Math.floor(now / CACHE_TTL) * CACHE_TTL;
     const ONE_DAY = 24 * 60 * 60 * 1000;
+    const queryStart = startMemo !== undefined
+      ? Math.floor(startMemo / CACHE_TTL) * CACHE_TTL
+      : alignedNow - ONE_DAY;
+    const queryEnd = endMemo !== undefined
+      ? Math.floor(endMemo / CACHE_TTL) * CACHE_TTL
+      : alignedNow;
 
-    const defaultRange = {
-      start: alignedEnd - ONE_DAY,
-      end: alignedEnd
-    };
+    // 先检查已解析缓存（同步结果），命中则直接返回，无需 loading
+    const resolvedCached = resolvedValueCache.get(cacheKey);
+    if (resolvedCached && now - resolvedCached.timestamp < CACHE_TTL) {
+      if (currentController.signal.aborted || !isMountedRef.current) return;
+      setRawData(resolvedCached.result);
+      setValue(transformRef.current(resolvedCached.result));
+      setLoading(false);
+      return;
+    }
 
-    const queryStart = startMemo ?? defaultRange.start;
-    const queryEnd = endMemo ?? defaultRange.end;
-
-    // 生成缓存键 (基于请求参数)
-    const cacheKey = `${modelId}-${instantMemo}-${queryStart}-${queryEnd}-${stepMemo}`;
-
-    // 检查缓存中是否有相同的请求
+    // 检查 in-flight 请求缓存（Promise 缓存，去重并发）
     const cached = requestCache.get(cacheKey);
     if (cached && (now - cached.timestamp) < CACHE_TTL) {
       if (import.meta.env.DEV) {
@@ -289,6 +336,7 @@ export function useMetricData(
           return;
         }
 
+        resolvedValueCache.set(cacheKey, { result, timestamp: now });
         setRawData(result);
         const transformedValue = transformRef.current(result);
         setValue(transformedValue);
@@ -335,6 +383,8 @@ export function useMetricData(
         return;
       }
 
+      // 写入已解析缓存
+      resolvedValueCache.set(cacheKey, { result, timestamp: now });
       setRawData(result);
       const transformedValue = transformRef.current(result);
       setValue(transformedValue);
@@ -530,7 +580,11 @@ export function useDimensionMetricData(
     setError(null);
 
     try {
-      const defaultRange = createLastDaysRange(1);
+      // 对齐到 TTL 窗口（3分钟），保证同一窗口内切换页面 key 不变
+      const now = Date.now();
+      const alignedEnd = Math.floor(now / CACHE_TTL) * CACHE_TTL;
+      const ONE_DAY = 24 * 60 * 60 * 1000;
+      const defaultRange = { start: alignedEnd - ONE_DAY, end: alignedEnd };
       const queryStart = startMemo ?? defaultRange.start;
       const queryEnd = endMemo ?? defaultRange.end;
 
@@ -550,7 +604,6 @@ export function useDimensionMetricData(
 
       // 生成缓存键 (基于请求参数)
       const cacheKey = `${modelId}-${instantMemo}-${queryStart}-${queryEnd}-${stepMemo}-${dimensionsKey}`;
-      const now = Date.now();
 
       // 检查缓存中是否有相同的请求
       const cached = requestCache.get(cacheKey);
@@ -672,9 +725,12 @@ export function useDimensionMetricData(
       const errorMessage = err instanceof Error ? err.message : '获取指标数据失败';
       setError(errorMessage);
       console.error(`[useDimensionMetricData] 获取指标 ${modelId} 失败:`, err);
-      // 请求失败时从缓存中移除
-      const defaultRange = createLastDaysRange(1);
-      const cacheKey = `${modelId}-${instantMemo}-${startMemo ?? defaultRange.start}-${endMemo ?? defaultRange.end}-${stepMemo}-${dimensionsKey}`;
+      // 请求失败时从缓存中移除（key 需与创建时保持一致：TTL 窗口对齐）
+      const alignedEndErr = Math.floor(Date.now() / CACHE_TTL) * CACHE_TTL;
+      const ONE_DAY_ERR = 24 * 60 * 60 * 1000;
+      const errStart = startMemo ?? (alignedEndErr - ONE_DAY_ERR);
+      const errEnd = endMemo ?? alignedEndErr;
+      const cacheKey = `${modelId}-${instantMemo}-${errStart}-${errEnd}-${stepMemo}-${dimensionsKey}`;
       requestCache.delete(cacheKey);
     } finally {
       if (isMountedRef.current) {
