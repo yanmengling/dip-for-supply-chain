@@ -48,7 +48,7 @@ interface ChartDataPoint {
 interface DataAnalysis {
     startPoint: number;           // 起始分析点
     startMaterial: string;        // 起始物料名称
-    startStock: number;           // 起始物料库存
+    startStockValue: number;      // 起始物料库存金额
     optimalPoint: number;         // 最优生产节点
     optimalReason: string;        // 最优原因
     linearRelation: boolean;      // 是否线性关系
@@ -94,7 +94,7 @@ function analyzeData(
         return {
             startPoint: 500,
             startMaterial: '未知物料',
-            startStock: 0,
+            startStockValue: 0,
             optimalPoint: 1000,
             optimalReason: '平衡补料与呆滞',
             linearRelation: true,
@@ -109,8 +109,7 @@ function analyzeData(
     // 获取最高价值物料信息
     const topMaterial = topMaterials[0];
     const startMaterial = topMaterial?.name || '高价值物料';
-    // 使用库存金额推算数量（假设平均单价约100元/单位）
-    const startStock = topMaterial ? Math.floor(topMaterial.stockValue / 100) : 500;
+    const startStockValue = topMaterial?.stockValue || 0;
 
     // 计算最优生产节点 - 基于边际效益分析
     let optimalPoint = startPoint;
@@ -166,7 +165,7 @@ function analyzeData(
     return {
         startPoint,
         startMaterial,
-        startStock,
+        startStockValue,
         optimalPoint,
         optimalReason: withMOQ ? '呆滞消耗边际效益最优' : '投入产出平衡点',
         linearRelation,
@@ -200,13 +199,11 @@ const CustomStyleChart: React.FC<CustomStyleChartProps> = ({
     const maxReplenishment = Math.max(...data.map(d => d.replenishment), 1);
     const maxStagnant = Math.max(...data.map(d => d.remainingStagnant), 1);
 
-    // 找到最优点的数据
-    const optimalData = data.find(d => d.quantity === analysis.optimalPoint) || data[Math.floor(data.length / 2)];
-
     // 计算关键数据
     const minReplenishment = Math.min(...data.map(d => d.replenishment));
+    // 起始点已消耗的呆滞料金额 = 总库存 - 起始点剩余库存
     const stagnantReduction = data.length > 0
-        ? data[0].remainingStagnant - (data[data.length - 1]?.remainingStagnant || 0)
+        ? totalStagnantValue - data[0].remainingStagnant
         : 0;
 
     return (
@@ -275,7 +272,7 @@ const CustomStyleChart: React.FC<CustomStyleChartProps> = ({
                                     tickLine={{ stroke: '#2563eb' }}
                                     domain={[0, maxStagnant * 1.1]}
                                     label={{
-                                        value: withMOQ ? '剩余呆滞料金额' : '新增呆滞金额',
+                                        value: withMOQ ? '剩余呆滞料金额' : '剩余库存金额',
                                         angle: 90,
                                         position: 'insideRight',
                                         offset: 0,
@@ -295,7 +292,7 @@ const CustomStyleChart: React.FC<CustomStyleChartProps> = ({
                                     formatter={(value: number, name: string) => {
                                         const label = name === 'replenishment'
                                             ? '实际补料金额'
-                                            : (withMOQ ? '剩余呆滞料金额' : '新增呆滞金额');
+                                            : (withMOQ ? '剩余呆滞料金额' : '剩余库存金额');
                                         return [`¥${formatCurrency(value)}`, label];
                                     }}
                                     labelFormatter={(label) => `生产数量: ${formatQuantity(label as number)} 套`}
@@ -336,7 +333,7 @@ const CustomStyleChart: React.FC<CustomStyleChartProps> = ({
                         <div className="flex items-center gap-2">
                             <div className="w-4 h-0.5 bg-blue-600"></div>
                             <div className="w-2 h-2 rounded-full bg-blue-600"></div>
-                            <span className="text-xs text-slate-600">{withMOQ ? '剩余呆滞料金额' : '新增呆滞金额'}</span>
+                            <span className="text-xs text-slate-600">{withMOQ ? '剩余呆滞料金额' : '剩余库存金额'}</span>
                         </div>
                     </div>
                 </div>
@@ -344,32 +341,38 @@ const CustomStyleChart: React.FC<CustomStyleChartProps> = ({
                 {/* 右侧分析文字 */}
                 <div className="w-72 p-4 bg-slate-50 border-l border-slate-200">
                     <div className="space-y-4">
-                        <h4 className="text-sm font-bold text-slate-800">数据分析{withMOQ ? '' : '（无起定量）'}：</h4>
+                        <h4 className="text-sm font-bold text-slate-800">数据分析{withMOQ ? '' : '（无起订量）'}：</h4>
 
                         {withMOQ ? (
                             // 按起订量分析的详细文字
                             <div className="space-y-3 text-sm text-slate-700 leading-relaxed">
-                                <p>
-                                    原则是生产数量的权重最低，消耗呆滞料和新增补料的权重最高
+                                <p className="text-slate-500 text-xs">
+                                    分析原则：优先消耗呆滞库存，在可接受的补料成本范围内最大化库存消纳
                                 </p>
                                 <p>
                                     <span className="font-medium">1、</span>
-                                    因{analysis.startMaterial}金额大库存{analysis.startStock}台，因此从生产{analysis.startPoint}套开始分析，此时投入金额最低只需¥{formatCurrency(minReplenishment)}，剩余呆滞¥{formatCurrency(totalStagnantValue)}，减少呆滞¥{formatCurrency(stagnantReduction)}；
+                                    图表起始点（{analysis.startPoint}套）时，新增采购金额¥{formatCurrency(minReplenishment)}，已消耗库存金额¥{formatCurrency(stagnantReduction)}，剩余待消耗库存¥{formatCurrency(data[0]?.remainingStagnant ?? totalStagnantValue)}；
                                 </p>
                                 <p>
                                     <span className="font-medium">2、</span>
-                                    {analysis.startPoint}-{analysis.optimalPoint}套的新增投入金额增长缓慢，但是消耗的呆滞金额明显，因此从消耗呆滞的角度看，{analysis.optimalPoint}套是个最优的生产数量节点；
+                                    {analysis.startPoint}～{analysis.optimalPoint}套为高效消纳区间：该区间内每增加一套产量，消耗的呆滞金额大于新增的补料成本（效益比 &gt; 1），{analysis.optimalPoint}套为当前数据的消耗效益最优节点；
                                 </p>
                                 <p>
                                     <span className="font-medium">3、</span>
-                                    {analysis.optimalPoint}套以上的数量投入和产出成正比例关系，即跟产品数量的关系更大，如果不好售卖的情况下是无意义的；
+                                    超过{analysis.optimalPoint}套后，库存逐渐耗尽，补料成本持续增加，应结合市场销量综合判断；
                                 </p>
                             </div>
                         ) : (
                             // 无起订量分析的文字
                             <div className="space-y-3 text-sm text-slate-700 leading-relaxed">
+                                <p className="text-slate-500 text-xs">
+                                    无起订量场景：按实际需求精确补料，无 MOQ 约束产生的过剩采购
+                                </p>
                                 <p>
-                                    图标中看新增金额和消耗呆滞同生产数量之间是比例线性关系，{analysis.slopeDescription}，因此实际生产数量的权重比较高；
+                                    图表中，新增采购金额与剩余库存金额随生产数量{analysis.linearRelation ? '均呈线性变化，趋势稳定' : '存在非线性变化，存在拐点'}（{analysis.slopeDescription}）；
+                                </p>
+                                <p>
+                                    与「按起订量」对比：两图差异越小说明 MOQ 约束影响越低；差异越大说明 MOQ 会带来较多过剩采购，需关注供应商起订量谈判；
                                 </p>
                                 <p className="font-medium text-amber-700">
                                     {analysis.recommendation}；
@@ -579,7 +582,7 @@ export const ProductionAnalysisPanel: React.FC<ProductionAnalysisPanelProps> = (
         return analysisResult.productionQuantities.map((qty, i) => ({
             quantity: qty,
             replenishment: analysisResult.newProcurementCosts[i], // 实际补料金额
-            remainingStagnant: Math.max(0, totalStagnant - analysisResult.replenishmentCosts[i]), // 新增呆滞
+            remainingStagnant: Math.max(0, totalStagnant - analysisResult.replenishmentCosts[i]), // 剩余库存金额
         }));
     }, [analysisResult]);
 

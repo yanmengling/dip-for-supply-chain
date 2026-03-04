@@ -418,8 +418,8 @@ function generateAnalysisConclusions(
         const repSlope = (replenishmentCosts[n - 1] - replenishmentCosts[0]) /
             ((productionQuantities?.[n - 1] || n) - (productionQuantities?.[0] || 1));
 
-        conclusions.push(`新增金额和消耗采购同生产数量之间呈线性关系，斜率${Math.abs(repSlope) > 100 ? '陡峭' : '平缓'}`);
-        conclusions.push(`实际生产数量的极差范围：${(repRange / 10000).toFixed(1)}万 ~ ${(procRange / 10000).toFixed(1)}万元`);
+        conclusions.push(`补货消耗与新增采购同生产数量之间呈线性关系，补货曲线斜率${Math.abs(repSlope) > 100 ? '陡峭' : '平缓'}`);
+        conclusions.push(`补货消耗金额区间：¥${(repRange / 10000).toFixed(1)}万；新增采购金额区间：¥${(procRange / 10000).toFixed(1)}万`);
     }
 
     // 2. 最大可生产数量
@@ -427,7 +427,7 @@ function generateAnalysisConclusions(
 
     // 3. 成本平衡点分??
     if (crossPoint > 0) {
-        conclusions.push(`成本平衡点：生产??${crossPoint.toLocaleString()} 套时，补货成本与采购成本持平`);
+        conclusions.push(`成本平衡点：生产 ${crossPoint.toLocaleString()} 套时，补货消耗成本与新增采购成本持平`);
     }
 
     // 4. 高价值物料消耗策??

@@ -279,7 +279,7 @@ async function fetchUnitPriceMap(materialCodes: string[]): Promise<Map<string, n
 
             for (const r of records) {
                 const code = String(r.material_code || '').trim();
-                const price = Number(r.unit_price ?? r.unit_cost ?? r.standard_price ?? 0);
+                const price = Number(r.material_standard_price ?? r.unit_price ?? r.unit_cost ?? r.standard_price ?? 0);
                 if (code) map.set(code, price);
             }
         }

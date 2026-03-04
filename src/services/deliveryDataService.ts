@@ -5,45 +5,27 @@
  */
 
 import { ontologyApi } from '../api';
-import { apiConfigService } from './apiConfigService';
-import { ApiConfigType, type OntologyObjectConfig } from '../types/apiConfig';
+import { dynamicConfigService } from './dynamicConfigService';
 import type { DeliveryOrder } from '../types/ontology';
-
-// Default Object type ID for delivery orders (sales orders) - used as fallback
-const DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID = 'supplychain_hd0202_salesorder'; // 更新为新的有效 ID
-
-/**
- * Get delivery order object type ID from configuration
- * @returns Object type ID for sales orders
- */
-function getDeliveryOrderObjectTypeId(): string {
-  // 优先使用 entityType 查找（更精确）
-  const config = apiConfigService.getOntologyObjectByEntityType('order');
-
-  if (config && config.enabled) {
-    console.log(`[DeliveryDataService] Using configured object type ID: ${config.objectTypeId} (${config.name})`);
-    return config.objectTypeId;
-  }
-
-  console.warn(`[DeliveryDataService] No sales order configuration found (entityType: 'order'), using default: ${DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID}`);
-  return DEFAULT_DELIVERY_ORDER_OBJECT_TYPE_ID;
-}
 
 /**
  * Load delivery orders from API
  * @returns Array of delivery orders
- * 
+ *
  * NOTE: Uses sales order object type as delivery orders
  */
 export async function loadDeliveryOrders(): Promise<DeliveryOrder[]> {
   console.log('[DeliveryDataService] Loading delivery orders from API...');
 
   try {
-    // Get configurable object type ID
-    const objectTypeId = getDeliveryOrderObjectTypeId();
+    // 使用 dynamicConfigService 动态获取对象类型 ID（与 ontologyDataService 保持一致）
+    const orderConfig = await dynamicConfigService.getConfigByEntityType('order');
+    if (!orderConfig) {
+      throw new Error('销售订单对象类型未配置，请确认知识网络中存在 order 类型的对象');
+    }
+    const objectTypeId = orderConfig.objectTypeId;
+    console.log(`[DeliveryDataService] Using object type ID: ${objectTypeId} (${orderConfig.name})`);
 
-    // Use GET method with query parameters as per ontology API documentation
-    // URL: /api/ontology-query/v1/knowledge-networks/{kn_id}/object-types/{ot_id}?include_type_info=true&include_logic_params=false
     const response = await ontologyApi.queryObjectInstances(objectTypeId, {
       limit: 10000,
       need_total: false,

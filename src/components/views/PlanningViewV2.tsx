@@ -10,6 +10,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import type { PlanningViewMode, NewTaskStep, Step1Data, Step2Data, PlanningTask } from '../../types/planningV2';
 import { taskService } from '../../services/taskService';
+import { pushFormDataToDIP } from '../../services/monitoringTaskApiService';
 import PlanningTaskSidebar from '../planningV2/PlanningTaskSidebar';
 import TaskListView from '../planningV2/TaskListView';
 import TaskDetailView from '../planningV2/TaskDetailView';
@@ -136,6 +137,8 @@ const PlanningViewV2 = () => {
 
   const handleCreateTask = useCallback((taskName: string) => {
     if (!step1Data || !step2Data) return;
+
+    // 1. 保存到 localStorage（前端任务列表展示）
     const task = taskService.createTask({
       name: taskName,
       productCode: step1Data.productCode,
@@ -147,6 +150,20 @@ const PlanningViewV2 = () => {
       productionEnd: step2Data.productionEnd,
       productionQuantity: step2Data.productionQuantity,
     });
+
+    // 2. 直接推送表单数据到 DIP 接口（fire-and-forget，不依赖 localStorage）
+    void pushFormDataToDIP({
+      task_name: taskName,
+      product_code: step1Data.productCode,
+      product_name: step1Data.productName,
+      demand_start: step1Data.demandStart,
+      demand_end: step1Data.demandEnd,
+      demand_quantity: step1Data.demandQuantity,
+      production_start: step2Data.productionStart,
+      production_end: step2Data.productionEnd,
+      production_quantity: step2Data.productionQuantity,
+    });
+
     setTaskVersion(v => v + 1);
     goToTaskDetail(task.id);
   }, [step1Data, step2Data, goToTaskDetail]);

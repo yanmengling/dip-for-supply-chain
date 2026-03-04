@@ -364,12 +364,78 @@ export function loadMaterialEntities(forceReload: boolean = false): Promise<any[
 
 /**
  * Load material procurement events
- * Returns: material_code, supplier_id, procurement data, etc.
+ * Merges purchase orders (PO) and purchase requests (PR) into a unified list.
+ * Returns: material_code, supplier_id, total_amount, status, etc.
  */
-export async function loadMaterialProcurementEvents(forceReload: boolean = false): Promise<any[]> {
-    console.warn('[OntologyDataService] Procurement event object type ID needs to be confirmed');
-    console.warn('[OntologyDataService] Returning empty array until correct ID is provided');
-    return [];
+export function loadMaterialProcurementEvents(forceReload: boolean = false): Promise<any[]> {
+    return withInFlightCache('material_procurement_events', async () => {
+        console.log('[OntologyDataService] Loading material procurement events from API...');
+        try {
+            const [poConfig, prConfig] = await Promise.all([
+                dynamicConfigService.getConfigByEntityType('purchase_order'),
+                dynamicConfigService.getConfigByEntityType('purchase_request'),
+            ]);
+
+            if (!poConfig && !prConfig) {
+                console.warn('[OntologyDataService] Neither purchase_order nor purchase_request object type is configured');
+                return [];
+            }
+
+            const queries: Promise<any[]>[] = [];
+
+            if (poConfig) {
+                queries.push(
+                    ontologyApi.queryObjectInstances(poConfig.objectTypeId, { limit: 10000, need_total: false })
+                        .then(r => r.entries.map((item: any) => ({
+                            source: 'purchase_order',
+                            material_code: item.material_code || item.materialCode || item.product_code || item.productCode || '',
+                            material_name: item.material_name || item.materialName || item.product_name || '',
+                            supplier_id: item.supplier_id || item.supplierId || item.supplier_code || '',
+                            supplier_name: item.supplier_name || item.supplierName || item.supplier || '',
+                            total_amount: item.total_amount || item.totalAmount || item.amount || '0',
+                            quantity: item.quantity || item.qty || '0',
+                            status: item.status || '',
+                            order_date: item.document_date || item.order_date || item.create_time || '',
+                            po_number: item.po_number || item.number || '',
+                        })))
+                        .catch(err => {
+                            console.error('[OntologyDataService] Failed to load purchase orders:', err);
+                            return [];
+                        })
+                );
+            }
+
+            if (prConfig) {
+                queries.push(
+                    ontologyApi.queryObjectInstances(prConfig.objectTypeId, { limit: 10000, need_total: false })
+                        .then(r => r.entries.map((item: any) => ({
+                            source: 'purchase_request',
+                            material_code: item.material_code || item.materialCode || item.product_code || item.productCode || '',
+                            material_name: item.material_name || item.materialName || item.product_name || '',
+                            supplier_id: item.supplier_id || item.supplierId || item.supplier_code || '',
+                            supplier_name: item.supplier_name || item.supplierName || item.supplier || '',
+                            total_amount: item.total_amount || item.totalAmount || item.amount || '0',
+                            quantity: item.quantity || item.qty || '0',
+                            status: item.status || '',
+                            order_date: item.document_date || item.order_date || item.create_time || '',
+                            pr_number: item.pr_number || item.number || '',
+                        })))
+                        .catch(err => {
+                            console.error('[OntologyDataService] Failed to load purchase requests:', err);
+                            return [];
+                        })
+                );
+            }
+
+            const results = await Promise.all(queries);
+            const events = results.flat();
+            console.log(`[OntologyDataService] Loaded ${events.length} material procurement events (PO+PR)`);
+            return events;
+        } catch (error) {
+            console.error('[OntologyDataService] Failed to load material procurement events:', error);
+            return [];
+        }
+    }, forceReload);
 }
 
 /**

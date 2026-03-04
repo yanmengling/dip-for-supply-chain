@@ -10,7 +10,7 @@ export default defineConfig({
     tailwindcss(),
     qiankun('supply-chain-brain', {
       useDevMode: false
-    })
+    }),
   ],
   base: '/supply-chain-brain/', // Base path for the micro-app
   server: {
@@ -105,6 +105,12 @@ export default defineConfig({
         secure: false,
         rewrite: (path) => path.replace(/^\/proxy-forecast/, ''),
       },
+      // DIP API 代理 - agent-factory (SDK 用于加载开场白和预置问题)
+      '/api/agent-factory': {
+        target: 'https://dip.aishu.cn',
+        changeOrigin: true,
+        secure: false,
+      },
       // 本地服务代理 (catch-all, must be last)
       '/api': {
         target: 'http://127.0.0.1:30777',
@@ -113,6 +119,9 @@ export default defineConfig({
         rewrite: (path) => path,
       },
     },
+  },
+  resolve: {
+    dedupe: ['react', 'react-dom'],
   },
   build: {
     target: 'esnext',

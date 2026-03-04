@@ -10,18 +10,12 @@
  * - Principle 4: No simulation mode in V2 - data isolation not applicable
  */
 
-import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Package, Truck, Users, TrendingUp, Settings,
   Brain, Database, Calendar, Loader2
 } from 'lucide-react';
 import logoIcon from './assets/logo.svg';
-import { CopilotSidebar } from './components/shared/CopilotSidebar';
-import type { CopilotMessage } from './components/shared/CopilotSidebar';
-import { getCopilotConfig } from './utils/copilotConfig';
-import type { CopilotSidebarProps } from './components/shared/CopilotSidebar';
-import { useHeaderHeight } from './hooks/useHeaderHeight';
-import { useConversation } from './hooks/useConversation';
 import { populateEntityConfigs, initializeEntityData } from './utils/entityConfigService';
 import { navigationConfigService } from './services/navigationConfigService';
 
@@ -38,6 +32,7 @@ const ProductSupplyOptimizationPage = lazy(() =>
     .then(m => ({ default: m.ProductSupplyOptimizationPage }))
 );
 const ConfigBackendLayout    = lazy(() => import('./components/config-backend/ConfigBackendLayout'));
+const CopilotPanel           = lazy(() => import('./components/shared/CopilotPanel'));
 
 /** 页面切换时的加载占位 */
 const PageFallback = () => (
@@ -64,24 +59,8 @@ const SupplyChainAppContent = () => {
   const [currentView, setCurrentView] = useState<ViewType>('cockpit');
   const [visibleNavigation, setVisibleNavigation] = useState<typeof ALL_NAV_ITEMS>(ALL_NAV_ITEMS);
   const [copilotOpen, setCopilotOpen] = useState(false);
-  const [copilotProps, setCopilotProps] = useState<Omit<CopilotSidebarProps, 'isOpen' | 'onClose'>>({
-    title: '供应链智能助手',
-    initialMessages: [{ type: 'bot', text: '欢迎使用供应链智能助手！' }],
-    suggestions: [],
-  });
 
   const headerRef = useRef<HTMLDivElement>(null);
-  const headerHeight = useHeaderHeight(headerRef);
-
-  // Global conversation tracking (unified across all pages)
-  const [globalConversationId, setGlobalConversationId] = useState<string | undefined>(undefined);
-  const [globalMessages, setGlobalMessages] = useState<CopilotMessage[]>([]);
-
-  // Initialize conversation management (kept for compatibility, but not actively used)
-  const conversation = useConversation({
-    agentId: 'supply_chain_agent',
-    autoLoad: false // We'll load conversations when copilot opens
-  });
 
   // Load navigation config and filter visible sections (reload when view changes, e.g. returning from config)
   useEffect(() => {
@@ -121,43 +100,10 @@ const SupplyChainAppContent = () => {
     init();
   }, []);
 
-  // Close copilot and reset conversation when switching views
+  // Close copilot when switching views
   useEffect(() => {
     setCopilotOpen(false);
-    // Reset conversation state to ensure isolation between views
-    setGlobalConversationId(undefined);
-    setGlobalMessages([]);
-    console.log('✓ Reset Copilot conversation state for new view:', currentView);
   }, [currentView]);
-
-  useEffect(() => {
-    // Use global conversation ID for all pages
-    getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
-  }, [currentView, globalConversationId]);
-
-  // Refresh suggestions when opening (so dynamic context from pages can be picked up)
-  useEffect(() => {
-    if (!copilotOpen) return;
-    getCopilotConfig(currentView, globalConversationId).then(setCopilotProps);
-  }, [copilotOpen, currentView, globalConversationId]);
-
-  // Callback to save global conversation ID
-  const handleConversationCreated = useCallback((conversationId: string) => {
-    setGlobalConversationId(conversationId);
-    console.log('✓ Saved global conversation ID:', conversationId);
-  }, []);
-
-  // Callback to save global messages
-  const handleMessagesSaved = useCallback((messages: CopilotMessage[]) => {
-    setGlobalMessages(messages);
-  }, []);
-
-  // Callback to start a new conversation
-  const handleNewConversation = useCallback(() => {
-    setGlobalConversationId(undefined);
-    setGlobalMessages([]);
-    console.log('✓ Started new conversation');
-  }, []);
 
   const handleNavigate = (view: string) => {
     const viewMap: Record<string, ViewType> = {
@@ -256,17 +202,12 @@ const SupplyChainAppContent = () => {
         </Suspense>
       </div>
 
-      {/* Copilot Sidebar */}
-      <CopilotSidebar
-        isOpen={copilotOpen}
-        onClose={() => setCopilotOpen(false)}
-        topOffset={headerHeight}
-        onConversationCreated={handleConversationCreated}
-        onMessagesSaved={handleMessagesSaved}
-        onNewConversation={handleNewConversation}
-        savedMessages={globalMessages}
-        {...copilotProps}
-      />
+      {/* Copilot — lazy loaded so chatkit CSS never touches the page until first open */}
+      {copilotOpen && (
+        <Suspense fallback={null}>
+          <CopilotPanel currentView={currentView} onClose={() => setCopilotOpen(false)} />
+        </Suspense>
+      )}
     </div>
   );
 };

@@ -165,15 +165,14 @@ function collectAllMaterials(node: BOMNode, parentQuantity: number = 1): Map<str
             }
         }
         
-        // 递归处理子节点 - 子节点的 multiplier 不需要乘以当前节点的 quantity
-        // 因为 BOM 树中已经包含了单耗关系
+        // 递归处理子节点：子节点乘数 = 父节点乘数 × 当前节点单耗，保证多层 BOM 正确累积
         n.children.forEach(child => {
-            traverse(child, isRootNode ? 1 : multiplier, false, null);
+            traverse(child, isRootNode ? 1 : multiplier * n.quantity, false, null);
         });
-        
+
         // 处理替代料 - 标记为替代料，并记录主料编码
         n.substitutes.forEach(sub => {
-            traverse(sub, isRootNode ? 1 : multiplier, true, n.code);
+            traverse(sub, isRootNode ? 1 : multiplier * n.quantity, true, n.code);
         });
     };
     
@@ -182,9 +181,12 @@ function collectAllMaterials(node: BOMNode, parentQuantity: number = 1): Map<str
 }
 
 /**
- * 全局优化算法 - 贪心策略
- * 
- * 策略：按边际效益分配物料，优先满足效益高的产品
+ * 全局优化算法
+ *
+ * 三项核心改进：
+ * 1. 效益指标 → 库存自给率（现有库存可覆盖的单位生产成本占比）
+ * 2. 共用物料 → 按需求比例分配（替代贪心先到先得）
+ * 3. 推荐数量 → 直接用比例分配后的可生产上限（去掉 0.7 魔法系数）
  */
 function calculateGlobalOptimization(bomTrees: ProductBOMTree[]): OptimizationResult {
     if (bomTrees.length === 0) {
@@ -198,30 +200,21 @@ function calculateGlobalOptimization(bomTrees: ProductBOMTree[]): OptimizationRe
         };
     }
 
-    // 1. 收集所有产品的物料需求
-    const productMaterials = new Map<string, Map<string, any>>();
+    // ── 1. 收集所有产品的物料需求 ────────────────────────────────────────────
+    const productMaterials = new Map<string, Map<string, MaterialInfo>>();
     bomTrees.forEach(tree => {
-        const materials = collectAllMaterials(tree.rootNode);
-        productMaterials.set(tree.productCode, materials);
+        productMaterials.set(tree.productCode, collectAllMaterials(tree.rootNode));
     });
 
-    // 2. 构建全局物料库存池（包含替代料标记）
+    // ── 2. 构建全局物料库存池 ────────────────────────────────────────────────
     const globalInventory = new Map<string, {
-        code: string;
-        name: string;
-        totalStock: number;
-        stockValue: number;
-        unitPrice: number;
-        remainingStock: number;
+        code: string; name: string;
+        totalStock: number; stockValue: number; unitPrice: number;
         usedByProducts: string[];
-        // 替代料信息
-        isSubstitute: boolean;
-        isPrimary: boolean;
-        alternativeGroup: string | null;
-        primaryMaterialCode: string | null;
+        isSubstitute: boolean; isPrimary: boolean;
+        alternativeGroup: string | null; primaryMaterialCode: string | null;
     }>();
 
-    // 合并所有产品的物料信息（保留替代料标记）
     productMaterials.forEach((materials, productCode) => {
         materials.forEach((mat, code) => {
             if (globalInventory.has(code)) {
@@ -229,204 +222,158 @@ function calculateGlobalOptimization(bomTrees: ProductBOMTree[]): OptimizationRe
                 if (!existing.usedByProducts.includes(productCode)) {
                     existing.usedByProducts.push(productCode);
                 }
-                // 合并替代料标记（任一产品中标记为替代料/主料则保留）
                 if (mat.isSubstitute && !existing.isSubstitute) {
                     existing.isSubstitute = true;
                     existing.primaryMaterialCode = mat.primaryMaterialCode;
                 }
-                if (mat.isPrimary && !existing.isPrimary) {
-                    existing.isPrimary = true;
-                }
+                if (mat.isPrimary && !existing.isPrimary) existing.isPrimary = true;
                 if (mat.alternativeGroup && !existing.alternativeGroup) {
                     existing.alternativeGroup = mat.alternativeGroup;
                 }
             } else {
                 globalInventory.set(code, {
-                    code: mat.code,
-                    name: mat.name,
-                    totalStock: mat.stock,
-                    stockValue: mat.stockValue,
-                    unitPrice: mat.unitPrice,
-                    remainingStock: mat.stock,
+                    code: mat.code, name: mat.name,
+                    totalStock: mat.stock, stockValue: mat.stockValue, unitPrice: mat.unitPrice,
                     usedByProducts: [productCode],
-                    // 替代料信息
-                    isSubstitute: mat.isSubstitute,
-                    isPrimary: mat.isPrimary,
-                    alternativeGroup: mat.alternativeGroup,
-                    primaryMaterialCode: mat.primaryMaterialCode,
+                    isSubstitute: mat.isSubstitute, isPrimary: mat.isPrimary,
+                    alternativeGroup: mat.alternativeGroup, primaryMaterialCode: mat.primaryMaterialCode,
                 });
             }
         });
     });
 
-    // 3. 计算每个产品的边际效益并排序
-    const productEfficiency: { 
-        productCode: string; 
-        productName: string;
-        maxProducible: number;
-        inventoryValue: number;
-        efficiency: number;
-    }[] = [];
+    // ── 3. 按需求比例预分配各物料给各产品 ────────────────────────────────────
+    // 对每种物料：各产品按自身单耗占所有产品总单耗的比例来分配库存
+    // 例：物料X库存100，产品A单耗80，产品B单耗60 → A得 100×(80/140)≈57，B得 100×(60/140)≈43
+    // proportionalAlloc[materialCode][productCode] = 分配到的库存量
+    const proportionalAlloc = new Map<string, Map<string, number>>();
 
-    bomTrees.forEach(tree => {
-        const materials = productMaterials.get(tree.productCode)!;
-        let maxProducible = Infinity;
-        let totalInventoryValue = 0;
+    globalInventory.forEach((matGlobal, matCode) => {
+        let totalDemandPerUnit = 0;
+        const productDemand = new Map<string, number>();
 
-        materials.forEach((mat) => {
-            if (mat.requiredPerUnit > 0) {
-                const canProduce = Math.floor(mat.stock / mat.requiredPerUnit);
-                maxProducible = Math.min(maxProducible, canProduce);
+        productMaterials.forEach((materials, productCode) => {
+            const mat = materials.get(matCode);
+            if (mat && mat.requiredPerUnit > 0) {
+                productDemand.set(productCode, mat.requiredPerUnit);
+                totalDemandPerUnit += mat.requiredPerUnit;
             }
-            totalInventoryValue += mat.stockValue;
         });
 
-        if (maxProducible === Infinity) maxProducible = 0;
+        if (totalDemandPerUnit === 0) return;
 
-        // 效益 = 可消耗库存价值 / 物料种类数（越高越好）
-        const efficiency = materials.size > 0 ? totalInventoryValue / materials.size : 0;
-
-        productEfficiency.push({
-            productCode: tree.productCode,
-            productName: tree.rootNode.name,
-            maxProducible,
-            inventoryValue: totalInventoryValue,
-            efficiency,
+        const alloc = new Map<string, number>();
+        productDemand.forEach((demand, productCode) => {
+            alloc.set(productCode, matGlobal.totalStock * (demand / totalDemandPerUnit));
         });
+        proportionalAlloc.set(matCode, alloc);
     });
 
-    // 按效益排序
-    productEfficiency.sort((a, b) => b.efficiency - a.efficiency);
-
-    // 4. 贪心分配 - 按效益顺序分配物料
+    // ── 4. 计算每个产品的推荐数量、自给率、消耗/采购金额 ─────────────────────
+    const materialAllocations = new Map<string, Map<string, number>>(); // 用于共用物料展示
     const allocations: ProductAllocation[] = [];
-    const materialAllocations = new Map<string, Map<string, number>>(); // 物料 -> 产品 -> 分配数量
 
-    productEfficiency.forEach(({ productCode, productName, inventoryValue }) => {
+    bomTrees.forEach(tree => {
+        const { productCode } = tree;
         const materials = productMaterials.get(productCode)!;
-        const tree = bomTrees.find(t => t.productCode === productCode)!;
-        
-        // 计算基于剩余库存可生产的最大数量
-        let maxFromRemaining = Infinity;
-        materials.forEach((mat) => {
-            const global = globalInventory.get(mat.code);
-            if (global && mat.requiredPerUnit > 0) {
-                const canProduce = Math.floor(global.remainingStock / mat.requiredPerUnit);
-                maxFromRemaining = Math.min(maxFromRemaining, canProduce);
+
+        // 推荐数量：为消耗完分配到的库存中最多的那种物料需要生产多少套
+        // 与逆向计算器方案A（最大化消纳）语义一致：由库存最充裕的物料驱动，
+        // 缺料的物料计入新增采购，不阻断推荐数量
+        let recommendedQuantity = 0;
+        materials.forEach((mat, matCode) => {
+            if (mat.requiredPerUnit <= 0) return;
+            const allocated = proportionalAlloc.get(matCode)?.get(productCode) ?? 0;
+            if (allocated > 0) {
+                const neededToConsumeAll = Math.ceil(allocated / mat.requiredPerUnit);
+                recommendedQuantity = Math.max(recommendedQuantity, neededToConsumeAll);
             }
         });
 
-        if (maxFromRemaining === Infinity || !isFinite(maxFromRemaining)) maxFromRemaining = 0;
-
-        // 使用边际效益分析确定推荐数量
-        // 策略：生产到边际效益开始下降的点，或最大可生产量的70%
-        // 如果库存为0，基于库存价值给出估算建议
-        let recommendedQuantity = 0;
-        if (maxFromRemaining > 0) {
-            recommendedQuantity = Math.max(
-                Math.floor(maxFromRemaining * 0.7),
-                Math.min(500, maxFromRemaining)
-            );
-        } else if (inventoryValue > 0) {
-            // 库存为0但有价值记录，给一个基于价值的建议
-            recommendedQuantity = Math.min(500, Math.max(100, Math.floor(inventoryValue / 1000)));
-        }
-
-        // 计算消耗和采购
+        // 消耗呆滞 / 新增采购
         let stagnantConsumed = 0;
         let newProcurement = 0;
 
-        materials.forEach((mat) => {
-            const global = globalInventory.get(mat.code);
-            if (global) {
-                const required = mat.requiredPerUnit * recommendedQuantity;
-                const fromStock = Math.min(required, global.remainingStock);
-                const needPurchase = Math.max(0, required - fromStock);
+        // 库存自给率计算（基于单耗，与推荐数量无关）
+        // 自给率 = Σ(min(库存量, 单耗) × 单价) / Σ(单耗 × 单价)
+        let coveredValue = 0;
+        let totalRequiredValue = 0;
 
-                stagnantConsumed += fromStock * mat.unitPrice;
-                newProcurement += needPurchase * mat.unitPrice;
+        materials.forEach((mat, matCode) => {
+            const required = mat.requiredPerUnit * recommendedQuantity;
+            const allocated = proportionalAlloc.get(matCode)?.get(productCode) ?? 0;
+            const fromStock = Math.min(required, allocated);
+            const needPurchase = Math.max(0, required - fromStock);
 
-                // 更新剩余库存
-                global.remainingStock -= fromStock;
+            stagnantConsumed += fromStock * mat.unitPrice;
+            newProcurement += needPurchase * mat.unitPrice;
 
-                // 记录分配
-                if (!materialAllocations.has(mat.code)) {
-                    materialAllocations.set(mat.code, new Map());
-                }
-                materialAllocations.get(mat.code)!.set(productCode, fromStock);
+            if (fromStock > 0) {
+                if (!materialAllocations.has(matCode)) materialAllocations.set(matCode, new Map());
+                materialAllocations.get(matCode)!.set(productCode, fromStock);
             }
+
+            coveredValue += Math.min(mat.stock, mat.requiredPerUnit) * mat.unitPrice;
+            totalRequiredValue += mat.requiredPerUnit * mat.unitPrice;
         });
 
-        // 确保数值有效
-        const validStagnantConsumed = isNaN(stagnantConsumed) ? 0 : stagnantConsumed;
-        const validNewProcurement = isNaN(newProcurement) ? 0 : newProcurement;
-        
-        const netBenefit = validStagnantConsumed - validNewProcurement;
-        const efficiency = validNewProcurement > 0 ? validStagnantConsumed / validNewProcurement : validStagnantConsumed > 0 ? 999 : 0;
+        const efficiency = totalRequiredValue > 0 ? coveredValue / totalRequiredValue : 0;
+        const netBenefit = stagnantConsumed - newProcurement;
 
         allocations.push({
             productCode,
-            productName,
+            productName: tree.rootNode.name,
             recommendedQuantity,
-            stagnantConsumed: validStagnantConsumed,
-            newProcurement: validNewProcurement,
+            stagnantConsumed: isNaN(stagnantConsumed) ? 0 : stagnantConsumed,
+            newProcurement: isNaN(newProcurement) ? 0 : newProcurement,
             netBenefit: isNaN(netBenefit) ? 0 : netBenefit,
             efficiency: isNaN(efficiency) ? 0 : efficiency,
             materialCount: materials.size,
         });
     });
 
-    // 5. 统计共用物料（包含替代料标记）
+    // ── 5. 按自给率降序排序（自给率越高 = 越少依赖采购 = 优先生产）─────────────
+    allocations.sort((a, b) => b.efficiency - a.efficiency);
+
+    // ── 6. 统计共用物料 ───────────────────────────────────────────────────────
     const sharedMaterials: SharedMaterial[] = [];
-    globalInventory.forEach((mat) => {
+    globalInventory.forEach((mat, code) => {
         if (mat.usedByProducts.length > 1) {
-            const allocation = materialAllocations.get(mat.code) || new Map();
             sharedMaterials.push({
-                code: mat.code,
-                name: mat.name,
-                totalStock: mat.totalStock,
-                stockValue: mat.stockValue,
+                code: mat.code, name: mat.name,
+                totalStock: mat.totalStock, stockValue: mat.stockValue,
                 usedByProducts: mat.usedByProducts,
-                allocation,
-                // 替代料标记
-                isSubstitute: mat.isSubstitute,
-                isPrimary: mat.isPrimary,
-                alternativeGroup: mat.alternativeGroup,
-                primaryMaterialCode: mat.primaryMaterialCode,
+                allocation: materialAllocations.get(code) || new Map(),
+                isSubstitute: mat.isSubstitute, isPrimary: mat.isPrimary,
+                alternativeGroup: mat.alternativeGroup, primaryMaterialCode: mat.primaryMaterialCode,
             });
         }
     });
 
-    // 按共用产品数量排序，主料优先
     sharedMaterials.sort((a, b) => {
-        // 首先按是否为主料排序（主料优先）
         if (a.isPrimary && !b.isPrimary) return -1;
         if (!a.isPrimary && b.isPrimary) return 1;
-        // 然后按共用产品数量排序
         return b.usedByProducts.length - a.usedByProducts.length;
     });
 
-    // 6. 计算汇总
+    // ── 7. 汇总 + 优化建议 ───────────────────────────────────────────────────
     const totalStagnantConsumed = allocations.reduce((sum, a) => sum + a.stagnantConsumed, 0);
     const totalNewProcurement = allocations.reduce((sum, a) => sum + a.newProcurement, 0);
     const totalNetBenefit = totalStagnantConsumed - totalNewProcurement;
     const totalRecommended = allocations.reduce((sum, a) => sum + a.recommendedQuantity, 0);
 
-    // 7. 生成优化建议
     const optimizationSummary: string[] = [];
-    
+
     if (allocations.length > 0) {
-        const bestProduct = allocations.reduce((best, curr) => 
-            curr.efficiency > best.efficiency ? curr : best
-        );
+        const best = allocations[0]; // 已按自给率排序
         optimizationSummary.push(
-            `最优效益产品：${bestProduct.productName}，效益比 ${bestProduct.efficiency.toFixed(1)}`
+            `最优自给率产品：${best.productName}，库存自给率 ${(best.efficiency * 100).toFixed(0)}%`
         );
     }
 
     if (sharedMaterials.length > 0) {
         optimizationSummary.push(
-            `共有 ${sharedMaterials.length} 种物料被多产品共用，需合理分配`
+            `共有 ${sharedMaterials.length} 种物料被多产品共用，已按需求比例分配库存`
         );
     }
 
@@ -440,7 +387,7 @@ function calculateGlobalOptimization(bomTrees: ProductBOMTree[]): OptimizationRe
         );
     }
 
-    optimizationSummary.push('建议根据市场需求调整各产品比例，优先生产高效益产品');
+    optimizationSummary.push('建议根据市场需求调整各产品比例，优先生产高自给率产品');
 
     return {
         allocations,
@@ -522,7 +469,7 @@ const ProductAllocationCard: React.FC<ProductAllocationCardProps> = ({ allocatio
 
                 <div className="flex justify-between items-center text-xs text-slate-500">
                     <span>涉及 {allocation.materialCount} 种物料</span>
-                    <span>效益比 {allocation.efficiency.toFixed(1)}</span>
+                    <span>自给率 {(allocation.efficiency * 100).toFixed(0)}%</span>
                 </div>
             </div>
         </div>

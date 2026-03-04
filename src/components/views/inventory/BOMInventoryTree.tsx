@@ -548,7 +548,7 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
             <div className="flex flex-col flex-1 min-h-0 relative z-0">
                 {/* 产品选择 Tab - 只在非全局模式显示 */}
                 {activeTab !== 'global' && (
-                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white z-10">
+                    <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white relative z-[60]">
                         <div className="flex items-center gap-4 relative">
                             <h4 className="text-sm font-bold text-slate-800">当前产品:</h4>
 
