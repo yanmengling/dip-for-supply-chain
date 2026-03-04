@@ -96,6 +96,7 @@ export interface ObjectProperty {
   id: string;                   // Property ID
   name: string;                 // Property name
   alias?: string;               // Display alias
+  display_name?: string;        // 业务属性显示名称（API/知识网络定义）
   data_type: string;            // Data type (e.g., "string", "number", "date")
   required?: boolean;           // Is required
   unique?: boolean;             // Is unique

@@ -1,8 +1,8 @@
 /**
  * 齐套模式倒排甘特图
  *
- * 基于 GanttBar[] 树形数据渲染倒排甘特图
- * 数据来源：ganttService.buildGanttData() 实时 API 查询
+ * 布局：左侧 240px 固定列（sticky）+ 右侧横向可滚动甘特区域
+ * 每天一格，固定 DAY_WIDTH px，支持任意时间跨度无损显示。
  */
 
 import { useState, useMemo, useRef } from 'react';
@@ -12,19 +12,26 @@ import GanttTimeAxis from './GanttTimeAxis';
 import GanttTaskBar from './GanttTaskBar';
 import GanttTooltip from './GanttTooltip';
 import GanttLegend from './GanttLegend';
+import GanttSummaryCard from './GanttSummaryCard';
 import { ganttService } from '../../../services/ganttService';
 
 interface GanttChartProps {
   bars: GanttBar[];
   productionStart: string;
+  productionEnd: string;
 }
+
+/** 每天对应的像素宽度 */
+const DAY_WIDTH = 28;
+
+/** 左侧 BOM 树列宽度（px） */
+const LEFT_COL_WIDTH = 240;
 
 /** 单次最多渲染行数，超出时提示折叠 */
 const MAX_VISIBLE_ROWS = 200;
 
-const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
+const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
-    // 默认只展开 L0（产品层），不展开子节点，避免一次渲染上千行
     const initial = new Set<string>();
     bars.forEach(root => initial.add(root.materialCode));
     return initial;
@@ -39,7 +46,16 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
     return Math.ceil((timeRange.end.getTime() - timeRange.start.getTime()) / (1000 * 60 * 60 * 24));
   }, [timeRange]);
 
+  /** 甘特图区域总宽度（px） */
+  const ganttWidth = totalDays * DAY_WIDTH;
+
   const productionStartDate = useMemo(() => new Date(productionStart), [productionStart]);
+
+  // 计划进度总结
+  const summary = useMemo(
+    () => ganttService.getGanttSummary(bars, productionStart, productionEnd),
+    [bars, productionStart, productionEnd],
+  );
 
   // 收集所有节点 ID（用于全展开）
   const allNodeIds = useMemo(() => {
@@ -80,7 +96,6 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
     const hasChildren = bar.children.length > 0;
     const rows: React.ReactNode[] = [];
 
-    // Material type label
     const typeLabel = bar.materialType === '外购' ? '外购'
       : bar.materialType === '委外' ? '委外'
       : bar.materialType === '自制' ? '自制'
@@ -97,40 +112,44 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
         className={`flex border-b border-slate-100 hover:bg-slate-50 transition-colors ${
           bar.hasShortage ? 'bg-red-50/50' : ''
         }`}
+        style={{ minWidth: `${LEFT_COL_WIDTH + ganttWidth}px` }}
       >
-        {/* 左侧 BOM 树 */}
+        {/* 左侧 BOM 树列 — sticky 固定 */}
         <div
-          className="w-60 flex-shrink-0 border-r border-slate-200 py-2 px-3 flex items-center gap-1.5"
-          style={{ paddingLeft: `${level * 20 + 8}px` }}
+          className="flex-shrink-0 border-r border-slate-200 py-2 px-3 flex items-center gap-1.5 bg-white sticky left-0 z-10"
+          style={{ width: `${LEFT_COL_WIDTH}px`, paddingLeft: `${level * 16 + 8}px` }}
         >
           {hasChildren ? (
-            <button onClick={() => toggleExpand(bar.materialCode)} className="p-0.5 hover:bg-slate-200 rounded">
+            <button onClick={() => toggleExpand(bar.materialCode)} className="p-0.5 hover:bg-slate-200 rounded flex-shrink-0">
               {isExpanded
                 ? <ChevronDown className="w-3.5 h-3.5 text-slate-600" />
                 : <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
               }
             </button>
           ) : (
-            <div className="w-4" />
+            <div className="w-4 flex-shrink-0" />
           )}
-          {bar.hasShortage && <span className="text-red-500 text-xs font-bold">⚠</span>}
+          {bar.hasShortage && <span className="text-red-500 text-xs font-bold flex-shrink-0">⚠</span>}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className={`px-1 py-0.5 text-[10px] rounded font-medium ${typeColor}`}>
+            <div className="flex items-center gap-1">
+              <span className={`px-1 py-0.5 text-[10px] rounded font-medium flex-shrink-0 ${typeColor}`}>
                 {typeLabel}
               </span>
-              <span className="text-[11px] text-slate-500">L{bar.bomLevel}</span>
+              <span className="text-[10px] text-slate-400 flex-shrink-0">L{bar.bomLevel}</span>
             </div>
             <div className="text-xs text-slate-800 truncate mt-0.5">{bar.materialName}</div>
           </div>
         </div>
 
-        {/* 右侧甘特图区域 */}
-        <div className="flex-1 relative py-2 px-1">
+        {/* 右侧甘特图任务条区域 */}
+        <div
+          className="relative py-1 flex-shrink-0"
+          style={{ width: `${ganttWidth}px` }}
+        >
           <GanttTaskBar
             bar={bar}
             chartStart={timeRange.start}
-            totalDays={totalDays}
+            dayWidth={DAY_WIDTH}
             productionStartDate={productionStartDate}
             onMouseEnter={(e) => handleBarMouseEnter(bar, e)}
             onMouseLeave={handleBarMouseLeave}
@@ -157,11 +176,17 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
   }
 
   return (
-    <div className="space-y-0">
+    <div className="space-y-3">
+      {/* 计划进度总结卡片 */}
+      <GanttSummaryCard summary={summary} />
+
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-        {/* 表头 */}
+        {/* 表头行（sticky top，不滚动） */}
         <div className="flex border-b-2 border-slate-300 bg-slate-50">
-          <div className="w-60 flex-shrink-0 border-r border-slate-300 py-2.5 px-3">
+          <div
+            className="flex-shrink-0 border-r border-slate-300 py-2.5 px-3 sticky left-0 bg-slate-50 z-20"
+            style={{ width: `${LEFT_COL_WIDTH}px` }}
+          >
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-slate-800">物料 BOM 结构</div>
               <div className="flex items-center gap-1">
@@ -174,26 +199,35 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
               </div>
             </div>
           </div>
-          <div className="flex-1 py-2.5 px-3">
+          <div className="flex-1 py-2.5 px-3 min-w-0">
             <div className="flex items-center justify-between">
               <div className="text-sm font-semibold text-slate-800">齐套倒排甘特图</div>
-              <div className="text-xs text-slate-500">
-                子级结束 = 父级开始 - 1天
-              </div>
+              <div className="text-xs text-slate-500">子级结束 = 父级开始 - 1天</div>
             </div>
           </div>
         </div>
 
-        {/* 时间轴 */}
-        <div className="flex border-b border-slate-200 bg-slate-50">
-          <div className="w-60 flex-shrink-0 border-r border-slate-200" />
-          <div className="flex-1">
-            <GanttTimeAxis startDate={timeRange.start} endDate={timeRange.end} totalDays={totalDays} />
+        {/* 横向滚动容器：时间轴 + 任务行共享同一个滚动区域 */}
+        <div className="overflow-x-auto overflow-y-auto" style={{ maxHeight: '520px' }}>
+          {/* 时间轴（sticky top 在滚动容器内） */}
+          <div
+            className="flex border-b border-slate-200 bg-slate-50 sticky top-0 z-20"
+            style={{ minWidth: `${LEFT_COL_WIDTH + ganttWidth}px` }}
+          >
+            <div
+              className="flex-shrink-0 border-r border-slate-200 bg-slate-50 sticky left-0 z-30"
+              style={{ width: `${LEFT_COL_WIDTH}px` }}
+            />
+            <div className="flex-shrink-0" style={{ width: `${ganttWidth}px` }}>
+              <GanttTimeAxis
+                startDate={timeRange.start}
+                endDate={timeRange.end}
+                dayWidth={DAY_WIDTH}
+              />
+            </div>
           </div>
-        </div>
 
-        {/* 任务行 */}
-        <div className="overflow-y-auto" style={{ maxHeight: '500px' }}>
+          {/* 任务行 */}
           {(() => {
             const allRows: React.ReactNode[] = [];
             for (const bar of bars) {
@@ -207,8 +241,11 @@ const GanttChart = ({ bars, productionStart }: GanttChartProps) => {
               <>
                 {allRows}
                 {totalRows > totalVisible && (
-                  <div className="py-3 px-4 text-center text-xs text-slate-400 border-t border-slate-100 bg-slate-50">
-                    已显示 {totalVisible} / {totalRows} 条（展开更多层级可查看子节点，建议按层级逐步展开）
+                  <div
+                    className="py-3 px-4 text-center text-xs text-slate-400 border-t border-slate-100 bg-slate-50 sticky left-0"
+                    style={{ minWidth: `${LEFT_COL_WIDTH + ganttWidth}px` }}
+                  >
+                    已显示 {totalVisible} / {totalRows} 条（展开更多层级可查看子节点）
                   </div>
                 )}
               </>

@@ -15,6 +15,7 @@ import {
     type MetricModelConfig,
     type AgentConfig,
     type WorkflowConfig,
+    type ConfigImportOptions,
     type ConfigTestResult
 } from '../types/apiConfig';
 import { configStorageService } from './configStorageService';
@@ -677,9 +678,10 @@ class ApiConfigService {
 
     /**
      * Import configuration
+     * @param optionsOrMerge If boolean: merge (true) or replace all (false). If object: { merge?, overwriteTypes? }. overwriteTypes: overwrite only these types with imported data.
      */
-    importConfig(jsonString: string, merge: boolean = false): void {
-        this.storage.importConfig(jsonString, merge);
+    importConfig(jsonString: string, optionsOrMerge: boolean | ConfigImportOptions = false): void {
+        this.storage.importConfig(jsonString, optionsOrMerge);
     }
 
     /**

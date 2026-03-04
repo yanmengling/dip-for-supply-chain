@@ -294,7 +294,7 @@ export type PlanningViewMode = 'task-list' | 'new-task' | 'task-detail';
 export type NewTaskStep = 1 | 2 | 3 | 4;
 
 /** 任务状态 */
-export type TaskStatus = 'active' | 'ended' | 'expired';
+export type TaskStatus = 'active' | 'completed' | 'incomplete' | 'expired';
 
 /** 监测任务对象（localStorage 持久化） */
 export interface PlanningTask {
@@ -313,6 +313,88 @@ export interface PlanningTask {
   productionStart: string;   // YYYY-MM-DD（甘特图倒排起点）
   productionEnd: string;
   productionQuantity: number;
+  // 任务结束相关（可选，向后兼容）
+  endedAt?: string;          // 任务结束时间（ISO 格式）
+  summaryReport?: TaskSummaryReport;
+}
+
+// ============= 总结报告 =============
+
+export interface TaskSummaryReport {
+  generatedAt: string;
+  planVsActual: {
+    demandPeriod: { start: string; end: string };
+    productionPeriod: { start: string; end: string };
+    actualInboundDate: string | null;
+    inboundQuantity: number | null;
+    timeDiffDays: number | null;
+    hasSignificantDelay: boolean;
+  };
+  productCompletion: {
+    plannedQuantity: number;
+    inboundQuantity: number | null;
+    completionRate: number | null;
+  };
+  materialCompletion: {
+    totalMaterials: number;
+    withPO: number;
+    withoutPO: number;
+    shortageCount: number;
+    riskCount: number;
+  };
+  keyMaterialsSnapshot: KeyMonitorMaterial[];
+}
+
+// ============= 关键监测物料 =============
+
+export interface KeyMonitorMaterial {
+  materialCode: string;
+  materialName: string;
+  materialType: string;
+  bomLevel: number;
+  shortageQuantity: number;
+  hasShortage: boolean;
+  // 库存信息（从 inventory API 查询）
+  inventoryQty: number | null;
+  availableInventoryQty: number | null;
+  newInboundQty: number | null;
+  latestInboundDate: string | null;
+  // 采购状态
+  prStatus: string;
+  poStatus: string;
+  poDeliverDate?: string;
+  // 倒排时间
+  startDate: string;
+  endDate: string;
+  leadtime: number;
+}
+
+// ============= 库存记录 =============
+
+export interface InventoryRecord {
+  seq_no: number;
+  material_code: string;
+  material_name: string;
+  inventory_qty: number;
+  available_inventory_qty: number;
+  reserved_inventory_qty: number;
+  inbound_date: string;
+  warehouse: string;
+  stock_status: string;
+  stock_type: string;
+  batch_no: string;
+  purchase_qty: number;
+}
+
+// ============= 任务导入导出 =============
+
+export interface TaskExportPackage {
+  version: '1.0';
+  exportedAt: string;
+  exportedBy: '供应链大脑';
+  task: PlanningTask;
+  ganttSnapshot: GanttBar[];
+  keyMaterials: KeyMonitorMaterial[];
 }
 
 /** 步骤①确认数据 */
@@ -347,6 +429,7 @@ export interface GanttBar {
   poStatus: 'has_po' | 'no_po' | 'not_applicable';
   prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
   poDeliverDate?: string;    // 最新PO交货日
+  availableInventoryQty?: number;  // 可用库存数量
   children: GanttBar[];
 }
 

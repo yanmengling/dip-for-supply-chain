@@ -76,6 +76,22 @@ const GanttTooltip = ({ bar, x, y, onMouseEnter, onMouseLeave }: GanttTooltipPro
             </div>
           </div>
 
+          {/* 库存信息 */}
+          <div className="flex justify-between">
+            <span className="text-slate-500">可用库存:</span>
+            <span className={
+              bar.availableInventoryQty === undefined
+                ? 'text-slate-400'
+                : bar.availableInventoryQty <= 0
+                ? 'text-red-600 font-medium'
+                : 'text-emerald-700 font-medium'
+            }>
+              {bar.availableInventoryQty === undefined
+                ? '—'
+                : bar.availableInventoryQty.toLocaleString()}
+            </span>
+          </div>
+
           {/* 缺口信息 */}
           {bar.hasShortage && (
             <div className="bg-red-50 border border-red-200 rounded px-2 py-1.5">

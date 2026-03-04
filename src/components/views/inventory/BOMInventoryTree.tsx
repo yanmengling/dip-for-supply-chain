@@ -557,9 +557,16 @@ export const BOMInventoryTree: React.FC<BOMInventoryTreeProps> = ({ onClose, isE
                                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                                 className="flex items-center justify-between w-[320px] px-3 py-2 bg-white border border-slate-300 rounded-lg shadow-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
                             >
-                                <div className="flex items-center gap-2 truncate">
+                                <div className="flex items-center gap-2 min-w-0 flex-1">
                                     <Package size={16} className="text-indigo-500 flex-shrink-0" />
-                                    <span className="truncate">{selectedProduct ? products.find(p => p.product_code === selectedProduct)?.product_name || selectedProduct : '选择产品...'}</span>
+                                    <span className="truncate">
+                                        {selectedProduct
+                                            ? (() => {
+                                                const p = products.find(pr => pr.product_code === selectedProduct);
+                                                return p ? `${p.product_code} ${p.product_name || ''}`.trim() || selectedProduct : selectedProduct;
+                                            })()
+                                            : '选择产品...'}
+                                    </span>
                                 </div>
                                 <ChevronDown size={16} className={`text-slate-400 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} />
                             </button>

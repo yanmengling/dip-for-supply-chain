@@ -1,10 +1,10 @@
 /**
  * 甘特图任务条 - 倒排模式
  *
- * 颜色方案：
- * - 深蓝 #1E3A5F: on_time（按时，无风险）
- * - 红色 #E24C4B: risk（需立即行动）
- * - 绿色 #27AE60: ordered（已下单，就绪）
+ * 颜色方案（与整体 indigo/slate 风格对齐）：
+ * - indigo  #4F46E5: on_time（按时，无风险）
+ * - red     #DC2626: risk（风险，需行动）
+ * - emerald #059669: ordered（已下单，就绪）
  */
 
 import { useMemo } from 'react';
@@ -13,46 +13,56 @@ import type { GanttBar } from '../../../types/planningV2';
 interface GanttTaskBarProps {
   bar: GanttBar;
   chartStart: Date;
-  totalDays: number;
+  /** 每天对应的像素宽度 */
+  dayWidth: number;
   productionStartDate: Date;
   onMouseEnter?: (e: React.MouseEvent<HTMLDivElement>) => void;
   onMouseLeave?: () => void;
 }
 
 const STATUS_COLORS: Record<GanttBar['status'], string> = {
-  on_time: '#1E3A5F',
-  risk: '#E24C4B',
-  ordered: '#27AE60',
+  on_time: '#4F46E5',   // indigo-600：按时，无风险
+  risk:    '#DC2626',   // red-600：风险，需行动
+  ordered: '#059669',  // emerald-600：已下单，就绪
 };
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 const GanttTaskBar = ({
   bar,
   chartStart,
-  totalDays,
+  dayWidth,
   productionStartDate,
   onMouseEnter,
   onMouseLeave,
 }: GanttTaskBarProps) => {
   const barStyle = useMemo(() => {
-    const chartStartMs = chartStart.getTime();
-    const chartRange = totalDays * 24 * 60 * 60 * 1000;
-    const startOffset = Math.max(0, (bar.startDate.getTime() - chartStartMs) / chartRange * 100);
-    const width = Math.max(0.5, (bar.endDate.getTime() - bar.startDate.getTime()) / chartRange * 100);
+    // 全部归零到当天零点，避免时分秒差导致偏移一天
+    const chartStartDay = new Date(chartStart); chartStartDay.setHours(0, 0, 0, 0);
+    const barStart = new Date(bar.startDate); barStart.setHours(0, 0, 0, 0);
+    const barEnd = new Date(bar.endDate); barEnd.setHours(0, 0, 0, 0);
+    const startOffsetDays = (barStart.getTime() - chartStartDay.getTime()) / MS_PER_DAY;
+    const durationDays = (barEnd.getTime() - barStart.getTime()) / MS_PER_DAY;
+    const left = Math.max(0, startOffsetDays * dayWidth);
+    const width = Math.max(dayWidth * 0.5, durationDays * dayWidth);
     return {
-      left: `${startOffset}%`,
-      width: `${Math.min(width, 100 - startOffset)}%`,
+      left: `${left}px`,
+      width: `${width}px`,
       backgroundColor: STATUS_COLORS[bar.status],
     };
-  }, [bar, chartStart, totalDays]);
+  }, [bar, chartStart, dayWidth]);
 
-  // 今天标记线
-  const todayOffset = useMemo(() => {
+  // 今天标记线（像素定位）
+  const todayLeft = useMemo(() => {
     const today = new Date();
-    const chartStartMs = chartStart.getTime();
-    const chartRange = totalDays * 24 * 60 * 60 * 1000;
-    const offset = (today.getTime() - chartStartMs) / chartRange * 100;
-    return offset >= 0 && offset <= 100 ? offset : null;
-  }, [chartStart, totalDays]);
+    today.setHours(0, 0, 0, 0);
+    // chartStart 也归零，避免时区/时分秒差导致偏移一天
+    const chartStartDay = new Date(chartStart);
+    chartStartDay.setHours(0, 0, 0, 0);
+    const offsetDays = (today.getTime() - chartStartDay.getTime()) / MS_PER_DAY;
+    if (offsetDays < 0) return null;
+    return offsetDays * dayWidth;
+  }, [chartStart, dayWidth]);
 
   return (
     <div className="relative h-7">
@@ -70,11 +80,11 @@ const GanttTaskBar = ({
       </div>
 
       {/* 今天标记线 */}
-      {todayOffset !== null && (
+      {todayLeft !== null && (
         <div
           className="absolute top-0 bottom-0 pointer-events-none z-10"
           style={{
-            left: `${todayOffset}%`,
+            left: `${todayLeft}px`,
             width: '1px',
             borderLeft: '1px dashed #EF4444',
           }}

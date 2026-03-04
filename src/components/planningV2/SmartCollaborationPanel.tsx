@@ -15,8 +15,10 @@ import {
   Calendar,
 } from 'lucide-react';
 import { ganttService } from '../../services/ganttService';
-import type { Step1Data, Step2Data, GanttBar } from '../../types/planningV2';
+import { taskService } from '../../services/taskService';
+import type { Step1Data, Step2Data, GanttBar, KeyMonitorMaterial } from '../../types/planningV2';
 import GanttChart from './gantt/GanttChart';
+import ShortageList from './ShortageList';
 
 interface SmartCollaborationPanelProps {
   active: boolean;
@@ -58,11 +60,14 @@ const SmartCollaborationPanel = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [taskName, setTaskName] = useState('');
+  const [keyMaterials, setKeyMaterials] = useState<KeyMonitorMaterial[]>([]);
+  const [keyMaterialsLoading, setKeyMaterialsLoading] = useState(false);
 
-  // ---------- Fetch gantt data ----------
+  // ---------- Fetch gantt data + key materials ----------
   const fetchGantt = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setKeyMaterials([]);
     try {
       const bars = await ganttService.buildGanttData(
         step1Data.productCode,
@@ -70,6 +75,18 @@ const SmartCollaborationPanel = ({
         step2Data.productionEnd,
       );
       setGanttBars(bars);
+
+      // 甘特图加载完成后，异步加载关键监测物料清单（含库存）
+      setKeyMaterialsLoading(true);
+      taskService.buildKeyMaterialList(bars, step2Data.productionStart)
+        .then(list => {
+          console.log(`[SmartCollaboration] 关键监测物料清单: ${list.length} 条`);
+          setKeyMaterials(list);
+        })
+        .catch(err => {
+          console.warn('[SmartCollaboration] 关键监测物料清单加载失败:', err);
+        })
+        .finally(() => setKeyMaterialsLoading(false));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '甘特图数据加载失败';
       setError(msg);
@@ -137,6 +154,7 @@ const SmartCollaborationPanel = ({
             <GanttChart
               bars={ganttBars}
               productionStart={step2Data.productionStart}
+              productionEnd={step2Data.productionEnd}
             />
           </div>
         ) : (
@@ -146,7 +164,16 @@ const SmartCollaborationPanel = ({
         )}
       </section>
 
-      {/* ---- (b) Summary Card ---- */}
+      {/* ---- (b) Key Material List ---- */}
+      <section>
+        <ShortageList
+          keyMaterials={keyMaterials}
+          productCode={step1Data.productCode}
+          loading={keyMaterialsLoading}
+        />
+      </section>
+
+      {/* ---- (c) Summary Card ---- */}
       <section className="bg-gray-50 rounded-lg p-5">
         <h3 className="text-base font-semibold text-slate-800 mb-4">
           计划协同摘要

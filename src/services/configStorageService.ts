@@ -14,6 +14,7 @@ import {
     type AgentConfig,
     type WorkflowConfig,
     type ConfigImportExportOptions,
+    type ConfigImportOptions,
     type ConfigValidationError
 } from '../types/apiConfig';
 
@@ -302,8 +303,15 @@ class ConfigStorageService {
 
     /**
      * Import configuration from JSON string
+     * @param jsonString JSON string to import
+     * @param optionsOrMerge If boolean: merge with existing (true) or replace all (false). If object: { merge?, overwriteTypes? }. overwriteTypes: only overwrite these types with imported data, keep others.
      */
-    importConfig(jsonString: string, merge: boolean = false): void {
+    importConfig(jsonString: string, optionsOrMerge: boolean | ConfigImportOptions = false): void {
+        const options: ConfigImportOptions =
+            typeof optionsOrMerge === 'boolean'
+                ? { merge: optionsOrMerge }
+                : optionsOrMerge ?? { merge: false };
+
         try {
             const imported = JSON.parse(jsonString) as Partial<ApiConfigCollection>;
 
@@ -313,8 +321,34 @@ class ConfigStorageService {
                 throw new Error(`Configuration validation failed: ${errors.map(e => e.message).join(', ')}`);
             }
 
-            if (merge) {
-                // Merge with existing configuration
+            const overwriteTypes = options.overwriteTypes;
+            if (overwriteTypes && overwriteTypes.length > 0) {
+                // Overwrite only the specified types with imported data; other types unchanged
+                const existing = this.loadConfig();
+                const typeToKey: Record<ApiConfigType, keyof Omit<ApiConfigCollection, 'version' | 'lastUpdated'>> = {
+                    [ApiConfigType.KNOWLEDGE_NETWORK]: 'knowledgeNetworks',
+                    [ApiConfigType.ONTOLOGY_OBJECT]: 'ontologyObjects',
+                    [ApiConfigType.METRIC_MODEL]: 'metricModels',
+                    [ApiConfigType.AGENT]: 'agents',
+                    [ApiConfigType.WORKFLOW]: 'workflows'
+                };
+                const result: ApiConfigCollection = {
+                    knowledgeNetworks: existing.knowledgeNetworks,
+                    ontologyObjects: existing.ontologyObjects,
+                    metricModels: existing.metricModels,
+                    agents: existing.agents,
+                    workflows: existing.workflows,
+                    version: this.version,
+                    lastUpdated: Date.now()
+                };
+                for (const t of overwriteTypes) {
+                    const key = typeToKey[t];
+                    const importedList = (imported[key] as any[]) ?? [];
+                    (result as any)[key] = Array.isArray(importedList) ? importedList : [];
+                }
+                this.saveConfig(result);
+            } else if (options.merge) {
+                // Merge with existing configuration (add/update by id)
                 const existing = this.loadConfig();
                 const merged: ApiConfigCollection = {
                     knowledgeNetworks: this.mergeConfigs(existing.knowledgeNetworks, imported.knowledgeNetworks || []),

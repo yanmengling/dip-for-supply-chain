@@ -1,3 +1,11 @@
+/**
+ * 任务卡片组件
+ *
+ * PRD v2.8 第 3.3~3.4 节
+ * 支持新状态: active / completed / incomplete / expired
+ * 向后兼容旧 ended 状态
+ */
+
 import React from 'react';
 import { X } from 'lucide-react';
 import type { PlanningTask } from '../../types/planningV2';
@@ -10,11 +18,14 @@ interface TaskCardProps {
   onDeleteTask: (taskId: string) => void;
 }
 
-const statusConfig = {
-  active: { label: '进行中', color: 'bg-green-100 text-green-700', dot: 'bg-green-500' },
-  ended: { label: '已结束', color: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
-  expired: { label: '已过期', color: 'bg-red-100 text-red-700', dot: 'bg-red-500' },
-} as const;
+const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
+  active:     { label: '进行中', color: 'bg-green-100 text-green-700',  dot: 'bg-green-500' },
+  completed:  { label: '已完成', color: 'bg-blue-100 text-blue-700',   dot: 'bg-blue-500' },
+  incomplete: { label: '未完成', color: 'bg-orange-100 text-orange-700', dot: 'bg-orange-500' },
+  expired:    { label: '已过期', color: 'bg-red-100 text-red-700',     dot: 'bg-red-500' },
+  // 向后兼容
+  ended:      { label: '已结束', color: 'bg-gray-100 text-gray-600',   dot: 'bg-gray-400' },
+};
 
 export default function TaskCard({
   task,
@@ -23,8 +34,8 @@ export default function TaskCard({
   onEndTask,
   onDeleteTask,
 }: TaskCardProps) {
-  const sc = statusConfig[task.status];
-  const canDelete = task.status === 'ended' || task.status === 'expired';
+  const sc = statusConfig[task.status] || statusConfig.active;
+  const canDelete = task.status !== 'active';
   const createdDate = new Date(task.createdAt);
   const dateStr = `${String(createdDate.getMonth() + 1).padStart(2, '0')}-${String(createdDate.getDate()).padStart(2, '0')}`;
 

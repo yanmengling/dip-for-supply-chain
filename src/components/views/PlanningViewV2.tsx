@@ -19,6 +19,7 @@ import ProductDemandPanel from '../planningV2/ProductDemandPanel';
 import MasterProductionPanel from '../planningV2/MasterProductionPanel';
 import MaterialRequirementPanel from '../planningV2/MaterialRequirementPanel';
 import SmartCollaborationPanel from '../planningV2/SmartCollaborationPanel';
+import DataLineagePanel from '../planningV2/DataLineagePanel';
 import ConfirmDialog from '../planningV2/ConfirmDialog';
 import { ArrowLeft } from 'lucide-react';
 
@@ -39,7 +40,6 @@ const PlanningViewV2 = () => {
   // 确认对话框状态
   type DialogState =
     | { type: 'none' }
-    | { type: 'end-task'; taskId: string }
     | { type: 'delete-task'; taskId: string; taskName: string }
     | { type: 'reset-step1' }
     | { type: 'reset-step2' };
@@ -76,9 +76,10 @@ const PlanningViewV2 = () => {
 
   // ======================== 任务操作 ========================
 
+  // 任务列表中的"结束任务"（简化版 — 直接跳转到详情页让用户在那里结束）
   const handleEndTask = useCallback((taskId: string) => {
-    setDialog({ type: 'end-task', taskId });
-  }, []);
+    goToTaskDetail(taskId);
+  }, [goToTaskDetail]);
 
   const handleDeleteTask = useCallback((taskId: string) => {
     const task = taskService.getTaskById(taskId);
@@ -88,10 +89,7 @@ const PlanningViewV2 = () => {
   }, []);
 
   const handleDialogConfirm = useCallback(() => {
-    if (dialog.type === 'end-task') {
-      taskService.endTask(dialog.taskId);
-      setTaskVersion(v => v + 1);
-    } else if (dialog.type === 'delete-task') {
+    if (dialog.type === 'delete-task') {
       taskService.deleteTask(dialog.taskId);
       setTaskVersion(v => v + 1);
       if (currentTaskId === dialog.taskId) goToTaskList();
@@ -221,14 +219,15 @@ const PlanningViewV2 = () => {
             onEndTask={handleEndTask}
             onDeleteTask={handleDeleteTask}
             onNewTask={goToNewTask}
+            onTaskImported={() => setTaskVersion(v => v + 1)}
           />
         )}
 
         {/* 视图2: 新建任务流程 */}
         {viewMode === 'new-task' && (
           <div>
-            {/* 顶部导航（sticky 固定在视口顶部） */}
-            <div className="sticky top-0 z-10 bg-white border-b border-slate-200 px-6 py-3">
+            {/* 顶部导航（跟随页面滚动，不固定） */}
+            <div className="bg-white border-b border-slate-200 px-6 py-3">
               <div className="flex items-center gap-3 mb-3">
                 <button
                   onClick={goToTaskList}
@@ -280,6 +279,11 @@ const PlanningViewV2 = () => {
                     onBack={handleStepBack}
                   />
                 )}
+                {/* 数据溯源信息板：跟随当前激活步骤切换内容 */}
+                <DataLineagePanel
+                  step={currentStep}
+                  productCode={step1Data?.productCode}
+                />
               </div>
             </div>
           </div>
@@ -290,10 +294,7 @@ const PlanningViewV2 = () => {
           <TaskDetailView
             task={currentTask}
             onBack={goToTaskList}
-            onEndTask={(id) => {
-              handleEndTask(id);
-              setTaskVersion(v => v + 1);
-            }}
+            onTaskUpdated={() => setTaskVersion(v => v + 1)}
           />
         )}
 
@@ -311,15 +312,6 @@ const PlanningViewV2 = () => {
       </div>
 
       {/* 确认对话框 */}
-      <ConfirmDialog
-        open={dialog.type === 'end-task'}
-        title="结束计划协同任务"
-        description="确认结束该计划协同任务？结束后任务将变为只读，无法继续监测。"
-        confirmLabel="结束任务"
-        variant="warning"
-        onConfirm={handleDialogConfirm}
-        onCancel={() => setDialog({ type: 'none' })}
-      />
       <ConfirmDialog
         open={dialog.type === 'delete-task'}
         title="删除计划协同任务"

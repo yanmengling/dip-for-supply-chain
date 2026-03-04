@@ -4,7 +4,7 @@
  * Fetches knowledge network data from real API and renders as draggable graph
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import ReactFlow, {
   Controls,
   Background,
@@ -18,7 +18,7 @@ import type { Connection, Node, Edge } from 'reactflow';
 import 'reactflow/dist/style.css';
 import { ontologyApi } from '../../api';
 import type { ObjectType, EdgeType } from '../../api';
-import { Home, Factory, Warehouse, Users, Package, Box, GitBranch, ShoppingCart, Truck, MapPin, Loader2, Database } from 'lucide-react';
+import { Home, Factory, Warehouse, Users, Package, Box, GitBranch, ShoppingCart, Truck, MapPin, Loader2, Database, Search } from 'lucide-react';
 
 
 // Icon mapping for common entity types
@@ -122,6 +122,11 @@ function edgeTypeToEdge(edgeType: EdgeType): Edge {
 const nodeTypes = {};
 const edgeTypes = {};
 
+// 业务对象属性显示名称：优先 display_name（API/知识网络），其次 alias，最后 name
+function getPropertyDisplayName(p: { name: string; alias?: string; display_name?: string }): string {
+  return p.display_name || p.alias || p.name;
+}
+
 // Instance Data Table Component
 const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
   const [data, setData] = useState<any[]>([]);
@@ -129,6 +134,7 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
   const [error, setError] = useState<string | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
+  const [searchText, setSearchText] = useState('');
   const pageSize = 10;
 
   useEffect(() => {
@@ -137,7 +143,7 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
         setLoading(true);
         // Using the configured objectType.id which comes from the API
         const response = await ontologyApi.queryObjectInstances(objectType.id, {
-          limit: 1000,
+          limit: 10000,
           need_total: true
         });
         setData(response.entries || []);
@@ -159,6 +165,31 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
     }
   }, [objectType.id]);
 
+  // Identify columns: use business object property display name (display_name / alias / name)
+  const columns = objectType.data_properties?.map(p => ({ key: p.name, label: getPropertyDisplayName(p) }))
+    || (data.length > 0 ? Object.keys(data[0]).slice(0, 5).map(k => ({ key: k, label: k })) : []);
+
+  // Filter out internal fields if using auto-discovery
+  const displayColumns = columns.filter(c => !c.key.startsWith('_') && c.key !== 'id');
+
+  // Attribute search: filter rows by any column value (case-insensitive)
+  const filteredData = useMemo(() => {
+    if (!searchText.trim()) return data;
+    const q = searchText.trim().toLowerCase();
+    return data.filter(row =>
+      displayColumns.some(col => String(row[col.key] ?? '').toLowerCase().includes(q))
+    );
+  }, [data, searchText, displayColumns]);
+
+  const filteredCount = filteredData.length;
+  const totalPages = Math.ceil(filteredCount / pageSize) || 1;
+  const paginatedData = filteredData.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
+  // Reset to page 1 when search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchText]);
+
   if (loading) return (
     <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm h-40 flex items-center justify-center">
       <div className="flex items-center gap-2 text-slate-500">
@@ -169,13 +200,6 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
   );
 
   if (error) return null; // Skip if error
-
-  // Identify columns from the first record or objectType properties
-  const columns = objectType.data_properties?.map(p => ({ key: p.name, label: p.alias || p.name }))
-    || (data.length > 0 ? Object.keys(data[0]).slice(0, 5).map(k => ({ key: k, label: k })) : []);
-
-  // Filter out internal fields if using auto-discovery
-  const displayColumns = columns.filter(c => !c.key.startsWith('_') && c.key !== 'id');
 
   if (displayColumns.length === 0) return (
     <div className="bg-white p-4 rounded-lg border border-slate-200 shadow-sm">
@@ -191,10 +215,6 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
     </div>
   );
 
-  // Pagination Logic
-  const totalPages = Math.ceil(data.length / pageSize);
-  const paginatedData = data.slice((currentPage - 1) * pageSize, currentPage * pageSize);
-
   const handlePrevPage = () => {
     if (currentPage > 1) setCurrentPage(p => p - 1);
   };
@@ -205,15 +225,33 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
 
   return (
     <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-          <div
-            className="w-3 h-3 rounded-full"
-            style={{ backgroundColor: objectType.color || '#6366f1' }}
+      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 flex flex-col gap-3">
+        <div className="flex justify-between items-center flex-wrap gap-2">
+          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+            <div
+              className="w-3 h-3 rounded-full"
+              style={{ backgroundColor: objectType.color || '#6366f1' }}
+            />
+            {objectType.name}
+            <span className="text-xs font-normal text-slate-500">({totalCount} 条记录)</span>
+          </h3>
+        </div>
+        {/* 属性搜索过滤 */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            placeholder="按属性值搜索过滤..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 bg-white"
           />
-          {objectType.name}
-          <span className="text-xs font-normal text-slate-500">({totalCount} 条记录)</span>
-        </h3>
+        </div>
+        {searchText.trim() && (
+          <p className="text-xs text-slate-500">
+            筛选结果：共 {filteredCount} 条（总 {data.length} 条）
+          </p>
+        )}
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
@@ -248,10 +286,12 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
 
       {/* Pagination Controls */}
       {data.length > 0 && (
-        <div className="px-4 py-2 border-t border-slate-100 flex justify-between items-center bg-slate-50/30">
+        <div className="px-4 py-2 border-t border-slate-100 flex justify-between items-center bg-slate-50/30 flex-wrap gap-2">
           <div className="text-xs text-slate-500">
-            显示 {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, data.length)} 条，共 {data.length} 条
-            {totalCount > data.length && <span className="ml-1 text-slate-400">(总数 {totalCount})</span>}
+            {searchText.trim()
+              ? `显示 ${(currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, filteredCount)} 条，筛选后共 ${filteredCount} 条（总 ${data.length} 条）`
+              : `显示 ${(currentPage - 1) * pageSize + 1} - ${Math.min(currentPage * pageSize, data.length)} 条，共 ${data.length} 条`}
+            {totalCount > data.length && <span className="ml-1 text-slate-400">(后端总数 {totalCount})</span>}
           </div>
           <div className="flex gap-2">
             <button
@@ -262,7 +302,7 @@ const InstanceDataTable = ({ objectType }: { objectType: ObjectType }) => {
               上一页
             </button>
             <span className="text-xs text-slate-600 self-center">
-              {currentPage} / {totalPages || 1}
+              {currentPage} / {totalPages}
             </span>
             <button
               onClick={handleNextPage}

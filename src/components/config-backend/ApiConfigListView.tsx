@@ -10,6 +10,7 @@ import { Plus, Search, Filter, Download, Upload, RefreshCw, Trash2, Copy, Power 
 import type { ApiConfigType, AnyApiConfig, BaseApiConfig } from '../../types/apiConfig';
 import { apiConfigService } from '../../services/apiConfigService';
 import { ConfigCard } from './ConfigCard';
+import ConfirmDialog from '../planningV2/ConfirmDialog';
 
 // ============================================================================
 // Props Interface
@@ -68,6 +69,9 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
     const [isLoading, setIsLoading] = useState(false);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+    const [importConfirmOpen, setImportConfirmOpen] = useState(false);
 
     // Load configurations
     useEffect(() => {
@@ -121,21 +125,29 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
     };
 
     /**
-     * Handle configuration deletion
+     * Open delete confirmation dialog
      */
-    const handleDelete = async (id: string) => {
-        if (!confirm('确定要删除此配置吗？此操作不可撤销。')) {
-            return;
-        }
+    const requestDelete = (id: string) => {
+        setDeleteConfirmId(id);
+        setDeleteConfirmOpen(true);
+    };
 
+    /**
+     * Handle configuration deletion (after user confirms)
+     */
+    const handleDeleteConfirm = () => {
+        if (!deleteConfirmId) return;
         try {
-            const success = apiConfigService.deleteConfig(id);
+            const success = apiConfigService.deleteConfig(deleteConfirmId);
             if (success) {
                 loadConfigs();
             }
         } catch (error) {
             console.error('Failed to delete configuration:', error);
             alert('删除配置失败，请重试');
+        } finally {
+            setDeleteConfirmOpen(false);
+            setDeleteConfirmId(null);
         }
     };
 
@@ -211,9 +223,17 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
     };
 
     /**
-     * Handle import
+     * Open import confirmation dialog (import will overwrite existing configs)
      */
-    const handleImport = () => {
+    const requestImport = () => {
+        setImportConfirmOpen(true);
+    };
+
+    /**
+     * Handle import (after user confirms overwrite warning)
+     */
+    const handleImportConfirm = () => {
+        setImportConfirmOpen(false);
         const input = document.createElement('input');
         input.type = 'file';
         input.accept = '.json';
@@ -223,7 +243,7 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
 
             try {
                 const text = await file.text();
-                apiConfigService.importConfig(text, true); // merge=true
+                apiConfigService.importConfig(text, { overwriteTypes: [configType] }); // 覆盖当前类型，不合并
                 loadConfigs();
                 alert('配置导入成功');
             } catch (error) {
@@ -296,7 +316,7 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
                         导出
                     </button>
                     <button
-                        onClick={handleImport}
+                        onClick={requestImport}
                         className="flex items-center gap-2 px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
                         title="导入配置"
                     >
@@ -342,7 +362,7 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
                             key={config.id}
                             config={config as AnyApiConfig}
                             onEdit={() => onEdit(config as AnyApiConfig)}
-                            onDelete={() => handleDelete(config.id)}
+                            onDelete={() => requestDelete(config.id)}
                             onDuplicate={() => handleDuplicate(config.id)}
                             onToggleEnabled={() => handleToggleEnabled(config.id)}
                             onTest={() => handleTest(config as AnyApiConfig)}
@@ -350,6 +370,33 @@ export function ApiConfigListView({ configType, onEdit, onCreate }: ApiConfigLis
                     ))}
                 </div>
             )}
+
+            {/* 删除确认弹窗 */}
+            <ConfirmDialog
+                open={deleteConfirmOpen}
+                title="确定要删除此配置吗？"
+                description="此操作不可撤销。"
+                confirmLabel="删除"
+                cancelLabel="取消"
+                variant="danger"
+                onConfirm={handleDeleteConfirm}
+                onCancel={() => {
+                    setDeleteConfirmOpen(false);
+                    setDeleteConfirmId(null);
+                }}
+            />
+
+            {/* 导入确认弹窗：提醒将覆盖现有配置 */}
+            <ConfirmDialog
+                open={importConfirmOpen}
+                title="导入配置"
+                description="导入的配置将覆盖当前同类型的现有业务知识网络对象配置。是否继续？"
+                confirmLabel="继续导入"
+                cancelLabel="取消"
+                variant="warning"
+                onConfirm={handleImportConfirm}
+                onCancel={() => setImportConfirmOpen(false)}
+            />
         </div>
     );
 }

@@ -1,20 +1,24 @@
 /**
  * 动态计划协同 V2 - 数据服务
  *
- * 基于 Ontology API 对象加载 PP/MPS/MRP 数据
- * 参考: /docs/PRD_动态计划协同V2.md 和 /docs/HD供应链业务知识网络_v2.json
+ * 基于 Ontology API 对象加载数据
+ * 参考: /docs/PRD_动态计划协同V2.md 和 /docs/HD供应链业务知识网络_v2-3.json
+ *
+ * v2.9 变更：步骤①数据源改为 product + forecast，废弃 PP 对象
  */
 
 import { ontologyApi } from '../api';
-import type { BOMRecord, MaterialRecord, PRRecord, PORecord } from '../types/planningV2';
+import type { BOMRecord, MaterialRecord, PRRecord, PORecord, InventoryRecord } from '../types/planningV2';
 
 // ============================================================================
 // Object Type IDs (对接 HD供应链业务知识网络)
 // ============================================================================
 
 const OBJECT_TYPE_IDS = {
-    // 产品需求计划 - 82条数据
-    PP: 'supplychain_hd0202_pp',
+    // 产品主数据 (v2.9 新增，替代 PP 作为步骤①产品来源)
+    PRODUCT: 'supplychain_hd0202_product',
+    // 需求预测 (v2.9 新增，替代 PP 作为步骤①需求数据)
+    FORECAST: 'supplychain_hd0202_forecast',
     // 工厂生产计划 - 6条数据
     MPS: 'supplychain_hd0202_mps',
     // 物料需求计划 - 663条数据
@@ -27,6 +31,8 @@ const OBJECT_TYPE_IDS = {
     PR: 'supplychain_hd0202_pr',
     // 采购订单 - 31732条
     PO: 'supplychain_hd0202_po',
+    // 库存 - 38608条
+    INVENTORY: 'supplychain_hd0202_inventory',
 };
 
 // ============================================================================
@@ -34,7 +40,50 @@ const OBJECT_TYPE_IDS = {
 // ============================================================================
 
 /**
- * 产品需求计划 (PP)
+ * 产品主数据 (v2.9，替代 PP 作为步骤①产品列表来源)
+ * API 对象: supplychain_hd0202_product
+ * 数据源: HD_产品
+ * 主键: material_number
+ */
+export interface ProductAPI {
+    /** 产品编码（主键，mapped: material_code） */
+    material_number: string;
+    /** 产品名称 */
+    material_name: string;
+}
+
+/**
+ * 需求预测 (v2.9，替代 PP 作为步骤①需求数据)
+ * API 对象: supplychain_hd0202_forecast
+ * 数据源: erp_mds_forecast
+ * 主键: billno + material_number
+ */
+export interface ForecastRecordAPI {
+    /** 预测单号（主键之一） */
+    billno: string;
+    /** 物料编码（产品编码，主键之一） */
+    material_number: string;
+    /** 物料名称（产成品名称） */
+    material_name: string;
+    /** 预测交货日期（该产品预测需要交货的日期） */
+    startdate: string;
+    /** 预测终止日期 */
+    enddate: string;
+    /** 预测数量 */
+    qty: number;
+    /** 单据创建时间 */
+    bizdate: string;
+    /** 创建人 */
+    creator_name: string;
+    /** 审核日期 */
+    auditdate: string;
+    /** 审核人 */
+    auditor_name: string;
+}
+
+/**
+ * 产品需求计划 (PP) — 已废弃，v2.9 起不再用于步骤①
+ * 保留类型定义供历史数据向后兼容，代码中不再调用 loadProductDemandPlans
  * API 对象: supplychain_hd0202_pp
  * 数据源: product_demand_plan
  * 数据量: 82 条
@@ -135,6 +184,108 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 }
 
 // ============================================================================
+// 产品主数据加载 (v2.9，步骤①产品列表来源)
+// ============================================================================
+
+/**
+ * 全量加载产品主数据（步骤①产品选择列表）
+ *
+ * 数据溯源:
+ *   API 对象: supplychain_hd0202_product（数据视图 HD_产品）
+ *   字段: material_number（产品编码），material_name（产品名称）
+ *   缓存: product_list，TTL 5min
+ */
+export async function loadProducts(forceReload = false): Promise<ProductAPI[]> {
+    const cacheKey = 'product_list';
+    if (!forceReload) {
+        const cached = getCached<ProductAPI[]>(cacheKey);
+        if (cached) {
+            console.log('[PlanningV2DataService] 使用缓存的产品列表');
+            return cached;
+        }
+    }
+
+    console.log('[PlanningV2DataService] 从 API 加载产品列表...');
+    try {
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
+            limit: 10000,
+            need_total: true,
+        });
+
+        const data: ProductAPI[] = response.entries.map((item: any) => ({
+            material_number: item.material_number || '',
+            material_name: item.material_name || '',
+        })).filter((p: ProductAPI) => p.material_number !== '');
+
+        data.sort((a, b) => a.material_number.localeCompare(b.material_number));
+        console.log(`[PlanningV2DataService] 产品列表: ${data.length} 条`);
+        setCache(cacheKey, data);
+        return data;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载产品列表失败:', error);
+        throw error;
+    }
+}
+
+// ============================================================================
+// 需求预测数据加载 (v2.9，步骤①需求数据来源)
+// ============================================================================
+
+/**
+ * 按产品编码查询需求预测记录（步骤①选产品后自动聚合）
+ *
+ * 数据溯源:
+ *   API 对象: supplychain_hd0202_forecast（数据视图 erp_mds_forecast）
+ *   查询条件: material_number == productCode
+ *   关键字段: startdate（预测交货日期）, enddate（预测终止日期）, qty（预测数量）
+ *   缓存: forecast_{productCode}，TTL 5min
+ */
+export async function loadForecastByProduct(productCode: string): Promise<ForecastRecordAPI[]> {
+    const cacheKey = `forecast_${productCode}`;
+    const cached = getCached<ForecastRecordAPI[]>(cacheKey);
+    if (cached) {
+        console.log(`[PlanningV2DataService] 使用缓存的需求预测数据: ${productCode}`);
+        return cached;
+    }
+
+    console.log(`[PlanningV2DataService] 加载需求预测: ${productCode}...`);
+    try {
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.FORECAST, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'material_number', operation: '==', value: productCode }
+                ]
+            },
+            limit: 10000,
+            need_total: true,
+        });
+
+        const data: ForecastRecordAPI[] = response.entries.map((item: any) => ({
+            billno: item.billno || '',
+            material_number: item.material_number || '',
+            material_name: item.material_name || '',
+            startdate: item.startdate || '',
+            enddate: item.enddate || '',
+            qty: parseFloat(item.qty) || 0,
+            bizdate: item.bizdate || '',
+            creator_name: item.creator_name || '',
+            auditdate: item.auditdate || '',
+            auditor_name: item.auditor_name || '',
+        }));
+
+        // 按 startdate 升序排列
+        data.sort((a, b) => (a.startdate > b.startdate ? 1 : -1));
+        console.log(`[PlanningV2DataService] 需求预测 ${productCode}: ${data.length} 条`);
+        setCache(cacheKey, data);
+        return data;
+    } catch (error) {
+        console.error(`[PlanningV2DataService] 加载需求预测失败 ${productCode}:`, error);
+        throw error;
+    }
+}
+
+// ============================================================================
 // 产品需求计划 (PP) 数据加载
 // ============================================================================
 
@@ -175,7 +326,12 @@ export async function loadProductDemandPlans(forceReload: boolean = false): Prom
         return plans;
     } catch (error) {
         console.error('[PlanningV2DataService] 加载产品需求计划失败:', error);
-        return [];
+        const knId = ontologyApi.getKnowledgeNetworkId();
+        const msg = error instanceof Error ? error.message : String(error);
+        if (msg.includes('对象类不存在') || msg.includes('ObjectTypeNotFound')) {
+            throw new Error(`当前业务知识网络（${knId}）中不存在对象类型 supplychain_hd0202_pp。若在其它浏览器可正常加载，请在本页面「管理配置」中将业务知识网络改为与其它浏览器一致（如 DIP 供应链业务知识网络）。`);
+        }
+        throw new Error(`加载产品需求计划失败：${msg}。请确认业务知识网络已选择且包含产品需求计划对象（supplychain_hd0202_pp）。`);
     }
 }
 
@@ -405,7 +561,9 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
         return data;
     } catch (error) {
         console.error('[PlanningV2DataService] 加载 BOM 失败:', error);
-        return [];
+        // 重新抛出，让调用方（MaterialRequirementPanel / ganttService）能感知失败并向用户报错
+        // 不静默返回 []，否则调用方会误认为 BOM 为空而非查询失败
+        throw error;
     }
 }
 
@@ -578,6 +736,74 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
 }
 
 // ============================================================================
+// 库存数据加载
+// ============================================================================
+
+/**
+ * 按物料编码列表查询库存记录（自动分片）
+ *
+ * 数据溯源:
+ *   API 对象: supplychain_hd0202_inventory (38608条)
+ *   查询条件: material_code in [codes]
+ *   分片: 50个/批，串行执行
+ */
+export async function loadInventoryByMaterials(materialCodes: string[]): Promise<InventoryRecord[]> {
+    if (materialCodes.length === 0) return [];
+
+    const sortedCodes = [...materialCodes].sort();
+    const cacheKey = `inv_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
+    const cached = getCached<InventoryRecord[]>(cacheKey);
+    if (cached) {
+        console.log(`[PlanningV2DataService] 使用缓存的库存数据 (${cached.length} 条)`);
+        return cached;
+    }
+
+    console.log(`[PlanningV2DataService] 加载库存数据: ${materialCodes.length} 个物料...`);
+
+    try {
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        console.log(`[PlanningV2DataService] 库存数据分 ${chunks.length} 批查询`);
+
+        const allData: InventoryRecord[] = [];
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_code', operation: 'in', value: chunk }
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+            });
+
+            const data: InventoryRecord[] = response.entries.map((item: any) => ({
+                seq_no: parseInt(item.seq_no) || 0,
+                material_code: item.material_code || '',
+                material_name: item.material_name || '',
+                inventory_qty: parseFloat(item.inventory_qty) || 0,
+                available_inventory_qty: parseFloat(item.available_inventory_qty) || 0,
+                reserved_inventory_qty: parseFloat(item.reserved_inventory_qty) || 0,
+                inbound_date: item.inbound_date || '',
+                warehouse: item.warehouse || '',
+                stock_status: item.stock_status || '',
+                stock_type: item.stock_type || '',
+                batch_no: item.batch_no || '',
+                purchase_qty: parseFloat(item.purchase_qty) || 0,
+            }));
+            allData.push(...data);
+        }
+
+        console.log(`[PlanningV2DataService] 库存数据: ${allData.length} 条`);
+        setCache(cacheKey, allData);
+        return allData;
+    } catch (error) {
+        console.error('[PlanningV2DataService] 加载库存数据失败:', error);
+        return [];
+    }
+}
+
+// ============================================================================
 // 清除缓存
 // ============================================================================
 
@@ -591,7 +817,11 @@ export function clearPlanningV2Cache(): void {
 // ============================================================================
 
 export const planningV2DataService = {
-    // PP
+    // Product (v2.9，步骤①)
+    loadProducts,
+    // Forecast (v2.9，步骤①)
+    loadForecastByProduct,
+    // PP（已废弃，保留供内部其他逻辑向后兼容）
     loadProductDemandPlans,
     getProductDemandPlansByProduct,
     getUniqueProducts,
@@ -611,6 +841,8 @@ export const planningV2DataService = {
     loadPRByMaterials,
     // PO
     loadPOByMaterials,
+    // Inventory
+    loadInventoryByMaterials,
     // Cache
     clearCache: clearPlanningV2Cache,
 };

@@ -48,11 +48,30 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
         planningV2DataService.loadBOMByProduct(productCode),
       ]);
 
+      // 与甘特图保持一致：物料范围只取 BOM 主料（过滤替代料），不 union MRP 中额外的物料
+      // MRP 中存在但 BOM 主料树不可达的物料不纳入统计，与甘特图节点集对齐
+      // 替代料判定逻辑与 ganttService.buildBOMTreeFromRecords 保持同步
       const codeSet = new Set<string>();
-      mrpData.forEach(m => codeSet.add(m.main_material));
-      bomData.forEach(b => codeSet.add(b.material_code));
+      const mainBomRecords = bomData.filter(b => !b.alt_part || b.alt_part === '' || b.alt_part === '0');
+      mainBomRecords.forEach(b => codeSet.add(b.material_code));
+
+      // 溯源日志：输出替代料过滤详情，便于排查"暂无物料"问题
+      const altRecords = bomData.filter(b => b.alt_part && b.alt_part !== '' && b.alt_part !== '0');
+      console.log(`[MRP Panel] 产品 ${productCode}: BOM全部 ${bomData.length} 条，主料 ${mainBomRecords.length} 条，替代料(过滤) ${altRecords.length} 条`);
+      if (altRecords.length > 0 && mainBomRecords.length === 0) {
+        // 所有 BOM 记录都被识别为替代料，打印样本帮助排查 alt_part 字段值
+        console.warn(`[MRP Panel] 警告：产品 ${productCode} 所有 BOM 记录均被识别为替代料，可能 alt_part 字段值异常！`);
+        console.warn(`[MRP Panel] 替代料样本 (前5条):`, altRecords.slice(0, 5).map(r => ({
+          material_code: r.material_code, material_name: r.material_name, alt_part: r.alt_part, alt_priority: r.alt_priority
+        })));
+        // Fallback：alt_priority === 0 的记录视为主料（优先级为0是主料的另一判定依据）
+        const fallbackRecords = bomData.filter(b => b.alt_priority === 0);
+        console.warn(`[MRP Panel] Fallback：按 alt_priority === 0 判定主料，找到 ${fallbackRecords.length} 条`);
+        fallbackRecords.forEach(b => codeSet.add(b.material_code));
+      }
+
       const codes = Array.from(codeSet);
-      console.log(`[MRP Panel] 产品 ${productCode}: MRP ${mrpData.length} 条, BOM ${bomData.length} 条, 去重物料 ${codes.length} 个`);
+      console.log(`[MRP Panel] 产品 ${productCode}: MRP ${mrpData.length} 条, BOM ${bomData.length} 条, 最终物料编码 ${codes.length} 个`);
 
       const [materials, prRecords, poRecords] = await Promise.all([
         planningV2DataService.loadMaterialsByCode(codes),

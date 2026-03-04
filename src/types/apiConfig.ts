@@ -388,3 +388,13 @@ export interface ConfigImportExportOptions {
     /** Pretty print JSON */
     prettyPrint?: boolean;
 }
+
+/**
+ * Configuration import options
+ */
+export interface ConfigImportOptions {
+    /** If true, merge imported configs with existing by id (default: false) */
+    merge?: boolean;
+    /** If set, only these types are overwritten with imported data; other types remain unchanged */
+    overwriteTypes?: ApiConfigType[];
+}
