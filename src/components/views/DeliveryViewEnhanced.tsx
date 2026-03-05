@@ -173,11 +173,11 @@ const DeliveryViewEnhanced = (_props: Props) => {
         const searchLower = searchText.toLowerCase();
         const orderNo = order.orderNumber || '';
         const prodName = order.productName || '';
-        const custName = order.customerName || '';
+        const prodCode = order.productCode || '';
         return (
           orderNo.toLowerCase().includes(searchLower) ||
           prodName.toLowerCase().includes(searchLower) ||
-          custName.toLowerCase().includes(searchLower)
+          prodCode.toLowerCase().includes(searchLower)
         );
       }
 
@@ -284,7 +284,7 @@ const DeliveryViewEnhanced = (_props: Props) => {
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
             <input
               type="text"
-              placeholder="搜索订单号、客户、产品..."
+              placeholder="搜索订单号、产品..."
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               className="pl-9 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 w-56"
@@ -434,12 +434,12 @@ const DeliveryViewEnhanced = (_props: Props) => {
                       <div className="flex items-center gap-4 flex-1">
                         <StatusIcon className={order.isOverdue ? 'text-red-500' : 'text-yellow-500'} size={24} />
                         <div className="flex-1">
-                          <p className="font-medium text-slate-800">{order.orderName}</p>
+                          <p className="font-medium text-slate-800">{order.orderNumber}</p>
                           <p className="text-sm text-slate-600 mt-1">
-                            客户: {order.customerName} | 产品: {order.productName} | 数量: {order.quantity} {order.unit}
+                            产品: {[order.productCode, order.productName].filter(Boolean).join(' - ')} | 签约数量: {order.signingQuantity ?? order.quantity} {order.unit} | 交付数量: {order.shippingQuantity ?? '-'} {order.unit}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
-                            交付日期: {order.plannedDeliveryDate}
+                            签约时间: {order.orderDate || '-'} | 承诺交期: {order.plannedDeliveryDate || '-'} | 交付时间: {order.actualDeliveryDate || '-'}
                           </p>
                           <p className="text-xs text-red-600 mt-1">
                             {order.isOverdue ? `已逾期 ${Math.abs(order.daysUntilDue)} 天` : `剩余 ${order.daysUntilDue} 天`}
@@ -515,12 +515,12 @@ const DeliveryViewEnhanced = (_props: Props) => {
                             order.orderStatus === '已完成' ? 'text-green-500' : 'text-slate-500'
                       } size={24} />
                       <div className="flex-1">
-                        <p className="font-medium text-slate-800">{order.orderName}</p>
+                        <p className="font-medium text-slate-800">{order.orderNumber}</p>
                         <p className="text-sm text-slate-600 mt-1">
-                          客户: {order.customerName} | 产品: {order.productName}
+                          产品: {[order.productCode, order.productName].filter(Boolean).join(' - ')} | 签约数量: {order.signingQuantity ?? order.quantity} {order.unit} | 交付数量: {order.shippingQuantity ?? '-'} {order.unit}
                         </p>
                         <p className="text-xs text-slate-500 mt-1">
-                          订单日期: {order.orderDate} | 交付日期: {order.plannedDeliveryDate}
+                          签约时间: {order.orderDate || '-'} | 承诺交期: {order.plannedDeliveryDate || '-'} | 交付时间: {order.actualDeliveryDate || '-'}
                         </p>
                         {order.daysUntilDue >= 0 && order.orderStatus !== '已完成' && order.orderStatus !== '已取消' && (
                           <p className="text-xs text-slate-500 mt-1">剩余 {order.daysUntilDue} 天</p>

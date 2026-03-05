@@ -149,24 +149,29 @@ export async function loadDeliveryOrders(): Promise<DeliveryOrder[]> {
       };
     });
 
-    console.log(`[DeliveryDataService] Loaded ${deliveryOrders.length} delivery orders`);
+    // 过滤掉签约数量<0的订单（驾驶舱订单面板、订单交付共用此数据源）
+    const validOrders = deliveryOrders.filter(
+      o => (o.signingQuantity ?? o.quantity ?? 0) >= 0
+    );
+
+    console.log(`[DeliveryDataService] Loaded ${validOrders.length} delivery orders (excluded ${deliveryOrders.length - validOrders.length} with signing quantity < 0)`);
 
     // Debug: Log status distribution
     const statusCounts: Record<string, number> = {};
-    deliveryOrders.forEach(order => {
+    validOrders.forEach(order => {
       statusCounts[order.orderStatus] = (statusCounts[order.orderStatus] || 0) + 1;
     });
     console.log('[DeliveryDataService] Status distribution:', statusCounts);
 
     // Debug: Log delivery performance
-    const completed = deliveryOrders.filter(o => o.orderStatus === '已完成');
+    const completed = validOrders.filter(o => o.orderStatus === '已完成');
     const delayed = completed.filter(o => {
       if (!o.actualDeliveryDate || !o.plannedDeliveryDate) return false;
       return new Date(o.actualDeliveryDate) > new Date(o.plannedDeliveryDate);
     });
     console.log(`[DeliveryDataService] Delivery performance: ${completed.length} completed, ${delayed.length} delayed`);
 
-    return deliveryOrders;
+    return validOrders;
   } catch (error) {
     console.error('[DeliveryDataService] Failed to load delivery orders:', error);
     return [];

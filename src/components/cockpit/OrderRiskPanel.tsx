@@ -206,9 +206,8 @@ const OrderRiskPanel = ({ onNavigate }: Props) => {
                       </span>
                     </div>
                     <div className="text-xs text-slate-600 space-y-0.5">
-                      <div>客户: {order.customerName}</div>
-                      <div>产品: {order.productName}</div>
-                      <div>计划交付: {order.plannedDeliveryDate}</div>
+                      <div>产品: {[order.productCode, order.productName].filter(Boolean).join(' - ')} | 签约数量: {order.signingQuantity ?? order.quantity} {order.unit} | 交付数量: {order.shippingQuantity ?? '-'} {order.unit}</div>
+                      <div>签约时间: {order.orderDate || '-'} | 承诺交期: {order.plannedDeliveryDate || '-'} | 交付时间: {order.actualDeliveryDate || '-'}</div>
                     </div>
                   </div>
                 </div>
