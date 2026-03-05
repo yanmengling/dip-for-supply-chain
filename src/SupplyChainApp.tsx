@@ -13,7 +13,7 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import {
   LayoutDashboard, Package, Truck, Users, TrendingUp, Settings,
-  Brain, Database, Calendar, Loader2
+  Calendar, Loader2
 } from 'lucide-react';
 import logoIcon from './assets/logo.svg';
 import { populateEntityConfigs, initializeEntityData } from './utils/entityConfigService';
@@ -22,7 +22,6 @@ import { navigationConfigService } from './services/navigationConfigService';
 // ── 页面级懒加载（按需拆包，首屏只加载当前视图代码）─────────────────────────
 const CockpitView            = lazy(() => import('./components/views/CockpitView'));
 const SearchView             = lazy(() => import('./components/views/SearchView'));
-const PlanningView           = lazy(() => import('./components/views/PlanningView'));
 const PlanningViewV2         = lazy(() => import('./components/views/PlanningViewV2'));
 const InventoryView          = lazy(() => import('./components/views/InventoryView'));
 const DeliveryViewEnhanced   = lazy(() => import('./components/views/DeliveryViewEnhanced'));
@@ -45,7 +44,6 @@ const PageFallback = () => (
 // Full navigation items (icons and labels)
 const ALL_NAV_ITEMS = [
   { id: 'cockpit' as const, label: '驾驶舱', icon: LayoutDashboard },
-  { id: 'planning' as const, label: '老版计划协同', icon: Calendar },
   { id: 'planningV2' as const, label: '动态计划协同', icon: Calendar },
   { id: 'inventory' as const, label: '库存优化', icon: Package },
   { id: 'optimization' as const, label: '产品供应优化', icon: TrendingUp },
@@ -53,7 +51,7 @@ const ALL_NAV_ITEMS = [
   { id: 'evaluation' as const, label: '供应商评估', icon: Users },
 ];
 
-type ViewType = 'cockpit' | 'search' | 'planning' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
+type ViewType = 'cockpit' | 'search' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
 
 const SupplyChainAppContent = () => {
   const [currentView, setCurrentView] = useState<ViewType>('cockpit');
@@ -109,7 +107,6 @@ const SupplyChainAppContent = () => {
     const viewMap: Record<string, ViewType> = {
       'cockpit': 'cockpit',
       'search': 'search',
-      'planning': 'planning',
       'inventory': 'inventory',
       'optimization': 'optimization',
       'delivery': 'delivery',
@@ -191,7 +188,6 @@ const SupplyChainAppContent = () => {
               <div className="max-w-6xl mx-auto px-6 py-8">
                 {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
                 {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
-                {currentView === 'planning' && <PlanningView />}
                 {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
                 {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
                 {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}

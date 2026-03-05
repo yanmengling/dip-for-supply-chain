@@ -11,7 +11,7 @@ import { getAgentConfigForView, getContextForView } from '../../utils/copilotCon
 import { dipEnvironmentService } from '../../services/dipEnvironmentService';
 import { getServiceConfig } from '../../config/apiConfig';
 
-type ViewType = 'cockpit' | 'search' | 'planning' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
+type ViewType = 'cockpit' | 'search' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
 
 interface CopilotPanelProps {
   currentView: ViewType;

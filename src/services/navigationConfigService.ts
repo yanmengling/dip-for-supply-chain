@@ -32,12 +32,9 @@ class NavigationConfigService {
           : { ...def };
       });
 
-      // Add any saved sections not in defaults (for backward compat)
-      parsed.sections?.forEach((s) => {
-        if (!defaultIds.has(s.id as NavViewId)) {
-          mergedSections.push(s as NavigationSectionConfig);
-        }
-      });
+      // Removed: backward-compat logic that re-added stale sections from
+      // localStorage. Only sections defined in DEFAULT_NAVIGATION_SECTIONS
+      // are valid; anything else (e.g. deprecated 'planning') is discarded.
 
       return {
         sections: mergedSections,

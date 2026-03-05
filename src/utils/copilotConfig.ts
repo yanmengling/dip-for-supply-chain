@@ -15,7 +15,6 @@ const FALLBACK_AGENT_NAMES: Record<string, string> = {
   inventory:    '库存优化助手',
   optimization: '产品供应优化助手',
   delivery:     '订单交付助手',
-  planning:     'PMC决策助手',
   search:       '搜索助手',
 };
 

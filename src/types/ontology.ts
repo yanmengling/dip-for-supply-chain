@@ -920,59 +920,6 @@ export interface GanttTask {
 }
 
 /**
- * 齐套模式V2甘特任务（扩展GanttTask）
- * 支持倒排排程和库存就绪状态显示
- */
-export interface MaterialReadyGanttTask extends Omit<GanttTask, 'status' | 'children'> {
-  code: string;                     // 编码（产品编码/物料编码）
-
-  // 状态属性
-  status: 'ready' | 'not-ready' | 'overdue' | 'normal';
-  isReady: boolean;                 // 库存是否就绪
-
-  // 数量属性
-  requiredQuantity: number;         // 需求数量
-  availableInventory: number;       // 可用库存
-
-  // 生产/交付属性（根据类型不同，使用不同字段）
-  productionRate?: number;          // 生产效率（产品/组件），如1000表示每天1000件
-  deliveryDuration?: number;        // 交付周期（物料），天数
-  assemblyTime?: number;            // 组装时长（天数）
-
-  // 物料类型（用于区分组件和物料）
-  materialType?: '自制' | '外购' | '委外';
-
-  // 损耗率
-  lossRate?: number;                // 损耗率（0-1之间的小数）
-
-  // 子件用量
-  childQuantity?: number;           // BOM中的子件用量
-
-  // 树形结构
-  children?: MaterialReadyGanttTask[];
-  isExpanded: boolean;
-  canExpand: boolean;
-  parentId?: string;
-}
-
-/**
- * 齐套模式V2计算结果
- */
-export interface MaterialReadyCalculationResult {
-  tasks: MaterialReadyGanttTask[];
-  totalCycle: number;               // 总周期（天）
-  planStartDate: Date;              // 计划开始时间
-  planEndDate: Date;                // 计划结束时间
-  actualStartDate: Date;            // 实际开始时间
-  actualEndDate: Date;              // 实际结束时间
-  isOverdue: boolean;               // 是否超期
-  overdueDays: number;              // 超期天数（负数表示提前完成）
-  readyMaterials: string[];         // 就绪物料编码列表
-  notReadyMaterials: string[];      // 未就绪物料编码列表
-  risks: RiskAlert[];               // 风险提示列表
-}
-
-/**
  * 物料需求分析结果
  */
 export interface MaterialRequirementAnalysis {
@@ -1170,23 +1117,6 @@ export type {
 };
 
 // ============================================================================
-// Planning Types (供应链计划 - 阶段定义)
-// ============================================================================
-
-export type PlanningStage = 'DP' | 'MPS' | 'MRP' | 'SCH';
-
-export interface PlanningStageConfig {
-  id: PlanningStage;
-  label: string;
-  shortLabel: string;
-  order: number;
-}
-
-export interface PlanningPanelProps {
-  active: boolean;
-}
-
-// ============================================================================
 // Demand Planning Types (供应链计划 - 需求计划)
 // ============================================================================
 
@@ -1243,23 +1173,6 @@ export interface ProductDemandForecast {
   /** 共识需求建议（18列，计算得出） */
   consensusSuggestion: (number | null)[];
 }
-
-/**
- * 需求计划状态
- */
-export interface DemandPlanningState {
-  /** 选中的产品ID（单选模式） */
-  selectedProduct: string | null;
-  /** 选中的预测算法 */
-  selectedAlgorithm: ForecastAlgorithm;
-  /** 产品预测结果Map（产品ID -> 预测结果） */
-  productForecasts: Map<string, ProductDemandForecast>;
-  /** 加载状态 */
-  loading: boolean;
-  /** 错误信息 */
-  error: string | null;
-}
-
 
 /**
  * Factory Production Plan
