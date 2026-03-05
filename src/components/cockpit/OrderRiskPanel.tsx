@@ -12,52 +12,38 @@
 import { useMemo, useState, useEffect } from 'react';
 import {
   AlertTriangle, ArrowRight, Truck, Package, CheckCircle,
-  TrendingUp, Loader2, Clock
+  TrendingUp, Loader2, Clock, RefreshCw
 } from 'lucide-react';
-import { loadDeliveryOrders, calculateDeliveryStats } from '../../services/deliveryDataService';
+import { loadDeliveryOrders, invalidateDeliveryOrdersCache, calculateDeliveryStats } from '../../services/deliveryDataService';
 import type { DeliveryOrder } from '../../types/ontology';
-
-// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
-const _ORDER_CACHE_TTL = 3 * 60 * 1000;
-let _orderCache: DeliveryOrder[] | null = null;
-let _orderCacheTime = 0;
-
 
 interface Props {
   onNavigate?: (view: string) => void;
 }
 
 const OrderRiskPanel = ({ onNavigate }: Props) => {
-  const _initValid =
-    !!(_orderCache && Date.now() - _orderCacheTime < _ORDER_CACHE_TTL);
-  const [orders, setOrders] = useState<DeliveryOrder[]>(_initValid ? _orderCache! : []);
-  const [loading, setLoading] = useState(!_initValid);
+  // 缓存已下沉到 deliveryDataService 服务层（3min TTL + in-flight 去重）
+  const [orders, setOrders] = useState<DeliveryOrder[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // 加载订单数据
-  useEffect(() => {
-    async function fetchOrders() {
-      // 命中模块级缓存则直接渲染，跳过所有 API 请求
-      const now = Date.now();
-      if (_orderCache && now - _orderCacheTime < _ORDER_CACHE_TTL) {
-        setOrders(_orderCache);
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-      try {
-        const data = await loadDeliveryOrders();
-        _orderCache = data;
-        _orderCacheTime = Date.now();
-        setOrders(data);
-      } catch (error) {
-        console.error('Failed to load orders:', error);
-      } finally {
-        setLoading(false);
-      }
+  async function fetchOrders() {
+    setLoading(true);
+    try {
+      const data = await loadDeliveryOrders();
+      setOrders(data);
+    } catch (error) {
+      console.error('Failed to load orders:', error);
+    } finally {
+      setLoading(false);
     }
+  }
+
+  useEffect(() => { fetchOrders(); }, []);
+
+  const handleRefresh = () => {
+    invalidateDeliveryOrdersCache();
     fetchOrders();
-  }, []);
+  };
 
   // 计算统计数据
   const stats = useMemo(() => calculateDeliveryStats(orders), [orders]);
@@ -112,6 +98,9 @@ const OrderRiskPanel = ({ onNavigate }: Props) => {
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-slate-800">订单面板</h2>
+          <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </div>
         <div className="p-6 flex items-center justify-center h-48">
           <Loader2 className="animate-spin text-indigo-600 mr-2" size={24} />
@@ -125,13 +114,18 @@ const OrderRiskPanel = ({ onNavigate }: Props) => {
     <div className="bg-white rounded-lg shadow">
       <div className="p-6 border-b border-slate-200 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">订单面板</h2>
-        <button
-          onClick={handleViewDetails}
-          className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
-        >
-          查看详情
-          <ArrowRight size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={handleViewDetails}
+            className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+          >
+            查看详情
+            <ArrowRight size={14} />
+          </button>
+        </div>
       </div>
       <div className="p-6 space-y-6">
         {/* Status Stats Grid */}

@@ -155,6 +155,9 @@ interface CacheEntry<T> {
 const cache = new Map<string, CacheEntry<any>>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 分钟
 
+/** In-Flight 去重：多处并发调用同一 cacheKey 共享同一个 Promise */
+const pendingRequests = new Map<string, Promise<any>>();
+
 function getCached<T>(key: string): T | null {
     const entry = cache.get(key);
     if (!entry) return null;
@@ -169,6 +172,26 @@ function getCached<T>(key: string): T | null {
 
 function setCache<T>(key: string, data: T): void {
     cache.set(key, { data, timestamp: Date.now() });
+}
+
+/**
+ * 带缓存 + in-flight 去重的通用加载包装器
+ * @param cacheKey 缓存键
+ * @param loader 实际加载函数（仅在缓存未命中且无 in-flight 请求时调用）
+ */
+async function withCachedLoader<T>(cacheKey: string, loader: () => Promise<T>): Promise<T> {
+    // 1. 命中缓存
+    const cached = getCached<T>(cacheKey);
+    if (cached) return cached;
+    // 2. In-flight 去重
+    const pending = pendingRequests.get(cacheKey);
+    if (pending) return pending as Promise<T>;
+    // 3. 发起新请求
+    const promise = loader()
+        .then(data => { setCache(cacheKey, data); pendingRequests.delete(cacheKey); return data; })
+        .catch(err => { pendingRequests.delete(cacheKey); throw err; });
+    pendingRequests.set(cacheKey, promise);
+    return promise;
 }
 
 /** 批量分片大小 - 避免 in 条件过大导致 API 超时 */
@@ -197,16 +220,10 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
  */
 export async function loadProducts(forceReload = false): Promise<ProductAPI[]> {
     const cacheKey = 'product_list';
-    if (!forceReload) {
-        const cached = getCached<ProductAPI[]>(cacheKey);
-        if (cached) {
-            console.log('[PlanningV2DataService] 使用缓存的产品列表');
-            return cached;
-        }
-    }
+    if (forceReload) { cache.delete(cacheKey); pendingRequests.delete(cacheKey); }
 
-    console.log('[PlanningV2DataService] 从 API 加载产品列表...');
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log('[PlanningV2DataService] 从 API 加载产品列表...');
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PRODUCT, {
             limit: 10000,
             need_total: true,
@@ -219,12 +236,8 @@ export async function loadProducts(forceReload = false): Promise<ProductAPI[]> {
 
         data.sort((a, b) => a.material_number.localeCompare(b.material_number));
         console.log(`[PlanningV2DataService] 产品列表: ${data.length} 条`);
-        setCache(cacheKey, data);
         return data;
-    } catch (error) {
-        console.error('[PlanningV2DataService] 加载产品列表失败:', error);
-        throw error;
-    }
+    });
 }
 
 // ============================================================================
@@ -242,14 +255,9 @@ export async function loadProducts(forceReload = false): Promise<ProductAPI[]> {
  */
 export async function loadForecastByProduct(productCode: string): Promise<ForecastRecordAPI[]> {
     const cacheKey = `forecast_${productCode}`;
-    const cached = getCached<ForecastRecordAPI[]>(cacheKey);
-    if (cached) {
-        console.log(`[PlanningV2DataService] 使用缓存的需求预测数据: ${productCode}`);
-        return cached;
-    }
 
-    console.log(`[PlanningV2DataService] 加载需求预测: ${productCode}...`);
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载需求预测: ${productCode}...`);
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.FORECAST, {
             condition: {
                 operation: 'and',
@@ -274,15 +282,10 @@ export async function loadForecastByProduct(productCode: string): Promise<Foreca
             auditor_name: item.auditor_name || '',
         }));
 
-        // 按 startdate 升序排列
         data.sort((a, b) => (a.startdate > b.startdate ? 1 : -1));
         console.log(`[PlanningV2DataService] 需求预测 ${productCode}: ${data.length} 条`);
-        setCache(cacheKey, data);
         return data;
-    } catch (error) {
-        console.error(`[PlanningV2DataService] 加载需求预测失败 ${productCode}:`, error);
-        throw error;
-    }
+    });
 }
 
 // ============================================================================
@@ -295,18 +298,10 @@ export async function loadForecastByProduct(productCode: string): Promise<Foreca
  */
 export async function loadProductDemandPlans(forceReload: boolean = false): Promise<ProductDemandPlanAPI[]> {
     const cacheKey = 'pp_data';
+    if (forceReload) { cache.delete(cacheKey); pendingRequests.delete(cacheKey); }
 
-    if (!forceReload) {
-        const cached = getCached<ProductDemandPlanAPI[]>(cacheKey);
-        if (cached) {
-            console.log('[PlanningV2DataService] 使用缓存的产品需求计划数据');
-            return cached;
-        }
-    }
-
-    console.log('[PlanningV2DataService] 从 API 加载产品需求计划数据...');
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log('[PlanningV2DataService] 从 API 加载产品需求计划数据...');
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PP, {
             limit: 10000,
             need_total: true,
@@ -322,17 +317,15 @@ export async function loadProductDemandPlans(forceReload: boolean = false): Prom
         }));
 
         console.log(`[PlanningV2DataService] 加载了 ${plans.length} 条产品需求计划`);
-        setCache(cacheKey, plans);
         return plans;
-    } catch (error) {
-        console.error('[PlanningV2DataService] 加载产品需求计划失败:', error);
+    }).catch(error => {
         const knId = ontologyApi.getKnowledgeNetworkId();
         const msg = error instanceof Error ? error.message : String(error);
         if (msg.includes('对象类不存在') || msg.includes('ObjectTypeNotFound')) {
             throw new Error(`当前业务知识网络（${knId}）中不存在对象类型 supplychain_hd0202_pp。若在其它浏览器可正常加载，请在本页面「管理配置」中将业务知识网络改为与其它浏览器一致（如 DIP 供应链业务知识网络）。`);
         }
         throw new Error(`加载产品需求计划失败：${msg}。请确认业务知识网络已选择且包含产品需求计划对象（supplychain_hd0202_pp）。`);
-    }
+    });
 }
 
 /**
@@ -389,18 +382,10 @@ export async function getProductDemandStats(): Promise<{
  */
 export async function loadProductionPlans(forceReload: boolean = false): Promise<ProductionPlanAPI[]> {
     const cacheKey = 'mps_data';
+    if (forceReload) { cache.delete(cacheKey); pendingRequests.delete(cacheKey); }
 
-    if (!forceReload) {
-        const cached = getCached<ProductionPlanAPI[]>(cacheKey);
-        if (cached) {
-            console.log('[PlanningV2DataService] 使用缓存的生产计划数据');
-            return cached;
-        }
-    }
-
-    console.log('[PlanningV2DataService] 从 API 加载生产计划数据...');
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log('[PlanningV2DataService] 从 API 加载生产计划数据...');
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
             limit: 10000,
             need_total: true,
@@ -420,16 +405,13 @@ export async function loadProductionPlans(forceReload: boolean = false): Promise
                 : parseInt(item.seq_no) || 0,
         }));
 
-        // 按生产序号排序
         plans.sort((a, b) => a.seq_no - b.seq_no);
-
         console.log(`[PlanningV2DataService] 加载了 ${plans.length} 条生产计划`);
-        setCache(cacheKey, plans);
         return plans;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载生产计划失败:', error);
         return [];
-    }
+    });
 }
 
 // ============================================================================
@@ -441,18 +423,10 @@ export async function loadProductionPlans(forceReload: boolean = false): Promise
  */
 export async function loadMaterialRequirementPlans(forceReload: boolean = false): Promise<MaterialRequirementPlanAPI[]> {
     const cacheKey = 'mrp_data';
+    if (forceReload) { cache.delete(cacheKey); pendingRequests.delete(cacheKey); }
 
-    if (!forceReload) {
-        const cached = getCached<MaterialRequirementPlanAPI[]>(cacheKey);
-        if (cached) {
-            console.log('[PlanningV2DataService] 使用缓存的物料需求计划数据');
-            return cached;
-        }
-    }
-
-    console.log('[PlanningV2DataService] 从 API 加载物料需求计划数据...');
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log('[PlanningV2DataService] 从 API 加载物料需求计划数据...');
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
             limit: 10000,
             need_total: true,
@@ -470,12 +444,11 @@ export async function loadMaterialRequirementPlans(forceReload: boolean = false)
         }));
 
         console.log(`[PlanningV2DataService] 加载了 ${plans.length} 条物料需求计划`);
-        setCache(cacheKey, plans);
         return plans;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载物料需求计划失败:', error);
         return [];
-    }
+    });
 }
 
 /**
@@ -521,12 +494,9 @@ export async function getMRPStats(): Promise<{
  */
 export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]> {
     const cacheKey = `bom_${productCode}`;
-    const cached = getCached<BOMRecord[]>(cacheKey);
-    if (cached) return cached;
 
-    console.log(`[PlanningV2DataService] 加载 BOM 数据: ${productCode}...`);
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载 BOM 数据: ${productCode}...`);
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
             condition: {
                 operation: 'and',
@@ -557,14 +527,9 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
             : allData;
 
         console.log(`[PlanningV2DataService] BOM ${productCode}: 全部 ${allData.length} 条，最新版本 "${latestVersion}" 共 ${data.length} 条`);
-        setCache(cacheKey, data);
         return data;
-    } catch (error) {
-        console.error('[PlanningV2DataService] 加载 BOM 失败:', error);
-        // 重新抛出，让调用方（MaterialRequirementPanel / ganttService）能感知失败并向用户报错
-        // 不静默返回 []，否则调用方会误认为 BOM 为空而非查询失败
-        throw error;
-    }
+    });
+    // 注意：BOM 加载失败直接抛出，让调用方感知失败
 }
 
 // ============================================================================
@@ -579,12 +544,9 @@ export async function loadMaterialsByCode(codes: string[]): Promise<MaterialReco
 
     const sortedCodes = [...codes].sort();
     const cacheKey = `material_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
-    const cached = getCached<MaterialRecord[]>(cacheKey);
-    if (cached) return cached;
 
-    console.log(`[PlanningV2DataService] 加载物料主数据: ${codes.length} 个编码...`);
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载物料主数据: ${codes.length} 个编码...`);
         const chunks = chunkArray(codes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] 物料主数据分 ${chunks.length} 批查询`);
 
@@ -612,12 +574,11 @@ export async function loadMaterialsByCode(codes: string[]): Promise<MaterialReco
         }
 
         console.log(`[PlanningV2DataService] 物料主数据: ${allData.length} 条`);
-        setCache(cacheKey, allData);
         return allData;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载物料主数据失败:', error);
         return [];
-    }
+    });
 }
 
 // ============================================================================
@@ -632,12 +593,9 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
 
     const sortedCodes = [...materialCodes].sort();
     const cacheKey = `pr_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
-    const cached = getCached<PRRecord[]>(cacheKey);
-    if (cached) return cached;
 
-    console.log(`[PlanningV2DataService] 加载 PR 数据: ${materialCodes.length} 个物料...`);
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载 PR 数据: ${materialCodes.length} 个物料...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] PR 分 ${chunks.length} 批查询`);
 
@@ -669,12 +627,11 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
         }
 
         console.log(`[PlanningV2DataService] PR: ${allData.length} 条`);
-        setCache(cacheKey, allData);
         return allData;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载 PR 失败:', error);
         return [];
-    }
+    });
 }
 
 // ============================================================================
@@ -689,12 +646,9 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
 
     const sortedCodes = [...materialCodes].sort();
     const cacheKey = `po_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
-    const cached = getCached<PORecord[]>(cacheKey);
-    if (cached) return cached;
 
-    console.log(`[PlanningV2DataService] 加载 PO 数据: ${materialCodes.length} 个物料...`);
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载 PO 数据: ${materialCodes.length} 个物料...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] PO 分 ${chunks.length} 批查询`);
 
@@ -727,12 +681,11 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
         }
 
         console.log(`[PlanningV2DataService] PO: ${allData.length} 条`);
-        setCache(cacheKey, allData);
         return allData;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载 PO 失败:', error);
         return [];
-    }
+    });
 }
 
 // ============================================================================
@@ -752,15 +705,9 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
 
     const sortedCodes = [...materialCodes].sort();
     const cacheKey = `inv_${sortedCodes.length}_${sortedCodes[0]}_${sortedCodes[sortedCodes.length - 1]}`;
-    const cached = getCached<InventoryRecord[]>(cacheKey);
-    if (cached) {
-        console.log(`[PlanningV2DataService] 使用缓存的库存数据 (${cached.length} 条)`);
-        return cached;
-    }
 
-    console.log(`[PlanningV2DataService] 加载库存数据: ${materialCodes.length} 个物料...`);
-
-    try {
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载库存数据: ${materialCodes.length} 个物料...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] 库存数据分 ${chunks.length} 批查询`);
 
@@ -795,12 +742,11 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
         }
 
         console.log(`[PlanningV2DataService] 库存数据: ${allData.length} 条`);
-        setCache(cacheKey, allData);
         return allData;
-    } catch (error) {
+    }).catch(error => {
         console.error('[PlanningV2DataService] 加载库存数据失败:', error);
         return [];
-    }
+    });
 }
 
 // ============================================================================
@@ -809,6 +755,7 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
 
 export function clearPlanningV2Cache(): void {
     cache.clear();
+    pendingRequests.clear();
     console.log('[PlanningV2DataService] 缓存已清除');
 }
 

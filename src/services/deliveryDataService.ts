@@ -1,20 +1,52 @@
 /**
  * Delivery Data Service
- * 
+ *
  * Provides delivery order data loading from API.
+ * 服务层统一缓存（3 分钟 TTL + In-Flight 去重），组件层不再维护独立缓存。
  */
 
 import { ontologyApi } from '../api';
 import { dynamicConfigService } from './dynamicConfigService';
 import type { DeliveryOrder } from '../types/ontology';
 
+// ── 服务层缓存（3 分钟 TTL + In-Flight 去重）────────────────────────────────
+const _CACHE_TTL = 3 * 60 * 1000;
+let _cache: DeliveryOrder[] | null = null;
+let _cacheTime = 0;
+let _inFlight: Promise<DeliveryOrder[]> | null = null;
+
+/** 清除缓存（供手动刷新场景使用） */
+export function invalidateDeliveryOrdersCache(): void {
+  _cache = null;
+  _cacheTime = 0;
+  _inFlight = null;
+  console.log('[DeliveryDataService] Cache invalidated');
+}
+
 /**
- * Load delivery orders from API
+ * Load delivery orders from API（带 3 分钟缓存 + in-flight 去重）
  * @returns Array of delivery orders
  *
  * NOTE: Uses sales order object type as delivery orders
  */
 export async function loadDeliveryOrders(): Promise<DeliveryOrder[]> {
+  // 命中缓存
+  const now = Date.now();
+  if (_cache && now - _cacheTime < _CACHE_TTL) {
+    return _cache;
+  }
+  // In-flight 去重：多处并发调用共享同一个 Promise
+  if (_inFlight) {
+    return _inFlight;
+  }
+  _inFlight = _loadDeliveryOrdersImpl()
+    .then(data => { _cache = data; _cacheTime = Date.now(); _inFlight = null; return data; })
+    .catch(err => { _inFlight = null; throw err; });
+  return _inFlight;
+}
+
+/** 实际加载逻辑（不带缓存） */
+async function _loadDeliveryOrdersImpl(): Promise<DeliveryOrder[]> {
   console.log('[DeliveryDataService] Loading delivery orders from API...');
 
   try {

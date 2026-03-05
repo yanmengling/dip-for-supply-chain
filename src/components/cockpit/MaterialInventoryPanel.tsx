@@ -7,8 +7,8 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowRight, Box, CheckCircle, Loader2, Search } from 'lucide-react';
-import { metricModelApi, createLastDaysRange } from '../../api/metricModelApi';
+import { AlertTriangle, ArrowRight, Box, CheckCircle, Loader2, RefreshCw, Search } from 'lucide-react';
+import { metricModelApi, createLastDaysRange, clearApiCache } from '../../api/metricModelApi';
 import { apiConfigService } from '../../services/apiConfigService';
 
 // ============================================================================
@@ -17,11 +17,6 @@ import { apiConfigService } from '../../services/apiConfigService';
 
 const getMaterialInventoryModelId = () =>
   apiConfigService.getMetricModelId('mm_material_inventory_optimization') || 'd58ihclg5lk40hvh48mg';
-
-// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
-const _MAT_CACHE_TTL = 3 * 60 * 1000;
-let _matCache: MaterialItem[] | null = null;
-let _matCacheTime = 0;
 
 /** 分析维度（物料库存模型中 material_name 无歧义，可直接使用） */
 const QUERY_DIMS = [
@@ -51,24 +46,23 @@ interface Props {
 }
 
 const MaterialInventoryPanel = ({ onNavigate }: Props) => {
-  const _initValid =
-    !!(_matCache && Date.now() - _matCacheTime < _MAT_CACHE_TTL);
-  const [materials, setMaterials] = useState<MaterialItem[]>(_initValid ? _matCache! : []);
-  const [loading, setLoading] = useState(!_initValid);
+  // 缓存已下沉到 metricModelApi 服务层（3min TTL + in-flight 去重）
+  const [materials, setMaterials] = useState<MaterialItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  // 刷新计数器：递增触发 useEffect 重新加载
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  const handleRefresh = () => {
+    clearApiCache();
+    setRefreshToken(t => t + 1);
+  };
 
   useEffect(() => {
     let isMounted = true;
 
     async function fetchData() {
-      // 命中模块级缓存则直接渲染，跳过所有 API 请求
-      const now = Date.now();
-      if (_matCache && now - _matCacheTime < _MAT_CACHE_TTL) {
-        if (isMounted) { setMaterials(_matCache); setLoading(false); }
-        return;
-      }
-
       try {
         setLoading(true);
         setError(null);
@@ -171,10 +165,6 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
 
         list.sort((a, b) => b.currentStock - a.currentStock);
 
-        // 写入模块级缓存
-        _matCache = list;
-        _matCacheTime = Date.now();
-
         if (isMounted) setMaterials(list);
       } catch (err) {
         if (!isMounted) return;
@@ -187,7 +177,7 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
 
     fetchData();
     return () => { isMounted = false; };
-  }, []);
+  }, [refreshToken]);
 
   // 搜索过滤
   const filtered = useMemo(() => {
@@ -217,13 +207,18 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
           <Box className="text-amber-600" size={20} />
           物料库存智能体
         </h2>
-        <button
-          onClick={handleViewDetails}
-          className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
-        >
-          查看详情
-          <ArrowRight size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={handleViewDetails}
+            className="flex items-center gap-1 text-sm text-indigo-600 hover:text-indigo-700"
+          >
+            查看详情
+            <ArrowRight size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="p-4 sm:p-6 space-y-4 flex-1 flex flex-col">

@@ -39,6 +39,7 @@ export type { RequestConfig, ApiResponse } from './httpClient';
 
 export {
   metricModelApi,
+  clearApiCache,
   createCurrentYearRange,
   createYearRange,
   createLastDaysRange,

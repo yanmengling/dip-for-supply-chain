@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Box, Search, Loader2, AlertTriangle } from 'lucide-react';
-import { metricModelApi, createLastDaysRange } from '../../../api';
+import { Box, Search, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
+import { metricModelApi, createLastDaysRange, clearApiCache } from '../../../api';
 
 import { apiConfigService } from '../../../services/apiConfigService';
 
@@ -49,37 +49,30 @@ interface MaterialData {
     lastOutboundTime?: string;
 }
 
-// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
-const _MAT_INV_CACHE_TTL = 3 * 60 * 1000;
-let _matInvCache: MaterialData[] | null = null;
-let _matInvCacheTime = 0;
-
 interface Props {
     // Props 变为可选，组件内部自行获取数据
     onNavigate?: (view: string) => void;
 }
 
 export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
-    const _initValid =
-        !!(_matInvCache && Date.now() - _matInvCacheTime < _MAT_INV_CACHE_TTL);
-    const [materials, setMaterials] = useState<MaterialData[]>(_initValid ? _matInvCache! : []);
-    const [loading, setLoading] = useState(!_initValid);
+    // 缓存已下沉到 metricModelApi 服务层（3min TTL + in-flight 去重）
+    const [materials, setMaterials] = useState<MaterialData[]>([]);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(1);
     const itemsPerPage = 8;
     const [searchText, setSearchText] = useState('');
+    // 刷新计数器：递增触发 useEffect 重新加载
+    const [refreshToken, setRefreshToken] = useState(0);
+
+    const handleRefresh = () => {
+        clearApiCache();
+        setRefreshToken(t => t + 1);
+    };
 
     // 从 API 获取数据
     useEffect(() => {
         async function fetchData() {
-            // 命中模块级缓存则直接渲染，跳过所有 API 请求
-            const now = Date.now();
-            if (_matInvCache && now - _matInvCacheTime < _MAT_INV_CACHE_TTL) {
-                setMaterials(_matInvCache);
-                setLoading(false);
-                return;
-            }
-
             try {
                 setLoading(true);
                 setError(null);
@@ -201,10 +194,6 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 // 按库存量降序排序
                 transformedData.sort((a, b) => b.currentStock - a.currentStock);
 
-                // 写入模块级缓存
-                _matInvCache = transformedData;
-                _matInvCacheTime = Date.now();
-
                 setMaterials(transformedData);
             } catch (err) {
                 console.error('[MaterialInventoryPanel] API call failed:', err);
@@ -214,7 +203,7 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
             }
         }
         fetchData();
-    }, []);
+    }, [refreshToken]);
 
     // 辅助函数已不再需要，因为当前指标模型不包含 last_outbound_time
     // const calculateDaysSinceLastActivity = (lastInboundTime: string, lastOutboundTime: string): number => {
@@ -266,7 +255,10 @@ export const MaterialInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                         <p className="text-xs text-slate-500 font-medium">{filteredMaterials.length} 种物料监控中</p>
                     </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                    <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+                        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                    </button>
                     <div className="relative group">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-hover:text-purple-400 transition-colors" size={15} />
                         <input

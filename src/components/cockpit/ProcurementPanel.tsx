@@ -8,15 +8,10 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, TrendingUp, Loader2 } from 'lucide-react';
+import { ShoppingCart, TrendingUp, Loader2, RefreshCw } from 'lucide-react';
 import { procurementService } from '../../services/procurementService';
 import type { ProcurementSummary } from '../../utils/cockpitDataService';
 import { generateProcurementRecommendations } from '../../utils/recommendationService';
-
-// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
-const _PROCUREMENT_CACHE_TTL = 3 * 60 * 1000;
-let _procurementCache: ProcurementSummary | null = null;
-let _procurementCacheTime = 0;
 
 const _EMPTY_SUMMARY: ProcurementSummary = {
   monthlyPlannedTotal: 0,
@@ -30,38 +25,28 @@ interface Props {
 }
 
 const ProcurementPanel = ({ onNavigate: _onNavigate }: Props) => {
-  const _initValid =
-    !!(_procurementCache && Date.now() - _procurementCacheTime < _PROCUREMENT_CACHE_TTL);
-  const [summary, setSummary] = useState<ProcurementSummary>(
-    _initValid ? _procurementCache! : _EMPTY_SUMMARY
-  );
-  const [loading, setLoading] = useState<boolean>(!_initValid);
+  // 缓存已下沉到 procurementService 服务层（3min TTL + in-flight 去重）
+  const [summary, setSummary] = useState<ProcurementSummary>(_EMPTY_SUMMARY);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  useEffect(() => {
-    const fetchData = async () => {
-      // 命中模块级缓存则直接渲染，跳过所有 API 请求
-      const now = Date.now();
-      if (_procurementCache && now - _procurementCacheTime < _PROCUREMENT_CACHE_TTL) {
-        setSummary(_procurementCache);
-        setLoading(false);
-        return;
-      }
+  async function fetchData() {
+    try {
+      setLoading(true);
+      const data = await procurementService.getProcurementSummary();
+      setSummary(data);
+    } catch (error) {
+      console.error('Failed to fetch procurement summary:', error);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      try {
-        setLoading(true);
-        const data = await procurementService.getProcurementSummary();
-        _procurementCache = data;
-        _procurementCacheTime = Date.now();
-        setSummary(data);
-      } catch (error) {
-        console.error('Failed to fetch procurement summary:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
+  useEffect(() => { fetchData(); }, []);
 
+  const handleRefresh = () => {
+    procurementService.invalidateCache();
     fetchData();
-  }, []);
+  };
 
   // 执行率
   const overallExecutionPercentage = useMemo(() => {
@@ -82,8 +67,11 @@ const ProcurementPanel = ({ onNavigate: _onNavigate }: Props) => {
 
   return (
     <div className="bg-white rounded-lg shadow">
-      <div className="p-6 border-b border-slate-200">
+      <div className="p-6 border-b border-slate-200 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-slate-800">采购面板</h2>
+        <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
       </div>
       <div className="p-6 space-y-6">
         {/* Summary Stats */}

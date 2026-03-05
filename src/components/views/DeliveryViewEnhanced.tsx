@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Truck, Clock, CheckCircle, AlertCircle, AlertTriangle, MessageSquare,
-  Search, X, Package, TrendingUp, Calendar, BarChart3
+  Search, X, Package, TrendingUp, Calendar, BarChart3, RefreshCw
 } from 'lucide-react';
 import type { DeliveryOrder } from '../../types/ontology';
-import { loadDeliveryOrders, calculateDeliveryStats, filterDeliveryOrders } from '../../services/deliveryDataService';
+import { loadDeliveryOrders, invalidateDeliveryOrdersCache, calculateDeliveryStats, filterDeliveryOrders } from '../../services/deliveryDataService';
 import type { LucideIcon } from 'lucide-react';
 
 // Enriched order type with computed properties
@@ -16,23 +16,14 @@ interface EnrichedDeliveryOrder extends DeliveryOrder {
 }
 import OrderDetailModal from './OrderDetailModal';
 
-// ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────
-const _DELIVERY_CACHE_TTL = 3 * 60 * 1000;
-let _deliveryCache: DeliveryOrder[] | null = null;
-let _deliveryCacheTime = 0;
-
-
-
 interface Props {
   toggleCopilot?: () => void;
 }
 
 const DeliveryViewEnhanced = (_props: Props) => {
-  // 数据状态
-  const _initValid =
-    !!(_deliveryCache && Date.now() - _deliveryCacheTime < _DELIVERY_CACHE_TTL);
-  const [allOrders, setAllOrders] = useState<DeliveryOrder[]>(_initValid ? _deliveryCache! : []);
-  const [loading, setLoading] = useState(!_initValid);
+  // 缓存已下沉到 deliveryDataService 服务层（3min TTL + in-flight 去重）
+  const [allOrders, setAllOrders] = useState<DeliveryOrder[]>([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // 筛选和搜索状态
@@ -56,39 +47,29 @@ const DeliveryViewEnhanced = (_props: Props) => {
   // 图表显示状态
 
 
-  // 加载数据 - 根据模式切换数据源
-  useEffect(() => {
-    const fetchData = async () => {
-      // 命中模块级缓存则直接渲染，跳过所有 API 请求
-      const now = Date.now();
-      if (_deliveryCache && now - _deliveryCacheTime < _DELIVERY_CACHE_TTL) {
-        setAllOrders(_deliveryCache);
-        setLoading(false);
-        return;
-      }
+  // 加载数据
+  async function fetchData() {
+    try {
+      setLoading(true);
+      const orders = await loadDeliveryOrders();
+      setAllOrders(orders);
+      setError(null);
+      setAllOrdersPage(1);
+      setUrgentOrdersPage(1);
+    } catch (err) {
+      console.error('Failed to load orders:', err);
+      setError('加载订单数据失败，请稍后重试');
+    } finally {
+      setLoading(false);
+    }
+  }
 
-      try {
-        setLoading(true);
-        // 根据模式加载对应数据
-        const orders = await loadDeliveryOrders();
-        // 写入模块级缓存
-        _deliveryCache = orders;
-        _deliveryCacheTime = Date.now();
-        setAllOrders(orders);
-        setError(null);
-        // 模式切换时重置分页
-        setAllOrdersPage(1);
-        setUrgentOrdersPage(1);
-      } catch (err) {
-        console.error('Failed to load orders:', err);
-        setError('加载订单数据失败，请稍后重试');
-      } finally {
-        setLoading(false);
-      }
-    };
+  useEffect(() => { fetchData(); }, []);
 
+  const handleRefresh = () => {
+    invalidateDeliveryOrdersCache();
     fetchData();
-  }, []);
+  };
 
   // 1. 先处理所有订单数据 (Enrichment)
   const enrichedOrders = useMemo(() => {
@@ -278,8 +259,11 @@ const DeliveryViewEnhanced = (_props: Props) => {
           <p className="text-sm text-slate-600 mt-1">共 {allOrders.length} 条订单记录</p>
         </div>
 
-        {/* 搜索和筛选 */}
+        {/* 刷新 + 搜索 */}
         <div className="flex items-center gap-3 flex-shrink-0">
+          <button onClick={handleRefresh} className="inline-flex items-center text-slate-500 hover:text-slate-700 hover:bg-slate-100 p-1.5 rounded-lg transition-colors" disabled={loading} title="刷新数据">
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          </button>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
             <input

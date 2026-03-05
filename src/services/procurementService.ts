@@ -40,11 +40,43 @@ export interface PurchaseRequestItem {
 }
 
 class ProcurementService {
+    // ── 服务层缓存（3 分钟 TTL + In-Flight 去重）────────────────────────────
+    private _cache: ProcurementSummary | null = null;
+    private _cacheTime = 0;
+    private _inFlight: Promise<ProcurementSummary> | null = null;
+    private readonly _CACHE_TTL = 3 * 60 * 1000;
+
+    /** 清除缓存（供手动刷新场景使用） */
+    invalidateCache(): void {
+        this._cache = null;
+        this._cacheTime = 0;
+        this._inFlight = null;
+        console.log('[ProcurementService] Cache invalidated');
+    }
+
     /**
      * Get procurement summary metrics for the cockpit panel
      * Fetches real data from Ontology API for Purchase Orders and Purchase Requests
+     * 带 3 分钟缓存 + in-flight 去重
      */
     async getProcurementSummary(): Promise<ProcurementSummary> {
+        // 命中缓存
+        const now = Date.now();
+        if (this._cache && now - this._cacheTime < this._CACHE_TTL) {
+            return this._cache;
+        }
+        // In-flight 去重
+        if (this._inFlight) {
+            return this._inFlight;
+        }
+        this._inFlight = this._loadProcurementSummary()
+            .then(data => { this._cache = data; this._cacheTime = Date.now(); this._inFlight = null; return data; })
+            .catch(err => { this._inFlight = null; throw err; });
+        return this._inFlight;
+    }
+
+    /** 实际加载逻辑（不带缓存） */
+    private async _loadProcurementSummary(): Promise<ProcurementSummary> {
         console.log('[ProcurementService] Fetching procurement summary...');
 
         // 1. Resolve Object Type IDs
