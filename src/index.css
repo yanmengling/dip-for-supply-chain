@@ -126,3 +126,26 @@ html, body, #root {
 body {
   background-color: var(--color-bg-primary);
 }
+
+/* Copilot 面板：固定在右侧栏，宽度 380px（≈黄金比例 38.2%），header 以下 */
+#copilot-host {
+  position: fixed !important;
+  right: 0 !important;
+  top: 68px !important;
+  bottom: 0 !important;
+  width: 380px !important;
+  z-index: 40;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+/* 内部组件铺满容器 */
+#copilot-host > * {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* 隐藏 chatkit 内部可能出现的全屏遮罩 */
+#copilot-host .fixed.inset-0 {
+  display: none !important;
+}

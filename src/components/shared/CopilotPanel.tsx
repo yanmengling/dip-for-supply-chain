@@ -9,7 +9,7 @@ import { Copilot } from '@kweaver-ai/chatkit';
 import type { Copilot as CopilotInstance } from '@kweaver-ai/chatkit';
 import { getAgentConfigForView, getContextForView } from '../../utils/copilotConfig';
 import { dipEnvironmentService } from '../../services/dipEnvironmentService';
-import { getServiceConfig } from '../../config/apiConfig';
+import { getServiceConfig, getAuthToken } from '../../config/apiConfig';
 
 type ViewType = 'cockpit' | 'search' | 'planningV2' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
 
@@ -30,7 +30,7 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getBearerToken = (): string => {
-    const t = dipEnvironmentService.getToken();
+    const t = getAuthToken();
     if (!t) return '';
     return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
   };
@@ -45,7 +45,10 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
       agentKey={agentKey}
       token={getBearerToken()}
       refreshToken={async () => {
-        const t = await dipEnvironmentService.refreshToken();
+        // In DIP mode, use DIP refresh; otherwise fall back to current token
+        const t = dipEnvironmentService.isDipMode()
+          ? await dipEnvironmentService.refreshToken()
+          : getAuthToken();
         if (!t) return '';
         return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
       }}

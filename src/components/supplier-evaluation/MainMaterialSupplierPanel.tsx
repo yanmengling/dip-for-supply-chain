@@ -76,7 +76,7 @@ const MainMaterialSupplierPanel = ({
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold text-slate-800">主要物料供应商</h2>
-        <div className="text-sm text-slate-500">显示前 5 个供应商（按采购额排序）</div>
+        <div className="text-sm text-slate-500">显示前 5 个供应商（按采购量排序）</div>
       </div>
 
       <div className="space-y-3">
@@ -110,7 +110,7 @@ const MainMaterialSupplierPanel = ({
                   {' | '}
                   准时交付率: {material.onTimeDeliveryRate}%
                   {' | '}
-                  年度采购额: ¥{(material.annualPurchaseAmount / 10000).toFixed(0)}万
+                  采购量: {Math.round(material.annualPurchaseAmount)}
                 </p>
               </div>
             </div>

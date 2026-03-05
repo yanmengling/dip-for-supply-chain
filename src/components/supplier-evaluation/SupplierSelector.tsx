@@ -76,12 +76,12 @@ const SupplierSelector = ({
         <option value="">请选择供应商</option>
         {suppliers.map((supplier) => (
           <option key={supplier.supplierId} value={supplier.supplierId}>
-            {supplier.supplierName} (¥{(supplier.annualPurchaseAmount / 10000).toFixed(0)}万)
+            {supplier.supplierName} ({supplier.supplierId})
           </option>
         ))}
       </select>
       <p className="mt-1 text-xs text-slate-500">
-        按年度采购额降序排列
+        按采购量降序排列
       </p>
     </div>
   );

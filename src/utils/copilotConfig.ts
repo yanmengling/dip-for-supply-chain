@@ -20,10 +20,14 @@ const FALLBACK_AGENT_NAMES: Record<string, string> = {
 
 /**
  * Returns the agentKey (from config center) and display title for the given view.
+ * Picks the most recently updated enabled agent, so user edits in the config center
+ * always take effect without needing to know the exact agent ID.
  */
 export function getAgentConfigForView(viewId: string): { agentKey: string; title: string } {
-  const allAgents = apiConfigService.getEnabledConfigsByType(ApiConfigType.AGENT);
-  const agentKey = (allAgents[0] as any)?.agentKey || '';
+  const enabledAgents = apiConfigService.getEnabledConfigsByType(ApiConfigType.AGENT) as import('../types/apiConfig').AgentConfig[];
+  // Sort by updatedAt descending — the agent most recently saved in the config center wins
+  const sorted = [...enabledAgents].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+  const agentKey = sorted[0]?.agentKey || '';
   return {
     agentKey,
     title: FALLBACK_AGENT_NAMES[viewId] ?? '供应链智能助手',

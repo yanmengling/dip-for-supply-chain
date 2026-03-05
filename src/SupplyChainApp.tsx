@@ -173,7 +173,7 @@ const SupplyChainAppContent = () => {
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="flex-1 overflow-hidden flex flex-col" style={{ transition: 'padding-right 0.3s ease', paddingRight: copilotOpen ? 380 : 0 }}>
         <Suspense fallback={<PageFallback />}>
           {currentView === 'config' ? (
             <div className="h-full">
@@ -200,9 +200,11 @@ const SupplyChainAppContent = () => {
 
       {/* Copilot — lazy loaded so chatkit CSS never touches the page until first open */}
       {copilotOpen && (
-        <Suspense fallback={null}>
-          <CopilotPanel currentView={currentView} onClose={() => setCopilotOpen(false)} />
-        </Suspense>
+        <div id="copilot-host">
+          <Suspense fallback={null}>
+            <CopilotPanel currentView={currentView} onClose={() => setCopilotOpen(false)} />
+          </Suspense>
+        </div>
       )}
     </div>
   );

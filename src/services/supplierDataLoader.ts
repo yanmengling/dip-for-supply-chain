@@ -142,12 +142,14 @@ async function querySupplierMetricWithDimensions(): Promise<any[]> {
             return firstResult.datas || [];
         }
 
-        // 检测名称维度：purchaserid_name 优先（supplier_name 与 supplier_code 同查时 SQL 有歧义）
-        const nameDimCandidates = ['purchaserid_name', 'supplier', 'supplier_name'];
+        // 检测名称维度：supplier_name 为真实供应商名，优先使用；
+        // purchaserid_name 是采购员名（内部人员），仅作兜底
+        const nameDimCandidates = ['supplier_name', 'supplier', 'purchaserid_name'];
         const nameDim = nameDimCandidates.find(d => allDims.includes(d)) ?? null;
 
         const amountDim = allDims.includes('total_amount') ? 'total_amount'
             : allDims.includes('annual_purchase_amount') ? 'annual_purchase_amount'
+            : allDims.includes('qty') ? 'qty'  // 采购数量作为采购规模代理指标
                 : null;
 
         // 组合实际可用的维度

@@ -109,7 +109,7 @@ const SupplierComparisonModal = ({
                 <div className="bg-slate-50 p-4 rounded-lg">
                   <div className="font-semibold text-slate-800">{comparison.currentSupplier.supplierName}</div>
                   <div className="text-sm text-slate-500 mt-1">
-                    年度采购额: ¥{(comparison.currentSupplier.totalPurchaseAmount / 10000).toFixed(0)}万
+                    采购量: {Math.round(comparison.currentSupplier.totalPurchaseAmount)}
                   </div>
                 </div>
               </div>
@@ -133,7 +133,7 @@ const SupplierComparisonModal = ({
                           <div className="flex-1">
                             <div className="font-semibold text-slate-800">{alt.supplierName}</div>
                             <div className="text-sm text-slate-500 mt-1">
-                              年度采购额: ¥{(alt.totalPurchaseAmount / 10000).toFixed(0)}万
+                              采购量: {Math.round(alt.totalPurchaseAmount)}
                             </div>
                           </div>
                           <button className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700">

@@ -701,9 +701,11 @@ class ApiConfigService {
             const configs = this.getAllConfigs();
 
             // Sync enabled agent config's appKey to runtime
-            const enabledAgents = configs.agents.filter(a => a.enabled);
+            // Use the most recently updated agent so config-center edits take effect immediately
+            const enabledAgents = configs.agents
+                .filter(a => a.enabled)
+                .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
             if (enabledAgents.length > 0) {
-                // Use the first enabled agent's appKey
                 const primaryAgent = enabledAgents[0];
                 if (primaryAgent.appKey) {
                     this.syncAgentAppKey(primaryAgent.appKey);
