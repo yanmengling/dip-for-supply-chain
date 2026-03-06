@@ -29,12 +29,6 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const getBearerToken = (): string => {
-    const t = getAuthToken();
-    if (!t) return '';
-    return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
-  };
-
   return (
     <Copilot
       ref={copilotRef}
@@ -43,7 +37,7 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
       onClose={onClose}
       baseUrl={getServiceConfig('agent').baseUrl}
       agentKey={agentKey}
-      token={getBearerToken()}
+      token={getAuthToken()}
       refreshToken={async () => {
         // In DIP mode, use DIP refresh; otherwise fall back to current token
         const t = dipEnvironmentService.isDipMode()
