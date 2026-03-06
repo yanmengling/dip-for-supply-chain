@@ -302,7 +302,7 @@ export async function loadProductDemandPlans(forceReload: boolean = false): Prom
 
     return withCachedLoader(cacheKey, async () => {
         console.log('[PlanningV2DataService] 从 API 加载产品需求计划数据...');
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PP, {
+        const response = await ontologyApi.queryObjectInstances('supplychain_hd0202_pp', {
             limit: 10000,
             need_total: true,
         });
