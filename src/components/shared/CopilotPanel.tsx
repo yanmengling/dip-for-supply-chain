@@ -5,6 +5,7 @@
  * (and its Tailwind v3 CSS injection) until the user first opens the panel.
  */
 import { useEffect, useRef } from 'react';
+import type { ComponentType } from 'react';
 import { Copilot } from '@kweaver-ai/chatkit';
 import type { Copilot as CopilotInstance } from '@kweaver-ai/chatkit';
 import { getAgentConfigForView, getContextForView } from '../../utils/copilotConfig';
@@ -18,6 +19,10 @@ interface CopilotPanelProps {
   onClose: () => void;
 }
 
+// Copilot uses TypeScript mixin pattern (Copilot_base: any) which causes JSX
+// to complain it has no 'props'. Cast to ComponentType<any> to fix the error.
+const CopilotComponent = Copilot as ComponentType<any>;
+
 const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
   const copilotRef = useRef<CopilotInstance>(null);
   const { agentKey, title } = getAgentConfigForView(currentView);
@@ -30,7 +35,7 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <Copilot
+    <CopilotComponent
       ref={copilotRef}
       title={title}
       visible={true}

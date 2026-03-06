@@ -125,7 +125,7 @@ function toDatetime3(value: string): string {
  *   'supply-chain-brain'         → created_by
  */
 export function mapPlanningTaskToRecord(task: PlanningTask): MonitoringTaskRecord {
-    const isTerminated = task.status === 'ended' || task.status === 'expired';
+    const isTerminated = (task.status as string) === 'ended' || task.status === 'expired';
 
     return {
         task_id: task.id,
@@ -215,44 +215,44 @@ export async function pushFormDataToDIP(fields: {
     const now = new Date().toISOString();
 
     const record: MonitoringTaskRecord = {
-        task_id:             crypto.randomUUID(),
-        task_name:           fields.task_name,
-        task_status:         'active',
-        created_at:          now,
-        updated_at:          now,
-        ended_at:            null,
+        task_id: crypto.randomUUID(),
+        task_name: fields.task_name,
+        task_status: 'active',
+        created_at: now,
+        updated_at: now,
+        ended_at: null,
         description_entries: null,
-        product_code:        fields.product_code,
-        product_name:        fields.product_name,
-        demand_start:        toDateOnly(fields.demand_start),
-        demand_end:          toDateOnly(fields.demand_end),
-        demand_quantity:     fields.demand_quantity,
-        production_start:    toDateOnly(fields.production_start),
-        production_end:      toDateOnly(fields.production_end),
+        product_code: fields.product_code,
+        product_name: fields.product_name,
+        demand_start: toDateOnly(fields.demand_start),
+        demand_end: toDateOnly(fields.demand_end),
+        demand_quantity: fields.demand_quantity,
+        production_start: toDateOnly(fields.production_start),
+        production_end: toDateOnly(fields.production_end),
         production_quantity: fields.production_quantity,
-        created_by:          fields.created_by ?? 'supply-chain-brain',
+        created_by: fields.created_by ?? 'supply-chain-brain',
     };
 
     const body = {
         _instance_identities: [],
         dynamic_params: {
             data: {
-                task_id:             record.task_id,
-                task_name:           record.task_name,
-                task_status:         record.task_status,
-                created_at:          record.created_at,
-                updated_at:          record.updated_at,
-                ended_at:            record.ended_at ?? '',
+                task_id: record.task_id,
+                task_name: record.task_name,
+                task_status: record.task_status,
+                created_at: record.created_at,
+                updated_at: record.updated_at,
+                ended_at: record.ended_at ?? '',
                 description_entries: record.description_entries ?? '',
-                product_code:        record.product_code,
-                product_name:        record.product_name,
-                demand_start:        record.demand_start,
-                demand_end:          record.demand_end,
-                demand_quantity:     record.demand_quantity,
-                production_start:    record.production_start,
-                production_end:      record.production_end,
+                product_code: record.product_code,
+                product_name: record.product_name,
+                demand_start: record.demand_start,
+                demand_end: record.demand_end,
+                demand_quantity: record.demand_quantity,
+                production_start: record.production_start,
+                production_end: record.production_end,
                 production_quantity: record.production_quantity,
-                created_by:          record.created_by,
+                created_by: record.created_by,
             },
         },
     };
