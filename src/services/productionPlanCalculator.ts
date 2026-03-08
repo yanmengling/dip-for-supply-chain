@@ -15,6 +15,8 @@ export interface ProductionPlan {
     end_time: string;
     status: string;
     priority: number;
+    /** 合格品入库数量 (MPS xkquainwaqty) */
+    qualifiedInboundQty?: number;
 }
 
 // 优先级分析结果
@@ -27,21 +29,23 @@ export interface PriorityAnalysis {
 
 // 产品分析结果
 export interface ProductAnalysis {
+    /** 生产工单单号 (MPS billno) */
+    orderNumber: string;
     code: string;
     name?: string;  // 产品名称
     quantity: number;
     cycleDays: number;
-    startTime: string;  // 计划开始时间
-    endTime: string;    // 计划结束时间
+    startTime: string;  // 计划开工时间
+    endTime: string;    // 计划完工时间
     priority: number;
     status: string;
-    pendingOrderQuantity?: number;  // 在手订单数量（签约数量-发货数量）
+    /** 合格品入库数量 (MPS xkquainwaqty) */
+    qualifiedInboundQty?: number;
 }
 
 // 统计结果
 export interface ProductionStats {
     totalQuantity: number;
-    totalPendingOrderQuantity: number;  // 所有产品的在手订单数量总和
     priorityAnalysis: PriorityAnalysis[];
     productAnalysis: ProductAnalysis[];
     statusDistribution: { status: string; count: number; percentage: number }[];
@@ -105,7 +109,7 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
         const productionPlanObjectTypeId = await getProductionPlanObjectTypeId();
 
         const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
-            limit: 1000,
+            limit: 10000,
         });
 
         const entries = response.entries || [];
@@ -115,22 +119,59 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
             console.log('[ProductionPlanCalculator] 第一条数据示例:', entries[0]);
 
             return entries.map((item: any) => {
-                // 兼容 MPS 格式 (bom_code, planned_start_date) 与销售订单格式 (order_number, code, start_time)
-                const code = item.product_code || item.productCode || item.code || item.bom_code || '';
-                const orderNumber = item.order_number || item.orderNumber || item.id || `mps-${item.seq_no ?? ''}`;
-                const startTime = item.start_time || item.startTime || item.startDate || item.planned_start_date || '';
-                const endTime = item.end_time || item.endTime || item.endDate || item.planned_end_date || '';
+                // 优先使用 supplychain_hd0202_mps (HD供应链业务知识网络 v3) 字段，再兼容旧格式
+                // v3 工厂生产计划: material_number=物料编码, material_name=物料名称, qty=生产数量,
+                // planbegintime=计划开工时间, planendtime=计划完工时间, billno=生产工单单号,
+                // taskstatus_title=任务状态[A:未开工,B:开工,C:完工,D:部分完工], billstatus=单据状态
+                const code =
+                    item.material_number ??
+                    item.product_code ??
+                    item.productCode ??
+                    item.code ??
+                    item.bom_code ??
+                    '';
+                const name =
+                    item.material_name ??
+                    item.product_name ??
+                    item.productName ??
+                    item.name ??
+                    '';
+                const orderNumber =
+                    item.billno ?? item.order_number ?? item.orderNumber ?? item.id ?? `mps-${item.seq_no ?? ''}`;
+                const startTime =
+                    item.planbegintime ??
+                    item.start_time ??
+                    item.startTime ??
+                    item.startDate ??
+                    item.planned_start_date ??
+                    '';
+                const endTime =
+                    item.planendtime ??
+                    item.end_time ??
+                    item.endTime ??
+                    item.endDate ??
+                    item.planned_end_date ??
+                    '';
+                const quantity = parseFloat(item.qty ?? item.quantity) || 0;
+                const status =
+                    item.taskstatus_title ??
+                    item.billstatus ??
+                    item.status ??
+                    item.order_type ??
+                    '待确认';
+                const qualifiedInboundQty = parseFloat(item.xkquainwaqty) || 0;
 
                 return {
                     order_number: orderNumber,
                     code,
-                    name: item.product_name || item.productName || item.name || '',
-                    quantity: parseFloat(item.quantity) || 0,
+                    name: name || undefined,
+                    quantity,
                     ordered: parseFloat(item.ordered) || 0,
                     start_time: startTime,
                     end_time: endTime,
-                    status: item.status || item.order_type || '待确认',
+                    status,
                     priority: parseInt(item.priority) || 0,
+                    qualifiedInboundQty: qualifiedInboundQty || undefined,
                 };
             });
         }
@@ -256,35 +297,23 @@ export async function getPendingOrderQuantity(productCode: string): Promise<numb
 }
 
 /**
- * 计算产品分析数据（异步，包含在手订单数量）
+ * 计算产品分析数据（不含在手订单）
  */
-export async function analyzeProducts(plans: ProductionPlan[]): Promise<ProductAnalysis[]> {
-    // 获取所有唯一的产品编码
-    const uniqueProductCodes = [...new Set(plans.map(plan => plan.code).filter(code => code))];
-
-    // 并行查询所有产品的在手订单数量
-    const pendingOrderMap = new Map<string, number>();
-    await Promise.all(
-        uniqueProductCodes.map(async (code) => {
-            const pendingQty = await getPendingOrderQuantity(code);
-            pendingOrderMap.set(code, pendingQty);
-        })
-    );
-
-    // 构建产品分析数据
-    const productAnalysis = plans.map(plan => ({
-        code: plan.code,
-        name: plan.name,  // 包含产品名称
-        quantity: plan.quantity,
-        cycleDays: calculateProductionCycle(plan.start_time, plan.end_time),
-        startTime: plan.start_time,  // 计划开始时间
-        endTime: plan.end_time,      // 计划结束时间
-        priority: plan.priority,
-        status: plan.status,
-        pendingOrderQuantity: pendingOrderMap.get(plan.code) || 0,  // 在手订单数量
-    })).sort((a, b) => b.quantity - a.quantity);
-
-    return productAnalysis;
+export function analyzeProducts(plans: ProductionPlan[]): ProductAnalysis[] {
+    return plans
+        .map(plan => ({
+            orderNumber: plan.order_number,
+            code: plan.code,
+            name: plan.name,
+            quantity: plan.quantity,
+            cycleDays: calculateProductionCycle(plan.start_time, plan.end_time),
+            startTime: plan.start_time,
+            endTime: plan.end_time,
+            priority: plan.priority,
+            status: plan.status,
+            qualifiedInboundQty: plan.qualifiedInboundQty,
+        }))
+        .sort((a, b) => b.quantity - a.quantity);
 }
 
 /**
@@ -310,25 +339,15 @@ export function analyzeStatus(plans: ProductionPlan[]): { status: string; count:
 }
 
 /**
- * 计算所有统计数据（异步）
+ * 计算所有统计数据
  */
-export async function calculateProductionStats(plans: ProductionPlan[]): Promise<ProductionStats> {
+export function calculateProductionStats(plans: ProductionPlan[]): ProductionStats {
     const totalQuantity = plans.reduce((sum, plan) => sum + plan.quantity, 0);
-
-    // 获取产品分析（包含在手订单数量）
-    const productAnalysis = await analyzeProducts(plans);
-
-    // 计算所有产品的在手订单数量总和
-    const totalPendingOrderQuantity = productAnalysis.reduce(
-        (sum, product) => sum + (product.pendingOrderQuantity || 0),
-        0
-    );
 
     return {
         totalQuantity,
-        totalPendingOrderQuantity,
         priorityAnalysis: groupByPriority(plans),
-        productAnalysis,
+        productAnalysis: analyzeProducts(plans),
         statusDistribution: analyzeStatus(plans),
     };
 }

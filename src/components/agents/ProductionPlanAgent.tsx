@@ -14,28 +14,34 @@ interface _PlanCacheEntry { plans: ProductionPlan[]; stats: ProductionStats }
 let _planCache: _PlanCacheEntry | null = null;
 let _planCacheTime = 0;
 
-/**
- * 格式化日期字符串显示
- */
-function formatDateString(dateStr: string): string {
-    if (!dateStr) return '';
+/** 过滤掉「完工」状态的生产计划 */
+const COMPLETED_STATUSES = ['完工', 'C'];
 
-    // 如果已经是标准格式（YYYY-MM-DD），直接返回
-    if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) {
-        return dateStr;
-    }
+const PAGE_SIZE = 10;
 
-    // 尝试解析并格式化
+/** 格式化日期时间显示（保留日期+时间或仅日期） */
+function formatDateTimeString(dateStr: string): string {
+    if (!dateStr) return '-';
     const date = new Date(dateStr);
-    if (!isNaN(date.getTime())) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    }
+    if (isNaN(date.getTime())) return dateStr;
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = date.getHours();
+    const min = date.getMinutes();
+    if (h === 0 && min === 0) return `${y}-${m}-${d}`;
+    return `${y}-${m}-${d} ${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
 
-    // 如果无法解析，返回原始字符串
-    return dateStr;
+/** 计划完工时间是否已逾期（早于今天） */
+function isPlannedEndOverdue(endTime: string): boolean {
+    if (!endTime) return false;
+    const end = new Date(endTime);
+    if (isNaN(end.getTime())) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+    return end.getTime() < today.getTime();
 }
 
 export const ProductionPlanAgent = () => {
@@ -45,6 +51,14 @@ export const ProductionPlanAgent = () => {
     const [stats, setStats] = useState<ProductionStats | null>(_initValid ? _planCache!.stats : null);
     const [loading, setLoading] = useState(!_initValid);
     const [error, setError] = useState<string | null>(null);
+    const [page, setPage] = useState(1);
+
+    // 数据条数变少时，若当前页超出范围则回到第 1 页
+    useEffect(() => {
+        if (!stats?.productAnalysis.length) return;
+        const totalPages = Math.max(1, Math.ceil(stats.productAnalysis.length / PAGE_SIZE));
+        if (page > totalPages) setPage(1);
+    }, [stats?.productAnalysis.length, page]);
 
     useEffect(() => {
         const loadData = async () => {
@@ -60,12 +74,16 @@ export const ProductionPlanAgent = () => {
             try {
                 setLoading(true);
                 const data = await loadProductionPlanData();
-                setPlans(data);
+                // 过滤掉完工状态的生产计划
+                const filtered = data.filter(
+                    (p) => !COMPLETED_STATUSES.includes(p.status)
+                );
+                setPlans(filtered);
                 setError(null);
 
-                if (data.length > 0) {
-                    const calculatedStats = await calculateProductionStats(data);
-                    _planCache = { plans: data, stats: calculatedStats };
+                if (filtered.length > 0) {
+                    const calculatedStats = calculateProductionStats(filtered);
+                    _planCache = { plans: filtered, stats: calculatedStats };
                     _planCacheTime = Date.now();
                     setStats(calculatedStats);
                 } else {
@@ -115,17 +133,11 @@ export const ProductionPlanAgent = () => {
 
             <div className="p-6 space-y-6">
                 {/* 总体统计 */}
-                <div className="grid grid-cols-2 gap-4">
-                    <div className="p-3 bg-indigo-50 rounded-lg">
+                <div className="grid grid-cols-1 gap-4">
+                    <div className="p-3 bg-indigo-50 rounded-lg max-w-xs">
                         <div className="text-xs text-indigo-600 mb-1">计划产量</div>
                         <div className="text-2xl font-bold text-indigo-700">
                             {stats.totalQuantity.toLocaleString()}
-                        </div>
-                    </div>
-                    <div className="p-3 bg-purple-50 rounded-lg">
-                        <div className="text-xs text-purple-600 mb-1">在手订单数量</div>
-                        <div className="text-2xl font-bold text-purple-700">
-                            {stats.totalPendingOrderQuantity.toLocaleString()}
                         </div>
                     </div>
                 </div>
@@ -141,56 +153,96 @@ export const ProductionPlanAgent = () => {
                         <table className="min-w-full divide-y divide-slate-200">
                             <thead className="bg-slate-50">
                                 <tr>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">生产工单单号</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">产品</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">计划产量</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">在手订单数量</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">优先级</th>
-                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">生产周期</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">合格品入库数量</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">计划开工时间</th>
+                                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">计划完工时间</th>
                                     <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">状态</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-slate-200">
-                                {stats.productAnalysis.map((product, index) => (
-                                    <tr key={index}>
-                                        <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
-                                            <div className="flex flex-col">
-                                                <span>{product.code}</span>
-                                                {product.name && (
-                                                    <span className="text-xs text-slate-500 mt-0.5">{product.name}</span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
-                                            {product.quantity.toLocaleString()}
-                                        </td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-700 font-medium">
-                                            {product.pendingOrderQuantity !== undefined
-                                                ? product.pendingOrderQuantity.toLocaleString()
-                                                : '-'}
-                                        </td>
-                                        <td className="px-4 py-3 whitespace-nowrap">
-                                            <span className={`text-xs px-2 py-1 rounded ${product.priority === 1 ? 'bg-red-100 text-red-700' :
-                                                product.priority === 2 ? 'bg-yellow-100 text-yellow-700' :
-                                                    'bg-slate-100 text-slate-700'
-                                                }`}>
-                                                {product.priority}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-indigo-600 font-semibold">
-                                            {product.startTime && product.endTime ? (
-                                                <span>{product.cycleDays}天（{formatDateString(product.startTime)}-{formatDateString(product.endTime)}）</span>
-                                            ) : (
-                                                <span>{product.cycleDays}天</span>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
-                                            {product.status}
-                                        </td>
-                                    </tr>
-                                ))}
+                                {(() => {
+                                    const total = stats.productAnalysis.length;
+                                    const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+                                    const from = (page - 1) * PAGE_SIZE;
+                                    const to = Math.min(from + PAGE_SIZE, total);
+                                    const pageList = stats.productAnalysis.slice(from, to);
+                                    return pageList.map((product, i) => {
+                                        const overdue = isPlannedEndOverdue(product.endTime);
+                                        return (
+                                            <tr key={from + i}>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-700 font-medium">
+                                                    {product.orderNumber || '-'}
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm font-medium text-slate-900">
+                                                    <div className="flex flex-col">
+                                                        <span>{product.code}</span>
+                                                        {product.name && (
+                                                            <span className="text-xs text-slate-500 mt-0.5">{product.name}</span>
+                                                        )}
+                                                    </div>
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                                                    {product.quantity.toLocaleString()}
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                                                    {product.qualifiedInboundQty != null
+                                                        ? product.qualifiedInboundQty.toLocaleString()
+                                                        : '-'}
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                                                    {formatDateTimeString(product.startTime)}
+                                                </td>
+                                                <td className="px-4 py-3 whitespace-nowrap text-sm text-slate-600">
+                                                    {formatDateTimeString(product.endTime)}
+                                                </td>
+                                                <td className={`px-4 py-3 whitespace-nowrap text-sm font-medium ${overdue ? 'text-red-600' : 'text-slate-600'}`}>
+                                                    {product.status}
+                                                </td>
+                                            </tr>
+                                        );
+                                    });
+                                })()}
                             </tbody>
                         </table>
                     </div>
+
+                    {/* 分页：每页 10 条 */}
+                    {(() => {
+                        const total = stats.productAnalysis.length;
+                        const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+                        if (totalPages <= 1) return null;
+                        return (
+                            <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center text-sm">
+                                <span className="text-slate-500">
+                                    共 {total} 条，第 {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} 条
+                                </span>
+                                <div className="flex items-center gap-2">
+                                    <button
+                                        type="button"
+                                        disabled={page <= 1}
+                                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                                    >
+                                        上一页
+                                    </button>
+                                    <span className="text-slate-600 font-medium min-w-[4rem] text-center">
+                                        {page} / {totalPages}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        disabled={page >= totalPages}
+                                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                        className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-lg disabled:opacity-50 disabled:pointer-events-none transition-colors"
+                                    >
+                                        下一页
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })()}
                 </div>
             </div>
         </div>
