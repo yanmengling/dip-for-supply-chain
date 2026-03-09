@@ -45,11 +45,13 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
       token={getAuthToken()}
       refreshToken={async () => {
         // In DIP mode, use DIP refresh; otherwise fall back to current token
+        // NOTE: Return raw token only — Copilot component adds "Bearer " prefix internally.
         const t = dipEnvironmentService.isDipMode()
           ? await dipEnvironmentService.refreshToken()
           : getAuthToken();
         if (!t) return '';
-        return t.startsWith('Bearer ') ? t : `Bearer ${t}`;
+        // Strip any accidental "Bearer " prefix so the component doesn't double it
+        return t.startsWith('Bearer ') ? t.slice(7) : t;
       }}
       businessDomain="bd_public"
     />
