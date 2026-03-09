@@ -86,13 +86,13 @@ async function getProductionPlanObjectTypeId(): Promise<string> {
 
 /**
  * 获取销售订单对象类型 ID（从配置中心获取）
- * 注意：使用 entityType: 'order' 对应销售订单 (supplychain_hd0202_salesorder)
+ * 返回 null 表示未配置，由调用方决定是否跳过查询
  */
-function getSalesOrderObjectTypeId(): string {
+function getSalesOrderObjectTypeId(): string | null {
     const config = apiConfigService.getOntologyObjectByEntityType('order');
-    if (!config || !config.enabled) {
-        console.error('[ProductionPlanCalculator] 未找到启用的销售订单对象配置 (entity_type: order)');
-        throw new Error('销售订单对象未配置，请在配置中心添加 order 类型的业务对象配置');
+    if (!config || !config.enabled || !config.objectTypeId) {
+        console.warn('[ProductionPlanCalculator] 未找到启用的销售订单对象配置 (entity_type: order)，在手订单量将显示为 0');
+        return null;
     }
     console.log(`[ProductionPlanCalculator] 使用配置的销售订单对象类型ID: ${config.objectTypeId}`);
     return config.objectTypeId;
@@ -259,8 +259,9 @@ export function groupByPriority(plans: ProductionPlan[]): PriorityAnalysis[] {
  */
 export async function getPendingOrderQuantity(productCode: string): Promise<number> {
     try {
-        // 从配置中心获取销售订单对象类型 ID
+        // 从配置中心获取销售订单对象类型 ID，未配置则跳过查询
         const salesOrderObjectTypeId = getSalesOrderObjectTypeId();
+        if (!salesOrderObjectTypeId) return 0;
 
         const condition: QueryCondition = {
             operation: '==',
