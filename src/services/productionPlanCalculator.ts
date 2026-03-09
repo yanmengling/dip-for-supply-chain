@@ -187,6 +187,43 @@ async function _doLoadProductionPlanData(): Promise<ProductionPlan[]> {
                 qualifiedInboundQty: qualifiedInboundQty || undefined,
             };
         });
+
+        const entries = response.entries || [];
+
+        if (entries.length > 0) {
+            console.log(`[ProductionPlanCalculator] Ontology API 返回 ${entries.length} 条生产计划记录`);
+            console.log('[ProductionPlanCalculator] 第一条数据示例:', entries[0]);
+
+            return entries.map((item: any) => {
+                // 兼容 MPS 格式 (bom_code, planned_start_date) 与销售订单格式 (order_number, code, start_time)
+                const code = item.product_code || item.productCode || item.code || item.bom_code || '';
+                const orderNumber = item.order_number || item.orderNumber || item.id || `mps-${item.seq_no ?? ''}`;
+                const startTime = item.start_time || item.startTime || item.startDate || item.planned_start_date || '';
+                const endTime = item.end_time || item.endTime || item.endDate || item.planned_end_date || '';
+                // quantity 有时 API 返回字符串，统一转为数字
+                const rawQty = item.quantity ?? item.planned_quantity ?? item.qty ?? 0;
+                const quantity = typeof rawQty === 'number' ? rawQty : parseFloat(String(rawQty).replace(/,/g, '')) || 0;
+
+                return {
+                    order_number: orderNumber,
+                    code,
+                    name: item.product_name || item.productName || item.name || '',
+                    quantity,
+                    ordered: parseFloat(item.ordered) || 0,
+                    start_time: startTime,
+                    end_time: endTime,
+                    status: item.status || item.order_type || '待确认',
+                    priority: parseInt(item.priority) || parseInt(item.seq_no) || 0,
+                };
+            });
+        }
+
+        console.warn('[ProductionPlanCalculator] Ontology API 返回空数据');
+        return [];
+
+    } catch (error) {
+        console.error('[ProductionPlanCalculator] Ontology API 加载失败:', error);
+        return [];
     }
 
     console.warn('[ProductionPlanCalculator] Ontology API 返回空数据');
