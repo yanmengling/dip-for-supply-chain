@@ -110,6 +110,7 @@ export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
 
         const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
             limit: 10000,
+            timeout: 120000,
         });
 
         const entries = response.entries || [];

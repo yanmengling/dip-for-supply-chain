@@ -107,10 +107,14 @@ const SmartCollaborationPanel = ({
   // ---------- Summary stats ----------
   const stats = useMemo(() => {
     const all = collectBars(ganttBars);
+    // 按唯一物料编码统计，与 MRP 面板和甘特图总结卡片口径一致
+    const uniqueCodes = new Set(all.map(b => b.materialCode));
+    const shortageCodesSet = new Set(all.filter(b => b.hasShortage).map(b => b.materialCode));
+    const poCodesSet = new Set(all.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
     return {
-      totalMaterials: all.length,
-      shortageCount: all.filter((b) => b.hasShortage).length,
-      poPlacedCount: all.filter((b) => b.poStatus === 'has_po').length,
+      totalMaterials: uniqueCodes.size,
+      shortageCount: shortageCodesSet.size,
+      poPlacedCount: poCodesSet.size,
     };
   }, [ganttBars]);
 

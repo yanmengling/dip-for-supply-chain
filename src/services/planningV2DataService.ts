@@ -389,6 +389,7 @@ export async function loadProductionPlans(forceReload: boolean = false): Promise
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
             limit: 10000,
             need_total: true,
+            timeout: 120000,
         });
 
         const plans: ProductionPlanAPI[] = response.entries.map((item: any) => ({
@@ -430,6 +431,7 @@ export async function loadMaterialRequirementPlans(forceReload: boolean = false)
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
             limit: 10000,
             need_total: true,
+            timeout: 120000,
         });
 
         const plans: MaterialRequirementPlanAPI[] = response.entries.map((item: any) => ({
@@ -490,25 +492,65 @@ export async function getMRPStats(): Promise<{
 // ============================================================================
 
 /**
- * 按产品编码查询全部 BOM 数据
+ * 按产品编码查询 BOM 数据（仅主料、最新版本）
+ *
+ * 查询策略（两步精确查询）：
+ *   Step 1: 用 bom_material_code 查询少量数据（limit=1），获取最新 bom_version
+ *   Step 2: 用 bom_material_code + bom_version + alt_priority=0 三条件精确查询
+ *
+ * 数据量对比（以 943-000003 为例）：
+ *   旧方案（全版本）: 14,504 条 → limit 截断到 10,000 → 客户端过滤 → 271 条（数据丢失！）
+ *   新方案（精确查询）: 直接返回 392 条，无截断风险
  */
 export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]> {
     const cacheKey = `bom_${productCode}`;
 
     return withCachedLoader(cacheKey, async () => {
         console.log(`[PlanningV2DataService] 加载 BOM 数据: ${productCode}...`);
+
+        // Step 1: 获取最新 bom_version（只查 1 条，取版本号即可）
+        const versionResp = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'bom_material_code', operation: '==', value: productCode },
+                ]
+            },
+            limit: 100,
+            need_total: false,
+            timeout: 120000,
+        });
+        const versionEntries = versionResp.entries || [];
+        const allVersions = [...new Set(versionEntries.map((r: any) => r.bom_version || ''))].sort();
+        console.log(`[PlanningV2DataService] BOM ${productCode}: Step1 返回 ${versionEntries.length} 条, 版本列表: ${allVersions.join(', ')}`);
+        const latestVersion = versionEntries.reduce(
+            (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max), ''
+        );
+
+        if (!latestVersion) {
+            console.warn(`[PlanningV2DataService] BOM ${productCode}: 未找到任何版本`);
+            return [];
+        }
+        console.log(`[PlanningV2DataService] BOM ${productCode}: 最新版本 "${latestVersion}"`);
+
+        // Step 2: 精确查询 = bom_material_code + bom_version + alt_priority=0
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
             condition: {
                 operation: 'and',
                 sub_conditions: [
-                    { field: 'bom_material_code', operation: '==', value: productCode }
+                    { field: 'bom_material_code', operation: '==', value: productCode },
+                    { field: 'bom_version', operation: '==', value: latestVersion },
+                    { field: 'alt_priority', operation: '==', value: 0 },
                 ]
             },
             limit: 10000,
             need_total: true,
+            timeout: 120000,
         });
 
-        const allData: BOMRecord[] = response.entries.map((item: any) => ({
+        console.log(`[PlanningV2DataService] BOM ${productCode}: API 返回 ${response.entries?.length ?? 0} 条, total=${(response as any).total ?? 'N/A'}`);
+
+        const data: BOMRecord[] = response.entries.map((item: any) => ({
             bom_material_code: item.bom_material_code || '',
             material_code: item.material_code || '',
             material_name: item.material_name || '',
@@ -520,14 +562,37 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
             alt_priority: parseInt(item.alt_priority) || 0,
         }));
 
-        // 取最新 BOM 版本（bom_version 为时间字符串，字典序最大即最新）
-        const latestVersion = allData.reduce((max, r) => r.bom_version > max ? r.bom_version : max, '');
-        const data = latestVersion
-            ? allData.filter(r => r.bom_version === latestVersion)
-            : allData;
+        // 从根节点做可达性遍历，只保留能从产品根节点到达的 BOM 记录
+        // 排除替代料（alt_priority>0 已被 API 过滤）的残留子级（parent 指向替代料编码）
+        const childMap = new Map<string, typeof data>();
+        for (const r of data) {
+            const parent = r.parent_material_code || productCode;
+            const list = childMap.get(parent) || [];
+            list.push(r);
+            childMap.set(parent, list);
+        }
 
-        console.log(`[PlanningV2DataService] BOM ${productCode}: 全部 ${allData.length} 条，最新版本 "${latestVersion}" 共 ${data.length} 条`);
-        return data;
+        const reachable: BOMRecord[] = [];
+        const queue = [productCode];
+        const visited = new Set<string>();
+        visited.add(productCode);
+        while (queue.length > 0) {
+            const parentCode = queue.shift()!;
+            const children = childMap.get(parentCode) || [];
+            for (const child of children) {
+                reachable.push(child);
+                if (!visited.has(child.material_code)) {
+                    visited.add(child.material_code);
+                    queue.push(child.material_code);
+                }
+            }
+        }
+
+        if (reachable.length < data.length) {
+            console.warn(`[PlanningV2DataService] BOM ${productCode}: 过滤了 ${data.length - reachable.length} 条不可达记录（替代料残留子级）`);
+        }
+        console.log(`[PlanningV2DataService] BOM ${productCode}: 版本 "${latestVersion}" 主料 ${reachable.length} 条`);
+        return reachable;
     });
     // 注意：BOM 加载失败直接抛出，让调用方感知失败
 }
@@ -561,6 +626,7 @@ export async function loadMaterialsByCode(codes: string[]): Promise<MaterialReco
                 },
                 limit: 10000,
                 need_total: true,
+                timeout: 120000,
             });
 
             const data: MaterialRecord[] = response.entries.map((item: any) => ({
@@ -610,6 +676,7 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
                 },
                 limit: 10000,
                 need_total: true,
+                timeout: 120000,
             });
 
             const data: PRRecord[] = response.entries.map((item: any) => ({
@@ -663,6 +730,7 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
                 },
                 limit: 10000,
                 need_total: true,
+                timeout: 120000,
             });
 
             const data: PORecord[] = response.entries.map((item: any) => ({
@@ -722,6 +790,7 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
                 },
                 limit: 10000,
                 need_total: true,
+                timeout: 120000,
             });
 
             const data: InventoryRecord[] = response.entries.map((item: any) => ({

@@ -169,115 +169,80 @@ export async function fetchPendingOrders(productCode: string): Promise<number> {
 }
 
 /**
- * 获取BOM数据（递归查询）
- * 符合Constitution Principle 1 & 7: 仅从API获取数据，字段名遵循HD供应链业务知识网络.json
- * 递归查询所有BOM层级，包括替代件
+ * 获取BOM数据（两步精确查询）
+ *
+ * 查询策略：
+ *   Step 1: 用 bom_material_code 查少量数据，获取最新 bom_version
+ *   Step 2: 用 bom_material_code + bom_version + alt_priority=0 精确查询主料
+ *
+ * 字段映射（API → BOMItem）：
+ *   parent_material_code → parent_code
+ *   material_code → child_code
+ *   material_name → child_name
+ *   standard_usage → quantity
+ *   seq_no → sequence
  */
 export async function fetchBOMData(productCode: string): Promise<BOMItem[]> {
-  console.log(`[mpsDataService] ========== fetchBOMData 开始 ==========`);
-  console.log(`[mpsDataService] 产品编码: ${productCode}`);
+  console.log(`[mpsDataService] fetchBOMData: ${productCode}`);
 
   const objectTypeIds = getObjectTypeIds();
-  console.log(`[mpsDataService] BOM对象类型ID: ${objectTypeIds.BOM}`);
 
-  // 🔍 DEBUG: 首先查询所有BOM数据（无条件）以验证数据是否存在
-  console.log(`[mpsDataService] 🔍 DEBUG: 查询所有BOM数据（无条件）...`);
-  try {
-    const debugResponse = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
-      limit: 10,
-      need_total: true,
-    });
-    console.log(`[mpsDataService] 🔍 DEBUG: 知识网络中BOM数据总数: ${debugResponse.total_count || debugResponse.entries.length}`);
-    if (debugResponse.entries.length > 0) {
-      console.log(`[mpsDataService] 🔍 DEBUG: BOM数据示例（前5条）:`, debugResponse.entries.slice(0, 5).map((item: any) => ({
-        bom_number: item.bom_number,
-        parent_code: item.parent_code,
-        child_code: item.child_code,
-        child_name: item.child_name,
-      })));
-    } else {
-      console.warn(`[mpsDataService] ⚠️ 知识网络中没有任何BOM数据！请检查数据是否已导入。`);
-    }
-  } catch (err) {
-    console.error(`[mpsDataService] ❌ DEBUG查询失败:`, err);
+  // Step 1: 获取最新 bom_version
+  const versionResp = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
+    condition: {
+      operation: 'and',
+      sub_conditions: [
+        { field: 'bom_material_code', operation: '==', value: productCode },
+      ]
+    },
+    limit: 100,
+    need_total: false,
+    timeout: 120000,
+  });
+  const versionEntries = versionResp.entries || [];
+  const latestVersion = versionEntries.reduce(
+    (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max), ''
+  );
+
+  if (!latestVersion) {
+    console.warn(`[mpsDataService] 未找到产品 ${productCode} 的 BOM 数据`);
+    return [];
   }
+  console.log(`[mpsDataService] BOM 最新版本: "${latestVersion}"`);
 
-  // ⚠️ 问题诊断：parent_code字段未建立索引，条件查询返回空结果
-  // 解决方案：获取所有BOM数据，然后在客户端递归过滤
-  console.log(`[mpsDataService] 🔧 使用客户端过滤方案（parent_code字段未索引）`);
-
-  // Step 1: 获取所有BOM数据（一次性查询，避免多次网络往返）
-  console.log(`[mpsDataService] Step 1: 获取所有BOM数据...`);
+  // Step 2: 精确查询 = bom_material_code + bom_version + alt_priority=0
   const response = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
-    limit: 10000, // 假设BOM总数不超过10000条
+    condition: {
+      operation: 'and',
+      sub_conditions: [
+        { field: 'bom_material_code', operation: '==', value: productCode },
+        { field: 'bom_version', operation: '==', value: latestVersion },
+        { field: 'alt_priority', operation: '==', value: 0 },
+      ]
+    },
+    limit: 10000,
     need_total: true,
+    timeout: 120000,
   });
 
-  console.log(`[mpsDataService] ✅ 获取到${response.entries.length}条BOM数据`);
-
-  // Step 2: 映射API响应到BOMItem类型
-  const allBOMRecords = response.entries.map((item: any) => ({
-    bom_id: item.bom_id || item.bom_number || '',
-    parent_code: item.parent_code || '',
-    child_code: item.child_code || '',
-    child_name: item.child_name || '',
-    quantity: item.quantity || item.child_quantity ? parseFloat(item.quantity || item.child_quantity) : undefined,
+  // Step 3: 映射 API 字段到 BOMItem 类型
+  const allBOMItems: BOMItem[] = response.entries.map((item: any) => ({
+    bom_id: item.seq_no?.toString() || item.bom_id || item.bom_number || '',
+    parent_code: item.parent_material_code || item.parent_code || '',
+    child_code: item.material_code || item.child_code || '',
+    child_name: item.material_name || item.child_name || '',
+    quantity: parseFloat(item.standard_usage || item.quantity || item.child_quantity) || undefined,
     unit: item.unit || '',
-    alternative_part: item.alternative_part,
-    alternative_group: item.alternative_group,
+    alternative_part: item.alt_part || item.alternative_part,
+    alternative_group: item.alt_priority != null ? parseInt(item.alt_priority) : item.alternative_group,
     relationship_type: item.relationship_type,
-    sequence: item.sequence ? parseInt(item.sequence) : undefined,
+    sequence: item.seq_no ? parseInt(item.seq_no) : (item.sequence ? parseInt(item.sequence) : undefined),
     effective_date: item.effective_date,
     expiry_date: item.expiry_date,
     loss_rate: item.loss_rate ? parseFloat(item.loss_rate) : undefined,
-  })).filter((bom: BOMItem) => bom.bom_id && bom.parent_code && bom.child_code);
+  })).filter((bom: BOMItem) => bom.parent_code && bom.child_code);
 
-  console.log(`[mpsDataService] 映射后有效BOM记录数: ${allBOMRecords.length}`);
-
-  // Step 3: 客户端递归过滤，构建指定产品的BOM树
-  const allBOMItems: BOMItem[] = [];
-  const processedCodes = new Set<string>();
-
-  function filterChildren(parentCode: string, level: number = 0) {
-    const indent = '  '.repeat(level);
-
-    // 防止循环引用
-    if (processedCodes.has(parentCode)) {
-      console.log(`${indent}[filterChildren] ⚠️ 跳过已处理的parentCode: ${parentCode}`);
-      return;
-    }
-
-    // 客户端过滤：查找parent_code匹配的记录
-    const children = allBOMRecords.filter(bom => bom.parent_code === parentCode);
-
-    console.log(`${indent}[filterChildren] level=${level}, parentCode=${parentCode}, 找到${children.length}个子项`);
-
-    if (children.length === 0) {
-      return; // 自然终止
-    }
-
-    if (level === 0 && children.length > 0) {
-      console.log(`${indent}[filterChildren] 顶层子项示例（前3条）:`, children.slice(0, 3).map(c => ({
-        parent_code: c.parent_code,
-        child_code: c.child_code,
-        child_name: c.child_name,
-      })));
-    }
-
-    allBOMItems.push(...children);
-    processedCodes.add(parentCode);
-
-    // 递归处理子项
-    for (const child of children) {
-      filterChildren(child.child_code, level + 1);
-    }
-  }
-
-  console.log(`[mpsDataService] Step 3: 客户端递归过滤，起始产品编码: ${productCode}`);
-  filterChildren(productCode, 0);
-
-  console.log(`[mpsDataService] ========== fetchBOMData 完成 ==========`);
-  console.log(`[mpsDataService] 共提取 ${allBOMItems.length} 条相关BOM数据`);
+  console.log(`[mpsDataService] BOM ${productCode}: 版本 "${latestVersion}" 主料 ${allBOMItems.length} 条`);
 
   return allBOMItems;
 }

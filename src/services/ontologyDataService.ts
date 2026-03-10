@@ -385,7 +385,7 @@ export function loadMaterialProcurementEvents(forceReload: boolean = false): Pro
 
             if (poConfig) {
                 queries.push(
-                    ontologyApi.queryObjectInstances(poConfig.objectTypeId, { limit: 10000, need_total: false })
+                    ontologyApi.queryObjectInstances(poConfig.objectTypeId, { limit: 10000, need_total: false, timeout: 120000 })
                         .then(r => r.entries.map((item: any) => ({
                             source: 'purchase_order',
                             material_code: item.material_code || item.materialCode || item.product_code || item.productCode || '',
@@ -407,7 +407,7 @@ export function loadMaterialProcurementEvents(forceReload: boolean = false): Pro
 
             if (prConfig) {
                 queries.push(
-                    ontologyApi.queryObjectInstances(prConfig.objectTypeId, { limit: 10000, need_total: false })
+                    ontologyApi.queryObjectInstances(prConfig.objectTypeId, { limit: 10000, need_total: false, timeout: 120000 })
                         .then(r => r.entries.map((item: any) => ({
                             source: 'purchase_request',
                             material_code: item.material_code || item.materialCode || item.product_code || item.productCode || '',

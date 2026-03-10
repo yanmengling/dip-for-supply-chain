@@ -81,6 +81,16 @@ export async function buildGanttData(
 
   // 5. 构建 BOM 树（parent_material_code -> children）
   const bomTree = buildBOMTreeFromRecords(bomRecords, productCode);
+  // 检查 BOM 数据中的孤立父节点（有子级但自身不在任何子件列表中）
+  const allChildCodes = new Set<string>();
+  bomRecords.forEach(r => allChildCodes.add(r.material_code));
+  const allParentCodes = new Set<string>();
+  bomRecords.forEach(r => { if (r.parent_material_code) allParentCodes.add(r.parent_material_code); });
+  const orphanParents = [...allParentCodes].filter(p => p !== productCode && !allChildCodes.has(p));
+  if (orphanParents.length > 0) {
+    const orphanChildCount = orphanParents.reduce((s, p) => s + (bomTree.get(p)?.length || 0), 0);
+    console.warn(`[GanttService] BOM数据存在 ${orphanParents.length} 个孤立父节点（${orphanChildCount} 条子记录），已补充到甘特图:`, orphanParents);
+  }
 
   // 6. 倒排计算
   const productMat = materialMap.get(productCode);
@@ -110,25 +120,35 @@ export async function buildGanttData(
     children: [],
   };
 
-  // BFS 倒排遍历（visited 防止环路导致无限循环）
-  const visited = new Set<string>();
-  visited.add(productCode);
+  // BFS 倒排遍历
+  // visitedPositions: 按 BOM 位置（parent+child）去重，允许同一物料在不同父组件下出现
+  // 环路检测: 通过 ancestorChain 追踪祖先链，防止 A→B→C→A 的循环
+  const visitedPositions = new Set<string>();
+  visitedPositions.add(`_root_>${productCode}`);
 
-  const queue: { parentBar: GanttBar; childRecords: BOMRecord[] }[] = [];
+  const queue: { parentBar: GanttBar; childRecords: BOMRecord[]; ancestors: Set<string> }[] = [];
   const level1 = bomTree.get(productCode) || [];
   if (level1.length > 0) {
-    queue.push({ parentBar: root, childRecords: level1 });
+    queue.push({ parentBar: root, childRecords: level1, ancestors: new Set([productCode]) });
   }
 
   const MAX_NODES = 2000; // 安全上限，防止异常数据导致内存溢出
   let nodeCount = 1; // 已包含 root
 
   while (queue.length > 0) {
-    const { parentBar, childRecords } = queue.shift()!;
+    const { parentBar, childRecords, ancestors } = queue.shift()!;
 
     for (const bomItem of childRecords) {
-      // 防止环路
-      if (visited.has(bomItem.material_code)) continue;
+      // 环路检测：如果子件已在祖先链上，跳过（真正的循环引用）
+      if (ancestors.has(bomItem.material_code)) {
+        console.warn(`[GanttService] 检测到环路: ${parentBar.materialCode} -> ${bomItem.material_code}，跳过`);
+        continue;
+      }
+      // BOM 位置去重：同一 parent 下同一 material 只保留一次
+      const posKey = `${parentBar.materialCode}>${bomItem.material_code}`;
+      if (visitedPositions.has(posKey)) continue;
+      visitedPositions.add(posKey);
+
       if (nodeCount >= MAX_NODES) {
         console.warn(`[GanttService] 节点数超过上限 ${MAX_NODES}，截断渲染`);
         break;
@@ -193,35 +213,40 @@ export async function buildGanttData(
         children: [],
       };
 
-      visited.add(bomItem.material_code);
       nodeCount++;
       parentBar.children.push(bar);
 
-      // 递归子级
+      // 递归子级：传递新的祖先链（加上当前节点）
       const grandChildren = bomTree.get(bomItem.material_code) || [];
       if (grandChildren.length > 0) {
-        queue.push({ parentBar: bar, childRecords: grandChildren });
+        const childAncestors = new Set(ancestors);
+        childAncestors.add(bomItem.material_code);
+        queue.push({ parentBar: bar, childRecords: grandChildren, ancestors: childAncestors });
       }
     }
   }
 
-  console.log(`[GanttService] 甘特图构建完成，共 ${nodeCount} 个节点`);
+  // 孤立父节点是替代料（alt_priority>0 被过滤掉了），其子级记录的 parent 指向替代料编码
+  // 这些子级不应出现在甘特图中，仅打印警告供排查
+  if (orphanParents.length > 0) {
+    const orphanChildCount = orphanParents.reduce((s, p) => s + (bomTree.get(p)?.length || 0), 0);
+    console.warn(`[GanttService] 跳过 ${orphanParents.length} 个替代料父节点的 ${orphanChildCount} 条子记录（替代料已被 alt_priority=0 过滤）:`, orphanParents);
+  }
+
+  console.log(`[GanttService] 甘特图构建完成，共 ${nodeCount} 个节点（BOM位置），唯一物料 ${new Set(flattenGanttBars([root]).map(b => b.materialCode)).size - 1} 种（不含根）`);
   return [root];
 }
 
-/** 从 BOM 记录构建 parent -> children 映射（仅保留主料，过滤替代料） */
+/** 从 BOM 记录构建 parent -> children 映射 */
 function buildBOMTreeFromRecords(
   records: BOMRecord[],
   rootCode: string
 ): Map<string, BOMRecord[]> {
   const tree = new Map<string, BOMRecord[]>();
 
-  // 过滤替代料（alt_part 为空或不存在为主料）
-  const mainRecords = records.filter(r => {
-    return !r.alt_part || r.alt_part === '' || r.alt_part === '0';
-  });
-
-  for (const record of mainRecords) {
+  // BOM 数据已在 API 层用 alt_priority=0 过滤了主料，无需客户端再过滤
+  // 注：alt_part 字段表示"是否存在替代料组"，主料也可能有 alt_part 非空值
+  for (const record of records) {
     const parent = record.parent_material_code || rootCode;
     const children = tree.get(parent) || [];
     children.push(record);
@@ -328,8 +353,12 @@ export function getGanttSummary(
     b => b.startDate < today && (b.poStatus === 'no_po') && b.materialType !== '自制',
   );
 
-  const totalMaterials = materials.length;
-  const shortageCount = materials.filter(b => b.hasShortage).length;
+  // 按唯一物料编码统计（同一物料在不同父组件下只算一种），与 MRP 面板口径一致
+  const uniqueMaterialCodes = new Set(materials.map(b => b.materialCode));
+  const totalMaterials = uniqueMaterialCodes.size;
+  // 缺料也按唯一物料编码统计
+  const shortageCodes = new Set(materials.filter(b => b.hasShortage).map(b => b.materialCode));
+  const shortageCount = shortageCodes.size;
   // 异常物料：pastDue 和 overdue 的并集（按 materialCode 去重）
   const abnormalCodes = new Set([
     ...pastDueItems.map(b => b.materialCode),

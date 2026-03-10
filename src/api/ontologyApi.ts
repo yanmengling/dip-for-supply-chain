@@ -306,6 +306,8 @@ export interface QueryObjectInstancesOptions {
   include_type_info?: boolean;
   /** Logic property parameters (if include_logic_params=true, these are used) */
   logic_params?: LogicPropertyParam[];
+  /** 请求超时时间（毫秒），不设则使用 httpClient 默认值 */
+  timeout?: number;
 }
 
 /**
@@ -588,7 +590,11 @@ class OntologyApiClient {
     // 使用 POST + X-HTTP-Method-Override: GET（ADP Ontology Query API 规范要求）
     let response: any;
     try {
-      response = await httpClient.postAsGet<ObjectInstancesResponse>(url, requestBody);
+      response = await httpClient.postAsGet<ObjectInstancesResponse>(
+        url,
+        requestBody,
+        options?.timeout ? { timeout: options.timeout } : undefined,
+      );
 
       if (!response.data) {
         throw new Error(`API返回空数据。状态码: ${response.status || 'unknown'}`);

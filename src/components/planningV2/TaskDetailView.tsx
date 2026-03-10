@@ -261,10 +261,14 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
   const stats = useMemo(() => {
     const flat = ganttService.flattenGanttBars(ganttBars);
     const materials = flat.filter(b => b.bomLevel > 0);
+    // 按唯一物料编码统计，与 MRP 面板和甘特图总结卡片口径一致
+    const uniqueCodes = new Set(materials.map(b => b.materialCode));
+    const shortageCodesSet = new Set(materials.filter(b => b.hasShortage).map(b => b.materialCode));
+    const poCodesSet = new Set(materials.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
     return {
-      totalMaterials: materials.length,
-      shortageCount: materials.filter(b => b.hasShortage).length,
-      poCount: materials.filter(b => b.poStatus === 'has_po').length,
+      totalMaterials: uniqueCodes.size,
+      shortageCount: shortageCodesSet.size,
+      poCount: poCodesSet.size,
     };
   }, [ganttBars]);
 

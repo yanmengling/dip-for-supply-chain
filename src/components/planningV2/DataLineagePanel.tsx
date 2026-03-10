@@ -2,12 +2,19 @@
  * 数据溯源信息板（可折叠）
  *
  * 在新建任务四步流程（步骤①②③④）和监测任务详情页底部展示：
- * - 使用了哪些业务对象
- * - 查询条件
- * - 数据处理规则
- * - 实时统计结果（③④和任务详情）
+ * - 使用了哪些业务对象（Ontology API 对象类型）
+ * - 查询条件与过滤规则
+ * - 数据处理逻辑（BOM 主料过滤、MRP 净需求、甘特图倒排）
+ * - 实时统计结果（步骤③④和任务详情）
  *
  * 默认收缩，点击标题行展开。
+ *
+ * 数据源对应关系：
+ *   步骤① → product + forecast（产品选择 + 需求预测聚合）
+ *   步骤② → mps（生产计划匹配，无匹配时用步骤①兜底）
+ *   步骤③ → bom + mrp + material + pr + po（BOM 展开 + MRP 缺口 + 采购状态）
+ *   步骤④ → 同步骤③ + inventory（甘特图倒排 + 库存汇总）
+ *   任务详情 → 同步骤④（从 task 对象读取倒排锚点，API 实时查询）
  */
 
 import { useState } from 'react';
@@ -92,23 +99,26 @@ const Step1Content = () => (
     <div>
       <SectionTitle>业务对象</SectionTitle>
       <div className="flex flex-wrap gap-2">
-        <ObjectTag id="supplychain_hd0202_pp" label="产品需求计划" />
+        <ObjectTag id="supplychain_hd0202_product" label="产品主数据" />
+        <ObjectTag id="supplychain_hd0202_forecast" label="需求预测" />
       </div>
     </div>
     <div>
       <SectionTitle>查询条件</SectionTitle>
       <div className="space-y-0.5">
-        <Row label="加载方式" value="全量加载（limit: 10000），无服务端过滤" />
-        <Row label="产品列表" value={<>前端按 <Code>product_code</Code> 去重</>} />
-        <Row label="缓存" value="key: pp_data，TTL 5 分钟" />
+        <Row label="产品列表" value={<>全量加载 <Code>supplychain_hd0202_product</Code>（limit: 10000），按 <Code>material_number</Code> 排序</>} />
+        <Row label="需求预测" value={<>选定产品后，按 <Code>material_number == productCode</Code> 查询 <Code>supplychain_hd0202_forecast</Code></>} />
+        <Row label="缓存" value={<>产品列表 key: product_list；预测数据 key: forecast_&#123;productCode&#125;，TTL 均 5 分钟</>} />
       </div>
     </div>
     <div>
       <SectionTitle>数据处理逻辑</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>全量 PP 记录按 <Code>product_code</Code> 去重得到产品列表（共82条）</li>
-        <li>选定产品后，聚合该产品所有 PP 记录：最早 <Code>planned_date</Code> 为需求开始，最晚为需求结束</li>
-        <li>需求数量 = Σ <Code>planned_demand_quantity</Code></li>
+        <li>产品列表来源于 <Code>supplychain_hd0202_product</Code>（产品主数据），非 PP 去重</li>
+        <li>选定产品后，查询该产品的需求预测记录（<Code>supplychain_hd0202_forecast</Code>）</li>
+        <li>自动聚合：最早 <Code>startdate</Code> 为需求开始，最晚 <Code>enddate</Code> 为需求结束</li>
+        <li>需求数量 = Σ <Code>qty</Code>（所有预测单的预测数量之和）</li>
+        <li>若无预测数据，提示用户手动填写需求计划时间和数量</li>
         <li>时间范围和数量字段用户可手动修改后再确认</li>
       </ul>
     </div>
@@ -129,17 +139,18 @@ const Step2Content = () => (
         <Row label="加载方式" value="全量加载（limit: 10000），前端过滤" />
         <Row label="匹配规则" value={<><Code>bom_code == productCode</Code>（步骤①选定产品）</>} />
         <Row label="排序" value={<>按 <Code>seq_no</Code> 升序，取第一条匹配记录</>} />
-        <Row label="无 MPS 时" value="使用步骤①的需求计划数据兜底，橙色提示条提示" highlight />
+        <Row label="无 MPS 时" value="使用步骤①的需求计划数据兜底（开始/结束/数量），橙色提示条提示" highlight />
         <Row label="缓存" value="key: mps_data，TTL 5 分钟" />
       </div>
     </div>
     <div>
       <SectionTitle>数据处理逻辑</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>全量加载后前端匹配 <Code>bom_code == productCode</Code></li>
-        <li>有匹配时：生产开始时间取 <Code>planned_start_date</Code>，数量取 <Code>quantity</Code>，生产结束时间回退到步骤①结束时间</li>
-        <li>无匹配时：全部字段使用步骤①需求计划数据</li>
-        <li>三个字段均可编辑后再确认</li>
+        <li>全量加载 MPS 后前端匹配 <Code>bom_code == productCode</Code></li>
+        <li>有匹配时：生产开始取 <Code>planned_start_date</Code>，数量取 <Code>quantity</Code>，生产结束回退到步骤① <Code>demandEnd</Code></li>
+        <li>无匹配或加载失败：开始/结束/数量全部使用步骤① <Code>demandStart / demandEnd / demandQuantity</Code></li>
+        <li>三个字段均可手动编辑后再确认</li>
+        <li>确认后输出 <Code>productionStart / productionEnd / productionQuantity</Code>，作为后续步骤甘特图倒排锚点</li>
       </ul>
     </div>
   </div>
@@ -148,10 +159,10 @@ const Step2Content = () => (
 const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: StepStats }) => (
   <div className="space-y-4">
     <div>
-      <SectionTitle>业务对象（并行查询）</SectionTitle>
+      <SectionTitle>业务对象</SectionTitle>
       <div className="flex flex-wrap gap-2">
-        <ObjectTag id="supplychain_hd0202_mrp" label="物料需求计划" />
         <ObjectTag id="supplychain_hd0202_bom" label="BOM" />
+        <ObjectTag id="supplychain_hd0202_mrp" label="物料需求计划" />
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
         <ObjectTag id="supplychain_hd0202_material" label="物料主数据" />
@@ -162,19 +173,27 @@ const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: St
     <div>
       <SectionTitle>查询条件</SectionTitle>
       <div className="space-y-0.5">
-        <Row label="MRP 条件" value={<><Code>finished_product_code == {productCode ?? '…'}</Code></>} />
-        <Row label="BOM 条件" value={<><Code>bom_material_code == {productCode ?? '…'}</Code>；取 bom_version 字典序最大</>} />
-        <Row label="物料集合" value={<>BOM 主料去重（<Code>alt_part</Code> 为空或 '0'），<strong>不</strong> union MRP extra codes</>} />
+        <Row label="BOM 查询" value={<>两步精确查询：Step1 取 <Code>bom_material_code == {productCode ?? '…'}</Code> 的 100 条获取最新版本号（字典序最大）；Step2 按 <Code>bom_material_code + bom_version + alt_priority == 0</Code> 三条件精确查询</>} />
+        <Row label="MRP 查询" value={<>全量加载后前端过滤 <Code>finished_product_code == {productCode ?? '…'}</Code></>} />
+        <Row label="物料集合" value={<>BOM 可达主料 <Code>material_code</Code> 去重，<strong>不</strong> union MRP 额外物料编码</>} />
         <Row label="Material/PR/PO" value={<><Code>material_code / material_number in [codes]</Code>，分片 50 个/批，串行</>} />
-        <Row label="缓存" value="bom_{productCode}；Material/PR/PO 按 code 列表哈希；TTL 5 分钟" />
+        <Row label="缓存" value={<>bom_&#123;productCode&#125;、mrp_data、Material/PR/PO 按列表哈希；TTL 均 5 分钟</>} />
       </div>
     </div>
     <div>
-      <SectionTitle>数据处理规则</SectionTitle>
+      <SectionTitle>BOM 数据处理</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>替代料判定：<Code>alt_part</Code> 非空且非 <Code>'0'</Code> → 排除（与甘特图 buildBOMTreeFromRecords 同步）</li>
-        <li>净需求判定：<Code>netDemand = mrpMap.get(code)?.demand ?? 0</Code>；<Code>{'< 0'}</Code> 为缺口</li>
-        <li>缺口行背景浅红 <Code>bg-red-50</Code>，数值红色加粗</li>
+        <li>API 层过滤：<Code>alt_priority == 0</Code> 仅查主料（替代料在服务端已排除）</li>
+        <li>可达性遍历：从产品根节点 BFS 遍历 <Code>parent_material_code → material_code</Code>，排除替代料残留子级（parent 指向已被过滤的替代料编码的记录）</li>
+        <li>物料统计 = BOM 可达记录中 <Code>material_code</Code> 的唯一值数量</li>
+      </ul>
+    </div>
+    <div>
+      <SectionTitle>MRP 数据处理</SectionTitle>
+      <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
+        <li>净需求取值：<Code>mrpMap.get(code) = material_demand_quantity</Code></li>
+        <li>缺口判定：<Code>netDemand {'< 0'}</Code> 为缺口，行背景浅红 <Code>bg-red-50</Code></li>
+        <li>排序：缺口物料置顶，其次按 BOM 层级升序</li>
         <li>PR/PO 仅对外购/委外物料显示，自制件显示 —</li>
       </ul>
     </div>
@@ -196,31 +215,47 @@ const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: St
 const Step4Content = ({ productCode, stats }: { productCode?: string; stats?: StepStats }) => (
   <div className="space-y-4">
     <div>
-      <SectionTitle>业务对象（同步骤③）</SectionTitle>
+      <SectionTitle>业务对象（ganttService.buildGanttData）</SectionTitle>
       <div className="flex flex-wrap gap-2">
         <ObjectTag id="supplychain_hd0202_bom" label="BOM" />
         <ObjectTag id="supplychain_hd0202_mrp" label="MRP" />
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
         <ObjectTag id="supplychain_hd0202_material" label="物料主数据" />
         <ObjectTag id="supplychain_hd0202_pr" label="PR" />
         <ObjectTag id="supplychain_hd0202_po" label="PO" />
+        <ObjectTag id="supplychain_hd0202_inventory" label="库存" />
       </div>
     </div>
     <div>
       <SectionTitle>查询条件</SectionTitle>
       <div className="space-y-0.5">
-        <Row label="BOM 条件" value={<><Code>bom_material_code == {productCode ?? '…'}</Code>；取最新版本</>} />
-        <Row label="MRP 条件" value={<><Code>finished_product_code == {productCode ?? '…'}</Code></>} />
-        <Row label="Material/PR/PO" value={<><Code>in [allMaterialCodes]</Code>（含产品自身），分片 50 个/批</>} />
+        <Row label="BOM" value={<>同步骤③：两步精确查询取最新版本主料（<Code>alt_priority == 0</Code>）+ 可达性遍历</>} />
+        <Row label="MRP" value={<>全量加载后前端过滤 <Code>finished_product_code == {productCode ?? '…'}</Code></>} />
+        <Row label="物料集合" value={<>BOM 所有可达 <Code>material_code</Code> + 产品自身 + MRP 中 <Code>main_material</Code>（合并去重）</>} />
+        <Row label="Material/PR/PO/库存" value={<><Code>in [allMaterialCodes]</Code>，分片 50 个/批，<strong>串行</strong>依次查询</>} />
+        <Row label="缓存" value="各查询均有独立缓存 key，TTL 5 分钟" />
       </div>
     </div>
     <div>
-      <SectionTitle>甘特图倒排规则（buildGanttData）</SectionTitle>
+      <SectionTitle>甘特图倒排规则</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>buildBOMTreeFromRecords：过滤替代料建主料父→子映射</li>
+        <li>倒排锚点：L0 产品层 <Code>startDate = productionStart</Code>（步骤②确认），<Code>endDate = productionEnd</Code></li>
         <li>BFS 倒排：子件 <Code>endDate = parent.startDate - 1天</Code>；<Code>startDate = endDate - leadtime</Code></li>
-        <li>Leadtime：外购/委外取 <Code>purchase_fixedleadtime</Code>，自制取 <Code>product_fixedleadtime</Code>，≤0 兜底 7 天（字符串需 parseFloat）</li>
-        <li>安全截断：<Code>MAX_NODES = 2000</Code>，visited Set 防环路</li>
-        <li>缺口：<Code>mrpMap.get(code) {'< 0'}</Code> → <Code>hasShortage = true</Code></li>
+        <li>BOM 位置去重：按 <Code>parentCode{'>'}childCode</Code> 去重，同一物料可在多个父组件下出现</li>
+        <li>环路检测：祖先链 <Code>ancestors Set</Code> 防止 A→B→C→A 循环</li>
+        <li>Leadtime：外购/委外取 <Code>purchase_fixedleadtime</Code>，自制取 <Code>product_fixedleadtime</Code>，≤0 兜底 7 天</li>
+        <li>安全截断：<Code>MAX_NODES = 2000</Code></li>
+      </ul>
+    </div>
+    <div>
+      <SectionTitle>状态判定</SectionTitle>
+      <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
+        <li>缺口：MRP <Code>material_demand_quantity {'< 0'}</Code> → <Code>hasShortage = true</Code></li>
+        <li>PO 状态：外购/委外物料有 PO 记录 → <Code>ordered</Code>（绿色），无 PO 且时间风险 → <Code>risk</Code>（红色）</li>
+        <li>PO 交货日：同一物料多条 PO 按 <Code>biztime</Code> 降序取第一条的 <Code>deliverdate</Code></li>
+        <li>可用库存：<Code>inventory</Code> 按 <Code>material_code</Code> 汇总 <Code>available_inventory_qty</Code></li>
+        <li>物料统计：按唯一 <Code>materialCode</Code> 去重（Set），与步骤③物料数口径一致</li>
       </ul>
     </div>
     {(stats?.totalMaterials !== undefined) && (
@@ -245,6 +280,7 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
         <Row label="任务 ID" value={<Code>{task?.id ?? '—'}</Code>} />
         <Row label="创建时间" value={task?.createdAt ? new Date(task.createdAt).toLocaleString('zh-CN') : '—'} />
         <Row label="甘特图数据" value="不持久化，每次进入页面实时从 API 重新计算" highlight />
+        <Row label="倒排锚点" value={<>来自任务对象 <Code>task.productionStart ~ task.productionEnd</Code></>} />
       </div>
     </div>
     <div>
@@ -255,22 +291,28 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
         <ObjectTag id="supplychain_hd0202_material" label="物料主数据" />
         <ObjectTag id="supplychain_hd0202_pr" label="PR" />
         <ObjectTag id="supplychain_hd0202_po" label="PO" />
+        <ObjectTag id="supplychain_hd0202_inventory" label="库存" />
       </div>
       <div className="space-y-0.5">
-        <Row label="BOM 条件" value={<><Code>bom_material_code == {task?.productCode ?? '…'}</Code>；取最新 bom_version</>} />
-        <Row label="MRP 条件" value={<><Code>finished_product_code == {task?.productCode ?? '…'}</Code></>} />
-        <Row label="批量查询" value={<><Code>in [codes]</Code>，分片 50 个/批，串行执行</>} />
-        <Row label="缓存 TTL" value="5 分钟（planningV2DataService 内部 Map）" />
+        <Row label="BOM" value={<>两步精确查询：<Code>bom_material_code == {task?.productCode ?? '…'}</Code> 取最新版本 + <Code>alt_priority == 0</Code> + 可达性遍历</>} />
+        <Row label="MRP" value={<>全量加载后前端过滤 <Code>finished_product_code == {task?.productCode ?? '…'}</Code></>} />
+        <Row label="物料集合" value={<>BOM 可达物料 + 产品自身 + MRP <Code>main_material</Code>，合并去重</>} />
+        <Row label="批量查询" value={<>Material → PR → PO → 库存，<Code>in [codes]</Code> 分片 50 个/批，串行执行</>} />
+        <Row label="缓存" value="各查询独立缓存 key，TTL 5 分钟" />
       </div>
     </div>
     <div>
-      <SectionTitle>数据处理规则</SectionTitle>
+      <SectionTitle>倒排规则与状态判定</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>BOM 取最新版本（bom_version 字典序最大），过滤替代料建主料树</li>
-        <li>BFS 倒排：子件 <Code>endDate = 父级 startDate - 1天</Code></li>
+        <li>L0 产品层：<Code>startDate = productionStart</Code>，<Code>endDate = productionEnd</Code></li>
+        <li>BFS 倒排：子件 <Code>endDate = parent.startDate - 1天</Code>，<Code>startDate = endDate - leadtime</Code></li>
+        <li>BOM 位置去重（<Code>parent{'>'}child</Code>）+ 祖先链防环路</li>
         <li>Leadtime：外购/委外取 <Code>purchase_fixedleadtime</Code>，自制取 <Code>product_fixedleadtime</Code>，≤0 兜底 7 天</li>
-        <li><Code>MAX_NODES = 2000</Code>，visited Set 防环路</li>
-        <li>MRP 净需求 &lt; 0 → hasShortage = true</li>
+        <li>缺口：MRP <Code>material_demand_quantity {'< 0'}</Code> → <Code>hasShortage = true</Code></li>
+        <li>PO 交货日：同一物料多条 PO 按 <Code>biztime</Code> 降序取第一条的 <Code>deliverdate</Code></li>
+        <li>可用库存：按 <Code>material_code</Code> 汇总 <Code>available_inventory_qty</Code></li>
+        <li>物料统计：按唯一 <Code>materialCode</Code> 去重（Set），与步骤③口径一致</li>
+        <li>安全截断：<Code>MAX_NODES = 2000</Code></li>
       </ul>
     </div>
     {stats !== undefined && (
@@ -280,8 +322,6 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
           { label: '物料总数', value: stats.totalMaterials !== undefined ? `${stats.totalMaterials} 种` : undefined },
           { label: '缺口物料', value: stats.shortageCount !== undefined ? `${stats.shortageCount} 种` : undefined, red: (stats.shortageCount ?? 0) > 0 },
           { label: '已下PO', value: stats.poCount !== undefined ? `${stats.poCount} 项` : undefined },
-          { label: '批量分片大小', value: '50 个/批' },
-          { label: '缓存 TTL', value: '5 分钟' },
         ]} />
       </div>
     )}

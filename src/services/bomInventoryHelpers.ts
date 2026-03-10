@@ -366,35 +366,47 @@ export async function loadSingleBOMTreeViaQueryInstances(
             `bom过滤值=${bomFilterValue}，对象类型=${bomTypeId}`
         );
 
-        // ── Step 2: 查询该产品下所有 BOM 记录 ───────────────────────────────
+        // ── Step 2: 获取最新 bom_version（查少量数据取版本号）────
+        const versionResp = await ontologyApi.queryObjectInstances(bomTypeId, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { operation: '==', field: 'bom_material_code', value: bomFilterValue },
+                ]
+            },
+            limit: 100,
+            need_total: false,
+            timeout: 120000,
+        });
+        const versionEntries = versionResp.entries || (versionResp as any).datas || [];
+        const latestVersion = versionEntries.reduce(
+            (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max),
+            ''
+        );
+
+        if (versionEntries.length === 0 || !latestVersion) {
+            console.warn(`[BOM服务] 未找到产品 ${bomFilterValue} 的 BOM 数据`);
+            return null;
+        }
+        console.log(`[BOM服务] 最新版本: "${latestVersion}"`);
+
+        // ── Step 3: 精确查询 = bom_material_code + bom_version + alt_priority=0 ──
         const response = await ontologyApi.queryObjectInstances(bomTypeId, {
             condition: {
                 operation: 'and',
                 sub_conditions: [
-                    { operation: '==', field: 'bom_material_code', value: bomFilterValue }
+                    { operation: '==', field: 'bom_material_code', value: bomFilterValue },
+                    { operation: '==', field: 'bom_version', value: latestVersion },
+                    { operation: '==', field: 'alt_priority', value: 0 },
                 ]
             },
             limit: 10000,
             need_total: false,
+            timeout: 120000,
         });
 
-        const allRecords = response.entries || (response as any).datas || [];
-        console.log(`[BOM服务] BOM 原始记录: ${allRecords.length} 条`);
-
-        if (allRecords.length === 0) {
-            console.warn(`[BOM服务] 未找到产品 ${bomFilterValue} 的 BOM 数据`);
-            return null;
-        }
-
-        // ── Step 3: 取最新 BOM 版本（字典序最大即最新，与 planningV2DataService 逻辑一致）──
-        const latestVersion = allRecords.reduce(
-            (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max),
-            ''
-        );
-        const records = latestVersion
-            ? allRecords.filter((r: any) => r.bom_version === latestVersion)
-            : allRecords;
-        console.log(`[BOM服务] 最新版本 "${latestVersion}"，过滤后: ${records.length} 条`);
+        const records = response.entries || (response as any).datas || [];
+        console.log(`[BOM服务] 版本 "${latestVersion}" 主料记录: ${records.length} 条`);
 
         // ── Step 4: 构建 BOM 树 ──────────────────────────────────────────────
         // 必须用 bomFilterValue 作为根节点编码，因为 BOM 记录中 parent_material_code
