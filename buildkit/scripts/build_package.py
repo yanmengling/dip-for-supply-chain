@@ -120,6 +120,7 @@ def build_dip_package(
 
 def main() -> None:
     """Entry point for building and packaging the DIP application."""
+    invocation_cwd = Path.cwd()
     parser = argparse.ArgumentParser(
         description="Build and package a DIP application."
     )
@@ -136,30 +137,34 @@ def main() -> None:
         help="Target architecture.",
     )
     parser.add_argument(
-        "--skip-build",
-        action="store_true",
-        help="Skip npm build step (use existing dist folder).",
+        "--config",
+        default="config.yaml",
+        help="Path to the JSON/YAML config file. Relative paths are resolved from the invocation directory.",
     )
 
     args = parser.parse_args()
 
     base_dir = Path(__file__).resolve().parents[1]
+    config_path = Path(args.config)
+    if not config_path.is_absolute():
+        config_path = invocation_cwd / config_path
+    config_path = config_path.resolve()
+
     os.chdir(base_dir)
     project_root = base_dir.parent
-    context = load_context(base_dir / "config.yaml")
+    context = load_context(config_path)
 
     name = context.get("name")
     tag = context.get("version")
     app_key = context.get("key")
     if not name or not tag or not app_key:
-        raise KeyError("config.yaml must include name, version, and key.")
+        raise KeyError(
+            f"{config_path} must include name, version, and key."
+        )
 
     task_dir = create_task_dir(base_dir / ".cache")
 
-    if not args.skip_build:
-        run_command(["npm", "run", "build"], cwd=project_root)
-    else:
-        print("Skipping npm build (--skip-build flag set)")
+    run_command(["npm", "run", "build"], cwd=project_root)
 
     copy_dist(project_root / "dist", task_dir / "dist")
 
@@ -175,14 +180,6 @@ def main() -> None:
 
     application_key_path = task_dir / "package" / args.arch / "application.key"
     application_key_path.write_text(str(app_key), encoding="utf-8")
-
-    # Copy logo
-    logo_source = project_root / "public" / "logo-32x32.png"
-    if logo_source.exists():
-        logo_dest = task_dir / "package" / args.arch / "logo.png"
-        shutil.copy2(logo_source, logo_dest)
-    else:
-        print(f"Warning: Logo file not found at {logo_source}")
 
     dockerfile_rendered = render_template(
         base_dir / "templates/Dockerfile.j2", context
@@ -252,12 +249,6 @@ def main() -> None:
 
     dip_output = task_dir / "package" / f"{name}-{tag}_{args.arch}.dip"
     build_dip_package(task_dir / "package" / args.arch, dip_output)
-
-    # Copy to stable release directory for CI
-    release_dir = base_dir / "release"
-    release_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(dip_output, release_dir / dip_output.name)
-    print(f"Build successful! Package available at: {release_dir / dip_output.name}")
 
 
 if __name__ == "__main__":

@@ -73,7 +73,7 @@ renderWithQiankun(qiankunLifeCycle);
 // Manual backup for global assignment - ensure host can find the lifecycles
 if (qiankunWindow.__POWERED_BY_QIANKUN__) {
   console.log('[SupplyChainBrain] Detected qiankun environment, setting global lifecycles');
-  const appName = 'supply-chain-brain';
+  const appName = 'dip-for-supply-chain';
   // @ts-ignore
   qiankunWindow[appName] = qiankunLifeCycle;
 }

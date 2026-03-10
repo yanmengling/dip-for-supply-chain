@@ -122,7 +122,7 @@ function toDatetime3(value: string): string {
  *   PlanningTask.productionStart → production_start
  *   PlanningTask.productionEnd   → production_end
  *   PlanningTask.productionQuantity → production_quantity
- *   'supply-chain-brain'         → created_by
+ *   'dip-for-supply-chain'         → created_by
  */
 export function mapPlanningTaskToRecord(task: PlanningTask): MonitoringTaskRecord {
     const isTerminated = (task.status as string) === 'ended' || task.status === 'expired';
@@ -230,7 +230,7 @@ export async function pushFormDataToDIP(fields: {
         production_start: toDateOnly(fields.production_start),
         production_end: toDateOnly(fields.production_end),
         production_quantity: fields.production_quantity,
-        created_by: fields.created_by ?? 'supply-chain-brain',
+        created_by: fields.created_by ?? 'dip-for-supply-chain',
     };
 
     const body = {

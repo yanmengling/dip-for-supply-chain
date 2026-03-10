@@ -7,34 +7,24 @@ server {
     server_tokens off;
 
     # 微应用的访问路径配置
-    # Vite 以 base='/{{ name }}/' 构建，容器内文件在 /app/dist/
-    # 访问路径：/{{ name }}/assets/foo.css → 文件路径：/app/dist/assets/foo.css
-    location /{{ name }}/ {
-        alias /app/dist/;
-        index index.html;
-
-        # 静态资源长缓存
-        location ~* /{{ name }}/(.+\.(js|css|png|jpg|svg|ico|woff2?|ttf|eot))$ {
-            alias /app/dist/$1;
-            add_header Cache-Control "public, max-age=2592000";
-            try_files "" =404;
+    # 注意：location 后面的路径就是 entry 中的路径部分
+    location /{{ name }} {
+        # 静态文件缓存配置
+        if ($request_filename ~* ^.*[.](html|htm)$) {
+            expires 0;
+            add_header Cache-Control "no-store";
         }
 
-        # 支持前端路由：找不到文件时回退到 index.html
-        # 使用 named location 避免 alias + try_files 的已知 bug
-        try_files $uri $uri/ @fallback_{{ name | replace("-", "_") }};
-    }
+        if ($request_filename ~* ^.*[.](js|css|png|jpg|svg|ico)$) {
+            add_header Cache-Control "public, max-age=2592000";
+        }
 
-    # 兼容不带尾随斜杠的入口请求
-    location = /{{ name }} {
-        return 301 /{{ name }}/;
-    }
-
-    # 前端路由回退
-    location @fallback_{{ name | replace("-", "_") }} {
-        add_header Cache-Control "no-store";
-        root /app/dist;
-        try_files /index.html =404;
+        # 构建后的 dist 目录，在打包镜像时会放到 /app/dist 下
+        alias "/app/dist";
+        index index.html;
+        
+        # 支持前端路由（重要：必须配置）
+        try_files $uri $uri/ /{{ name }}/index.html;
     }
 
     # 健康检查端点（K8s 探针使用）

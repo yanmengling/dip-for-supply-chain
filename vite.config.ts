@@ -8,11 +8,11 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    qiankun('supply-chain-brain', {
+    qiankun('dip-for-supply-chain', {
       useDevMode: false
     }),
   ],
-  base: '/supply-chain-brain/', // Base path for the micro-app
+  base: '/dip-for-supply-chain/', // Base path for the micro-app
   server: {
     port: 5173,
     host: '127.0.0.1',
