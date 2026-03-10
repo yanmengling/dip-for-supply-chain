@@ -213,7 +213,7 @@ export default function TaskListView({
         <ConfirmDialog
           open={true}
           title="导入监测任务"
-          description={`确认导入以下任务？\n\n任务名称：${importPreview.task.name}\n产品：${importPreview.task.productCode} ${importPreview.task.productName}\n生产周期：${importPreview.task.productionStart} ~ ${importPreview.task.productionEnd}\n原始状态：${statusLabels[importPreview.task.status] || importPreview.task.status}\n导出时间：${importPreview.exportedAt?.slice(0, 10) || '-'}`}
+          description={`确认导入以下任务？\n\n任务名称：${importPreview.task.name}\n产品：${importPreview.task.productCode} ${importPreview.task.productName}\n需求周期：${importPreview.task.demandStart} ~ ${importPreview.task.demandEnd}\n原始状态：${statusLabels[importPreview.task.status] || importPreview.task.status}\n导出时间：${importPreview.exportedAt?.slice(0, 10) || '-'}`}
           confirmLabel="确认导入"
           cancelLabel="取消"
           variant="warning"

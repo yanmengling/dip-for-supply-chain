@@ -1,7 +1,7 @@
 /**
  * Planning Timeline V2 Component
  *
- * 四步引导导航: ① 产品需求计划 → ② 生产计划 → ③ 物料需求计划 → ④ 计划协同
+ * PRD v3.1: 三步引导导航: ① 需求预测 → ② 物料需求 → ③ 计划协同
  */
 
 import type { NewTaskStep } from '../../types/planningV2';
@@ -14,10 +14,9 @@ interface PlanningTimelineV2Props {
 }
 
 const STEPS: { step: NewTaskStep; label: string; shortLabel: string }[] = [
-  { step: 1, label: '产品需求计划', shortLabel: '①' },
-  { step: 2, label: '生产计划', shortLabel: '②' },
-  { step: 3, label: '物料需求计划', shortLabel: '③' },
-  { step: 4, label: '计划协同', shortLabel: '④' },
+  { step: 1, label: '需求预测', shortLabel: '①' },
+  { step: 2, label: '物料需求', shortLabel: '②' },
+  { step: 3, label: '计划协同', shortLabel: '③' },
 ];
 
 const PlanningTimelineV2 = ({ currentStep, completedSteps, onStepClick }: PlanningTimelineV2Props) => {

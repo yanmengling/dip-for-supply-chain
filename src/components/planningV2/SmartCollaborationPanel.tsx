@@ -1,7 +1,8 @@
 /**
- * 步骤④ 智能计划协同 - 甘特图预览 & 创建监测任务
+ * 步骤3 智能计划协同 - 甘特图预览 & 创建监测任务
  *
- * 展示倒排甘特图预览、计划协同摘要，并允许用户创建监测任务。
+ * PRD v3.1: 原步骤4，移除生产计划步骤后变为步骤3。
+ * 倒排锚点改为 step1Data.demandEnd（而非 step2Data.productionStart）。
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
@@ -10,20 +11,22 @@ import {
   Plus,
   Loader2,
   Package,
-  Factory,
   AlertTriangle,
   Calendar,
+  ShieldAlert,
 } from 'lucide-react';
 import { ganttService } from '../../services/ganttService';
+import type { DegradationInfo } from '../../services/ganttService';
 import { taskService } from '../../services/taskService';
-import type { Step1Data, Step2Data, GanttBar, KeyMonitorMaterial } from '../../types/planningV2';
+import type { Step1Data, GanttBar, KeyMonitorMaterial } from '../../types/planningV2';
 import GanttChart from './gantt/GanttChart';
 import ShortageList from './ShortageList';
+import MatchingStatusCard from './MatchingStatusCard';
+import WorkOrderTracker from './WorkOrderTracker';
 
 interface SmartCollaborationPanelProps {
   active: boolean;
   step1Data: Step1Data;
-  step2Data: Step2Data;
   onCreateTask: (taskName: string) => void;
   onBack: () => void;
 }
@@ -38,21 +41,9 @@ function formatTimestamp(): string {
   );
 }
 
-/** Recursively collect all non-root bars */
-function collectBars(bars: GanttBar[]): GanttBar[] {
-  const result: GanttBar[] = [];
-  function walk(bar: GanttBar, isRoot: boolean) {
-    if (!isRoot) result.push(bar);
-    bar.children.forEach((child) => walk(child, false));
-  }
-  bars.forEach((bar) => walk(bar, true));
-  return result;
-}
-
 const SmartCollaborationPanel = ({
   active,
   step1Data,
-  step2Data,
   onCreateTask,
   onBack,
 }: SmartCollaborationPanelProps) => {
@@ -62,6 +53,7 @@ const SmartCollaborationPanel = ({
   const [taskName, setTaskName] = useState('');
   const [keyMaterials, setKeyMaterials] = useState<KeyMonitorMaterial[]>([]);
   const [keyMaterialsLoading, setKeyMaterialsLoading] = useState(false);
+  const [degradation, setDegradation] = useState<DegradationInfo>({ mrp: false, pr: false, po: false });
 
   // ---------- Fetch gantt data + key materials ----------
   const fetchGantt = useCallback(async () => {
@@ -69,16 +61,21 @@ const SmartCollaborationPanel = ({
     setError(null);
     setKeyMaterials([]);
     try {
-      const bars = await ganttService.buildGanttData(
+      // PRD v3.7: 精确查询链（传入 forecastBillnos + demandStart）
+      const result = await ganttService.buildGanttData(
         step1Data.productCode,
-        step2Data.productionStart,
-        step2Data.productionEnd,
+        step1Data.demandStart,
+        step1Data.demandEnd,
+        step1Data.relatedForecastBillnos,
+        step1Data.demandStart,
       );
-      setGanttBars(bars);
+      setGanttBars(result.bars);
+      setDegradation(result.degradation);
+      console.log(`[SmartCollaboration] 降级状态: MRP=${result.degradation.mrp}, PR=${result.degradation.pr}, PO=${result.degradation.po}`);
 
       // 甘特图加载完成后，异步加载关键监测物料清单（含库存）
       setKeyMaterialsLoading(true);
-      taskService.buildKeyMaterialList(bars, step2Data.productionStart)
+      taskService.buildKeyMaterialList(result.bars, new Date().toISOString())
         .then(list => {
           console.log(`[SmartCollaboration] 关键监测物料清单: ${list.length} 条`);
           setKeyMaterials(list);
@@ -93,7 +90,7 @@ const SmartCollaborationPanel = ({
     } finally {
       setLoading(false);
     }
-  }, [step1Data.productCode, step2Data.productionStart, step2Data.productionEnd]);
+  }, [step1Data.productCode, step1Data.demandStart, step1Data.demandEnd]);
 
   useEffect(() => {
     if (!active) return;
@@ -104,13 +101,14 @@ const SmartCollaborationPanel = ({
     );
   }, [active, fetchGantt, step1Data.productCode, step1Data.productName]);
 
-  // ---------- Summary stats ----------
+  // ---------- Summary stats (PRD D1: 口径与 TaskDetailView 完全一致) ----------
   const stats = useMemo(() => {
-    const all = collectBars(ganttBars);
-    // 按唯一物料编码统计，与 MRP 面板和甘特图总结卡片口径一致
-    const uniqueCodes = new Set(all.map(b => b.materialCode));
-    const shortageCodesSet = new Set(all.filter(b => b.hasShortage).map(b => b.materialCode));
-    const poCodesSet = new Set(all.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
+    const flat = ganttService.flattenGanttBars(ganttBars);
+    const materials = flat.filter(b => b.bomLevel > 0);
+    // 按唯一物料编码统计
+    const uniqueCodes = new Set(materials.map(b => b.materialCode));
+    const shortageCodesSet = new Set(materials.filter(b => b.hasShortage).map(b => b.materialCode));
+    const poCodesSet = new Set(materials.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
     return {
       totalMaterials: uniqueCodes.size,
       shortageCount: shortageCodesSet.size,
@@ -148,6 +146,20 @@ const SmartCollaborationPanel = ({
 
   return (
     <div className="space-y-6">
+      {/* ---- Degradation badge (PRD C4) ---- */}
+      {(degradation.mrp || degradation.pr || degradation.po) && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+          <ShieldAlert className="w-4 h-4 shrink-0" />
+          <span>
+            数据精度：兜底模式
+            {degradation.mrp && ' [MRP]'}
+            {degradation.pr && ' [PR]'}
+            {degradation.po && ' [PO]'}
+            — 部分环节使用物料编码匹配，数据可能包含非本预测单的记录
+          </span>
+        </div>
+      )}
+
       {/* ---- (a) Gantt Chart Preview ---- */}
       <section>
         <h3 className="text-base font-semibold text-slate-800 mb-3">
@@ -157,8 +169,8 @@ const SmartCollaborationPanel = ({
           <div className="border border-slate-200 rounded-lg overflow-hidden">
             <GanttChart
               bars={ganttBars}
-              productionStart={step2Data.productionStart}
-              productionEnd={step2Data.productionEnd}
+              productionStart={step1Data.demandStart}
+              productionEnd={step1Data.demandEnd}
             />
           </div>
         ) : (
@@ -177,13 +189,34 @@ const SmartCollaborationPanel = ({
         />
       </section>
 
+      {/* ---- (b2) Matching Status Card (PRD 4.5.3) ---- */}
+      {ganttBars.length > 0 && (
+        <section>
+          <MatchingStatusCard
+            ganttBars={ganttBars}
+            demandEnd={step1Data.demandEnd}
+            degradation={degradation}
+          />
+        </section>
+      )}
+
+      {/* ---- (b3) Work Order Tracker (PRD 4.5.4) ---- */}
+      {ganttBars.length > 0 && (
+        <section>
+          <WorkOrderTracker
+            forecastBillnos={step1Data.relatedForecastBillnos || []}
+            productCode={step1Data.productCode}
+          />
+        </section>
+      )}
+
       {/* ---- (c) Summary Card ---- */}
       <section className="bg-gray-50 rounded-lg p-5">
         <h3 className="text-base font-semibold text-slate-800 mb-4">
           计划协同摘要
         </h3>
-        <div className="grid grid-cols-3 gap-4">
-          {/* Product info */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Product & demand info */}
           <div className="flex items-start gap-3">
             <Package className="w-5 h-5 text-indigo-500 mt-0.5 shrink-0" />
             <div className="text-sm text-slate-700 leading-relaxed">
@@ -192,21 +225,7 @@ const SmartCollaborationPanel = ({
                 {step1Data.productCode} {step1Data.productName}
               </p>
               <p className="text-slate-500">
-                {step1Data.demandStart} ~ {step1Data.demandEnd}
-              </p>
-            </div>
-          </div>
-
-          {/* Production info */}
-          <div className="flex items-start gap-3">
-            <Factory className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
-            <div className="text-sm text-slate-700 leading-relaxed">
-              <p className="font-medium">生产</p>
-              <p>
-                {step2Data.productionStart} ~ {step2Data.productionEnd}
-              </p>
-              <p className="text-slate-500">
-                {step2Data.productionQuantity} 套
+                预测单 {step1Data.relatedForecastBillnos?.length || 0} 单 | 截止 {step1Data.demandEnd} | 需求 {step1Data.demandQuantity} 套
               </p>
             </div>
           </div>

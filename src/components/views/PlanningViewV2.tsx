@@ -1,14 +1,16 @@
 /**
- * Planning View V2 - 主视图（优化版）
+ * Planning View V2 - 主视图
+ *
+ * PRD v3.1: 三步流程（需求预测 → 物料需求 → 计划协同）
  *
  * 结构：左侧 56px 窄边栏 + 右侧三视图
  * - 视图1: 监测任务列表（默认首页）
- * - 视图2: 新建任务（四步引导流程）
+ * - 视图2: 新建任务（三步引导流程）
  * - 视图3: 任务详情（概览 + 甘特图 + 缺料清单）
  */
 
 import { useState, useCallback, useMemo } from 'react';
-import type { PlanningViewMode, NewTaskStep, Step1Data, Step2Data, PlanningTask } from '../../types/planningV2';
+import type { PlanningViewMode, NewTaskStep, Step1Data, PlanningTask } from '../../types/planningV2';
 import { taskService } from '../../services/taskService';
 import { pushFormDataToDIP } from '../../services/monitoringTaskApiService';
 import PlanningTaskSidebar from '../planningV2/PlanningTaskSidebar';
@@ -16,7 +18,6 @@ import TaskListView from '../planningV2/TaskListView';
 import TaskDetailView from '../planningV2/TaskDetailView';
 import PlanningTimelineV2 from '../planningV2/PlanningTimelineV2';
 import ProductDemandPanel from '../planningV2/ProductDemandPanel';
-import MasterProductionPanel from '../planningV2/MasterProductionPanel';
 import MaterialRequirementPanel from '../planningV2/MaterialRequirementPanel';
 import SmartCollaborationPanel from '../planningV2/SmartCollaborationPanel';
 import DataLineagePanel from '../planningV2/DataLineagePanel';
@@ -28,11 +29,10 @@ const PlanningViewV2 = () => {
   const [viewMode, setViewMode] = useState<PlanningViewMode>('task-list');
   const [currentTaskId, setCurrentTaskId] = useState<string>();
 
-  // 新建任务流程状态
+  // 新建任务流程状态（PRD v3.1: 三步流程）
   const [currentStep, setCurrentStep] = useState<NewTaskStep>(1);
   const [completedSteps, setCompletedSteps] = useState<Set<NewTaskStep>>(new Set());
   const [step1Data, setStep1Data] = useState<Step1Data>();
-  const [step2Data, setStep2Data] = useState<Step2Data>();
 
   // 任务数据版本号（触发重新获取）
   const [taskVersion, setTaskVersion] = useState(0);
@@ -41,8 +41,7 @@ const PlanningViewV2 = () => {
   type DialogState =
     | { type: 'none' }
     | { type: 'delete-task'; taskId: string; taskName: string }
-    | { type: 'reset-step1' }
-    | { type: 'reset-step2' };
+    | { type: 'reset-step1' };
   const [dialog, setDialog] = useState<DialogState>({ type: 'none' });
 
   // 获取任务列表
@@ -58,7 +57,6 @@ const PlanningViewV2 = () => {
     setCurrentStep(1);
     setCompletedSteps(new Set());
     setStep1Data(undefined);
-    setStep2Data(undefined);
   }, []);
 
   const goToNewTask = useCallback(() => {
@@ -66,7 +64,6 @@ const PlanningViewV2 = () => {
     setCurrentStep(1);
     setCompletedSteps(new Set());
     setStep1Data(undefined);
-    setStep2Data(undefined);
   }, []);
 
   const goToTaskDetail = useCallback((taskId: string) => {
@@ -76,7 +73,6 @@ const PlanningViewV2 = () => {
 
   // ======================== 任务操作 ========================
 
-  // 任务列表中的"结束任务"（简化版 — 直接跳转到详情页让用户在那里结束）
   const handleEndTask = useCallback((taskId: string) => {
     goToTaskDetail(taskId);
   }, [goToTaskDetail]);
@@ -94,22 +90,16 @@ const PlanningViewV2 = () => {
       setTaskVersion(v => v + 1);
       if (currentTaskId === dialog.taskId) goToTaskList();
     } else if (dialog.type === 'reset-step1') {
-      setStep2Data(undefined);
+      // 修改步骤1 → 重置步骤2和3（PRD 4.6）
       setCompletedSteps(new Set());
       setCurrentStep(1);
-    } else if (dialog.type === 'reset-step2') {
-      setCompletedSteps(prev => {
-        const next = new Set(prev);
-        next.delete(2); next.delete(3); next.delete(4);
-        return next;
-      });
-      setCurrentStep(2);
     }
     setDialog({ type: 'none' });
   }, [dialog, currentTaskId, goToTaskList]);
 
-  // ======================== 步骤流程 ========================
+  // ======================== 三步流程 ========================
 
+  /** 步骤1确认 → 进入步骤2 */
   const handleStep1Confirm = useCallback((data: Step1Data) => {
     setStep1Data(data);
     const next = new Set(completedSteps);
@@ -118,25 +108,19 @@ const PlanningViewV2 = () => {
     setCurrentStep(2);
   }, [completedSteps]);
 
-  const handleStep2Confirm = useCallback((data: Step2Data) => {
-    setStep2Data(data);
+  /** 步骤2确认 → 进入步骤3 */
+  const handleStep2Confirm = useCallback(() => {
     const next = new Set(completedSteps);
     next.add(2);
     setCompletedSteps(next);
     setCurrentStep(3);
   }, [completedSteps]);
 
-  const handleStep3Confirm = useCallback(() => {
-    const next = new Set(completedSteps);
-    next.add(3);
-    setCompletedSteps(next);
-    setCurrentStep(4);
-  }, [completedSteps]);
-
+  /** 步骤3创建任务 */
   const handleCreateTask = useCallback((taskName: string) => {
-    if (!step1Data || !step2Data) return;
+    if (!step1Data) return;
 
-    // 1. 保存到 localStorage（前端任务列表展示）
+    // 1. 保存到 localStorage
     const task = taskService.createTask({
       name: taskName,
       productCode: step1Data.productCode,
@@ -144,12 +128,10 @@ const PlanningViewV2 = () => {
       demandStart: step1Data.demandStart,
       demandEnd: step1Data.demandEnd,
       demandQuantity: step1Data.demandQuantity,
-      productionStart: step2Data.productionStart,
-      productionEnd: step2Data.productionEnd,
-      productionQuantity: step2Data.productionQuantity,
+      relatedForecastBillnos: step1Data.relatedForecastBillnos,
     });
 
-    // 2. 直接推送表单数据到 DIP 接口（fire-and-forget，不依赖 localStorage）
+    // 2. 推送到 DIP 接口（fire-and-forget）
     void pushFormDataToDIP({
       task_name: taskName,
       product_code: step1Data.productCode,
@@ -157,27 +139,26 @@ const PlanningViewV2 = () => {
       demand_start: step1Data.demandStart,
       demand_end: step1Data.demandEnd,
       demand_quantity: step1Data.demandQuantity,
-      production_start: step2Data.productionStart,
-      production_end: step2Data.productionEnd,
-      production_quantity: step2Data.productionQuantity,
+      production_start: step1Data.demandStart,   // 兼容 DIP 字段
+      production_end: step1Data.demandEnd,
+      production_quantity: step1Data.demandQuantity,
     });
 
     setTaskVersion(v => v + 1);
     goToTaskDetail(task.id);
-  }, [step1Data, step2Data, goToTaskDetail]);
+  }, [step1Data, goToTaskDetail]);
 
   const handleStepClick = useCallback((step: NewTaskStep) => {
     if (step < currentStep) {
       if (step === 1 && currentStep > 1) {
         setDialog({ type: 'reset-step1' });
         return;
-      } else if (step === 2 && currentStep > 2) {
-        setDialog({ type: 'reset-step2' });
-        return;
       }
     }
-    setCurrentStep(step);
-  }, [currentStep]);
+    if (step <= currentStep || completedSteps.has(step)) {
+      setCurrentStep(step);
+    }
+  }, [currentStep, completedSteps]);
 
   const handleStepBack = useCallback(() => {
     if (currentStep > 1) {
@@ -223,10 +204,10 @@ const PlanningViewV2 = () => {
           />
         )}
 
-        {/* 视图2: 新建任务流程 */}
+        {/* 视图2: 新建任务流程（三步） */}
         {viewMode === 'new-task' && (
           <div>
-            {/* 顶部导航（跟随页面滚动，不固定） */}
+            {/* 顶部导航 */}
             <div className="bg-white border-b border-slate-200 px-6 py-3">
               <div className="flex items-center gap-3 mb-3">
                 <button
@@ -248,38 +229,31 @@ const PlanningViewV2 = () => {
             {/* 步骤内容区 */}
             <div className="p-6">
               <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+                {/* 步骤1: 需求预测 */}
                 <ProductDemandPanel
                   active={currentStep === 1}
                   onConfirm={handleStep1Confirm}
                   initialData={step1Data}
                 />
+                {/* 步骤2: 物料需求 */}
                 {step1Data && (
-                  <MasterProductionPanel
+                  <MaterialRequirementPanel
                     active={currentStep === 2}
                     step1Data={step1Data}
                     onConfirm={handleStep2Confirm}
                     onBack={handleStepBack}
-                    initialData={step2Data}
                   />
                 )}
+                {/* 步骤3: 计划协同 */}
                 {step1Data && (
-                  <MaterialRequirementPanel
+                  <SmartCollaborationPanel
                     active={currentStep === 3}
                     step1Data={step1Data}
-                    onConfirm={handleStep3Confirm}
-                    onBack={handleStepBack}
-                  />
-                )}
-                {step1Data && step2Data && (
-                  <SmartCollaborationPanel
-                    active={currentStep === 4}
-                    step1Data={step1Data}
-                    step2Data={step2Data}
                     onCreateTask={handleCreateTask}
                     onBack={handleStepBack}
                   />
                 )}
-                {/* 数据溯源信息板：跟随当前激活步骤切换内容 */}
+                {/* 数据溯源信息板 */}
                 <DataLineagePanel
                   step={currentStep}
                   productCode={step1Data?.productCode}
@@ -324,16 +298,7 @@ const PlanningViewV2 = () => {
       <ConfirmDialog
         open={dialog.type === 'reset-step1'}
         title="重置后续步骤"
-        description="修改产品需求计划将重置后续所有步骤，是否继续？"
-        confirmLabel="继续"
-        variant="warning"
-        onConfirm={handleDialogConfirm}
-        onCancel={() => setDialog({ type: 'none' })}
-      />
-      <ConfirmDialog
-        open={dialog.type === 'reset-step2'}
-        title="重置后续步骤"
-        description="修改生产计划将重置后续步骤，是否继续？"
+        description="修改需求预测将重置后续所有步骤，是否继续？"
         confirmLabel="继续"
         variant="warning"
         onConfirm={handleDialogConfirm}

@@ -1,16 +1,14 @@
 /**
- * 产品需求计划(PP) - Step ① 产品选择 + 需求确认面板
+ * 产品需求预测(步骤1) - 产品选择 + 预测单按月分组
  *
- * v2.9 数据源变更：
+ * PRD v3.1 / 4.3 章节:
  *   产品列表: supplychain_hd0202_product（material_number / material_name）
  *   需求数据: supplychain_hd0202_forecast（startdate / enddate / qty），按 material_number 查询
- *   原 PP 对象（supplychain_hd0202_pp）已废弃，不再使用
- *
- * 参考: /docs/PRD_动态计划协同V2.md 4.3 章节
+ *   预测单按 startdate 月份分组，用户勾选月份后自动聚合
  */
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { Search, ChevronRight, ChevronDown, ChevronUp, Loader2, AlertCircle, Info } from 'lucide-react';
+import { Search, ChevronRight, ChevronDown, ChevronUp, Loader2, AlertCircle, Info, Check } from 'lucide-react';
 import {
     planningV2DataService,
     type ProductAPI,
@@ -19,7 +17,7 @@ import {
 import type { Step1Data } from '../../types/planningV2';
 
 // ============================================================================
-// Props
+// Types
 // ============================================================================
 
 interface ProductDemandPanelProps {
@@ -28,27 +26,84 @@ interface ProductDemandPanelProps {
     initialData?: Step1Data;
 }
 
+/** 按月分组的预测单 */
+interface MonthGroup {
+    /** 月份 key: "YYYY-MM" */
+    monthKey: string;
+    /** 显示标签: "2026年4月" */
+    label: string;
+    /** 是否为推荐月份（当前月的下一个月） */
+    isRecommended: boolean;
+    /** 该月份下的所有预测单 */
+    records: ForecastRecordAPI[];
+    /** 该月份数量小计 */
+    subtotal: number;
+}
+
 // ============================================================================
-// 辅助：根据 forecast 记录聚合需求计划信息
+// 辅助：按月份分组预测单（PRD 4.3.3）
 // ============================================================================
 
-function aggregateForecast(records: ForecastRecordAPI[]): {
+function groupForecastByMonth(records: ForecastRecordAPI[]): MonthGroup[] {
+    if (records.length === 0) return [];
+
+    // 按 startdate 的年月分组
+    const groupMap = new Map<string, ForecastRecordAPI[]>();
+    for (const r of records) {
+        const date = r.startdate?.slice(0, 7) || 'unknown'; // "YYYY-MM"
+        if (!groupMap.has(date)) groupMap.set(date, []);
+        groupMap.get(date)!.push(r);
+    }
+
+    // 推荐月份：当前月份的下一个月
+    const now = new Date();
+    const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    const recommendedKey = `${nextMonth.getFullYear()}-${String(nextMonth.getMonth() + 1).padStart(2, '0')}`;
+
+    // 排序 & 构建 MonthGroup
+    const sortedKeys = [...groupMap.keys()].sort();
+    return sortedKeys.map(monthKey => {
+        const recs = groupMap.get(monthKey)!;
+        const [year, month] = monthKey.split('-').map(Number);
+        return {
+            monthKey,
+            label: `${year}年${month}月`,
+            isRecommended: monthKey === recommendedKey,
+            records: recs.sort((a, b) => (a.startdate || '').localeCompare(b.startdate || '')),
+            subtotal: recs.reduce((sum, r) => sum + r.qty, 0),
+        };
+    });
+}
+
+/** 从选中的月份组聚合需求数据 */
+function aggregateSelectedGroups(groups: MonthGroup[], selectedMonths: Set<string>): {
     demandStart: string;
     demandEnd: string;
     demandQuantity: number;
+    billnos: string[];
 } {
-    if (records.length === 0) {
-        return { demandStart: '', demandEnd: '', demandQuantity: 0 };
+    const selectedRecords = groups
+        .filter(g => selectedMonths.has(g.monthKey))
+        .flatMap(g => g.records);
+
+    if (selectedRecords.length === 0) {
+        return { demandStart: '', demandEnd: '', demandQuantity: 0, billnos: [] };
     }
 
-    const startDates = records.map(r => r.startdate).filter(Boolean).sort();
-    const endDates = records.map(r => r.enddate).filter(Boolean).sort();
-    const demandQuantity = records.reduce((sum, r) => sum + r.qty, 0);
+    const startDates = selectedRecords.map(r => r.startdate).filter(Boolean).sort();
+    const endDates = selectedRecords.map(r => r.enddate).filter(Boolean).sort();
+    const demandQuantity = selectedRecords.reduce((sum, r) => sum + r.qty, 0);
+    const billnos = selectedRecords.map(r => r.billno).filter(Boolean);
+
+    // demandEnd: 选中月份中最后一个月的最后一天（PRD 4.3.4）
+    // 使用 enddate 最大值，如果没有则使用 startdate 最大值
+    const demandEnd = endDates[endDates.length - 1] || startDates[startDates.length - 1] || '';
 
     return {
         demandStart: startDates[0] || '',
-        demandEnd: endDates[endDates.length - 1] || startDates[startDates.length - 1] || '',
+        demandEnd,
         demandQuantity,
+        billnos,
     };
 }
 
@@ -57,16 +112,19 @@ function aggregateForecast(records: ForecastRecordAPI[]): {
 // ============================================================================
 
 const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPanelProps) => {
-    // -------- 产品列表加载 --------
+    // -------- 产品列表 --------
     const [productsLoading, setProductsLoading] = useState(true);
     const [productsError, setProductsError] = useState<string | null>(null);
     const [products, setProducts] = useState<ProductAPI[]>([]);
 
-    // -------- 需求预测加载 --------
+    // -------- 需求预测 --------
     const [forecastLoading, setForecastLoading] = useState(false);
     const [forecastRecords, setForecastRecords] = useState<ForecastRecordAPI[]>([]);
     const [forecastLoaded, setForecastLoaded] = useState(false);
-    const [forecastDetailOpen, setForecastDetailOpen] = useState(false);
+
+    // -------- 月份分组 & 选择 --------
+    const [selectedMonths, setSelectedMonths] = useState<Set<string>>(new Set());
+    const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set());
 
     // -------- 交互状态 --------
     const [searchText, setSearchText] = useState('');
@@ -76,6 +134,13 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
     const [demandStart, setDemandStart] = useState('');
     const [demandEnd, setDemandEnd] = useState('');
     const [demandQuantity, setDemandQuantity] = useState<number | ''>('');
+    const [relatedBillnos, setRelatedBillnos] = useState<string[]>([]);
+
+    // ========================================================================
+    // 月份分组
+    // ========================================================================
+
+    const monthGroups = useMemo(() => groupForecastByMonth(forecastRecords), [forecastRecords]);
 
     // ========================================================================
     // 加载产品列表
@@ -87,7 +152,6 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
         try {
             const data = await planningV2DataService.loadProducts();
             setProducts(data);
-            console.log(`[ProductDemandPanel] 产品列表加载完成: ${data.length} 条`);
         } catch (err) {
             console.error('[ProductDemandPanel] 加载产品列表失败:', err);
             setProductsError('加载产品数据失败，请检查网络连接后重试');
@@ -101,16 +165,19 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
     }, [active, loadProducts]);
 
     // ========================================================================
-    // 选择产品 -> 查询 forecast -> 自动聚合
+    // 选择产品 -> 查询 forecast -> 按月分组 -> 默认选中推荐月份
     // ========================================================================
 
     const handleSelectProduct = useCallback(async (productCode: string) => {
         setSelectedProductCode(productCode);
         setForecastLoaded(false);
         setForecastRecords([]);
+        setSelectedMonths(new Set());
+        setExpandedMonths(new Set());
         setDemandStart('');
         setDemandEnd('');
         setDemandQuantity('');
+        setRelatedBillnos([]);
 
         setForecastLoading(true);
         try {
@@ -119,16 +186,66 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
             setForecastLoaded(true);
             console.log(`[ProductDemandPanel] 需求预测 ${productCode}: ${records.length} 条`);
 
-            const agg = aggregateForecast(records);
-            setDemandStart(agg.demandStart);
-            setDemandEnd(agg.demandEnd);
-            setDemandQuantity(agg.demandQuantity > 0 ? agg.demandQuantity : '');
+            // 默认选中推荐月份（下月）（PRD 4.3.3）
+            const groups = groupForecastByMonth(records);
+            const recommended = groups.find(g => g.isRecommended);
+            if (recommended) {
+                const newSelected = new Set([recommended.monthKey]);
+                setSelectedMonths(newSelected);
+                // 自动聚合
+                const agg = aggregateSelectedGroups(groups, newSelected);
+                setDemandStart(agg.demandStart);
+                setDemandEnd(agg.demandEnd);
+                setDemandQuantity(agg.demandQuantity > 0 ? agg.demandQuantity : '');
+                setRelatedBillnos(agg.billnos);
+            } else if (groups.length > 0) {
+                // 无推荐月份则选中第一个月份
+                const firstMonth = groups[0].monthKey;
+                const newSelected = new Set([firstMonth]);
+                setSelectedMonths(newSelected);
+                const agg = aggregateSelectedGroups(groups, newSelected);
+                setDemandStart(agg.demandStart);
+                setDemandEnd(agg.demandEnd);
+                setDemandQuantity(agg.demandQuantity > 0 ? agg.demandQuantity : '');
+                setRelatedBillnos(agg.billnos);
+            }
         } catch (err) {
             console.error(`[ProductDemandPanel] 加载需求预测失败 ${productCode}:`, err);
-            setForecastLoaded(true); // 失败也标记已加载，显示手动填写提示
+            setForecastLoaded(true);
         } finally {
             setForecastLoading(false);
         }
+    }, []);
+
+    // ========================================================================
+    // 切换月份选择 -> 重新聚合
+    // ========================================================================
+
+    const toggleMonth = useCallback((monthKey: string) => {
+        setSelectedMonths(prev => {
+            const next = new Set(prev);
+            if (next.has(monthKey)) {
+                next.delete(monthKey);
+            } else {
+                next.add(monthKey);
+            }
+            // 重新聚合
+            const agg = aggregateSelectedGroups(monthGroups, next);
+            setDemandStart(agg.demandStart);
+            setDemandEnd(agg.demandEnd);
+            setDemandQuantity(agg.demandQuantity > 0 ? agg.demandQuantity : '');
+            setRelatedBillnos(agg.billnos);
+            return next;
+        });
+    }, [monthGroups]);
+
+    const toggleMonthExpand = useCallback((monthKey: string) => {
+        setExpandedMonths(prev => {
+            const next = new Set(prev);
+            if (next.has(monthKey)) next.delete(monthKey);
+            else next.add(monthKey);
+            return next;
+        });
     }, []);
 
     // ========================================================================
@@ -141,6 +258,7 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
             setDemandStart(initialData.demandStart);
             setDemandEnd(initialData.demandEnd);
             setDemandQuantity(initialData.demandQuantity);
+            setRelatedBillnos(initialData.relatedForecastBillnos || []);
             setForecastLoaded(true);
         }
     }, [initialData, products, selectedProductCode]);
@@ -184,13 +302,14 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
             demandStart,
             demandEnd,
             demandQuantity: Number(demandQuantity),
+            relatedForecastBillnos: relatedBillnos,
         });
     };
 
     if (!active) return null;
 
     // ========================================================================
-    // 加载中（产品列表）
+    // Loading / Error
     // ========================================================================
 
     if (productsLoading) {
@@ -201,10 +320,6 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
             </div>
         );
     }
-
-    // ========================================================================
-    // 错误状态
-    // ========================================================================
 
     if (productsError) {
         return (
@@ -224,7 +339,7 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
     }
 
     // ========================================================================
-    // 正常渲染
+    // Render
     // ========================================================================
 
     return (
@@ -311,10 +426,10 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
                 </p>
             </div>
 
-            {/* ---- 需求预测信息 ---- */}
+            {/* ---- 预测单按月分组（PRD 4.3.3） ---- */}
             {selectedProductCode && selectedProduct && (
                 <div className="bg-white rounded-lg border border-gray-200 p-4">
-                    <h3 className="text-sm font-semibold text-gray-800 mb-4">
+                    <h3 className="text-sm font-semibold text-gray-800 mb-3">
                         需求预测信息
                     </h3>
 
@@ -347,47 +462,90 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
                         </div>
                     )}
 
-                    {/* 有预测数据：展示聚合结果 + 明细入口 */}
-                    {!forecastLoading && forecastLoaded && forecastRecords.length > 0 && (
-                        <div className="mb-4">
-                            <div className="flex items-center justify-between mb-1">
-                                <span className="text-xs text-green-600 font-medium">
-                                    已从 {forecastRecords.length} 条预测单自动聚合
-                                </span>
-                                <button
-                                    type="button"
-                                    onClick={() => setForecastDetailOpen(v => !v)}
-                                    className="flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800"
-                                >
-                                    {forecastDetailOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                    {forecastDetailOpen ? '收起明细' : '查看明细'}
-                                </button>
-                            </div>
+                    {/* 有预测数据：按月分组展示 */}
+                    {!forecastLoading && forecastLoaded && monthGroups.length > 0 && (
+                        <div className="mb-4 space-y-2">
+                            <p className="text-xs text-gray-500 mb-2">
+                                勾选月份后自动聚合需求数据（已选 {selectedMonths.size} 个月份）
+                            </p>
+                            {monthGroups.map(group => {
+                                const isChecked = selectedMonths.has(group.monthKey);
+                                const isExpanded = expandedMonths.has(group.monthKey);
+                                return (
+                                    <div
+                                        key={group.monthKey}
+                                        className={`border rounded-lg transition-colors ${
+                                            isChecked ? 'border-indigo-300 bg-indigo-50/50' : 'border-gray-200'
+                                        }`}
+                                    >
+                                        {/* 月份头 */}
+                                        <div className="flex items-center gap-3 px-4 py-3">
+                                            {/* checkbox */}
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleMonth(group.monthKey)}
+                                                className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                                                    isChecked
+                                                        ? 'bg-indigo-600 border-indigo-600'
+                                                        : 'border-gray-300 hover:border-indigo-400'
+                                                }`}
+                                            >
+                                                {isChecked && <Check className="w-3.5 h-3.5 text-white" />}
+                                            </button>
 
-                            {forecastDetailOpen && (
-                                <div className="mt-2 border border-slate-100 rounded-lg overflow-hidden">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-slate-50">
-                                            <tr className="text-slate-500">
-                                                <th className="py-1.5 px-3 text-left font-medium">预测单号</th>
-                                                <th className="py-1.5 px-3 text-left font-medium">交货日期</th>
-                                                <th className="py-1.5 px-3 text-left font-medium">终止日期</th>
-                                                <th className="py-1.5 px-3 text-right font-medium">数量</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {forecastRecords.map((r, i) => (
-                                                <tr key={i} className="border-t border-slate-100">
-                                                    <td className="py-1.5 px-3 font-mono text-slate-600">{r.billno || '-'}</td>
-                                                    <td className="py-1.5 px-3 text-slate-600">{r.startdate?.slice(0, 10) || '-'}</td>
-                                                    <td className="py-1.5 px-3 text-slate-600">{r.enddate?.slice(0, 10) || '-'}</td>
-                                                    <td className="py-1.5 px-3 text-right text-slate-700 font-medium">{r.qty.toLocaleString()}</td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+                                            {/* 月份标签 */}
+                                            <div className="flex-1 min-w-0">
+                                                <span className="text-sm font-medium text-gray-800">
+                                                    {group.label}
+                                                </span>
+                                                {group.isRecommended && (
+                                                    <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">
+                                                        推荐
+                                                    </span>
+                                                )}
+                                                <span className="ml-2 text-xs text-gray-400">
+                                                    {group.records.length} 单 · 小计 {group.subtotal.toLocaleString()}
+                                                </span>
+                                            </div>
+
+                                            {/* 展开/收起明细 */}
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleMonthExpand(group.monthKey)}
+                                                className="flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-600"
+                                            >
+                                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                            </button>
+                                        </div>
+
+                                        {/* 月份明细 */}
+                                        {isExpanded && (
+                                            <div className="border-t border-gray-100 px-4 pb-3">
+                                                <table className="w-full text-xs mt-2">
+                                                    <thead className="text-gray-400">
+                                                        <tr>
+                                                            <th className="py-1 text-left font-medium">预测单号</th>
+                                                            <th className="py-1 text-left font-medium">交货日期</th>
+                                                            <th className="py-1 text-left font-medium">终止日期</th>
+                                                            <th className="py-1 text-right font-medium">数量</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {group.records.map((r, i) => (
+                                                            <tr key={i} className="border-t border-gray-50">
+                                                                <td className="py-1.5 font-mono text-gray-600">{r.billno || '-'}</td>
+                                                                <td className="py-1.5 text-gray-600">{r.startdate?.slice(0, 10) || '-'}</td>
+                                                                <td className="py-1.5 text-gray-600">{r.enddate?.slice(0, 10) || '-'}</td>
+                                                                <td className="py-1.5 text-right text-gray-700 font-medium">{r.qty.toLocaleString()}</td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     )}
 
@@ -431,6 +589,18 @@ const ProductDemandPanel = ({ active, onConfirm, initialData }: ProductDemandPan
                                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-colors"
                                 />
                             </div>
+
+                            {/* 关联预测单号（只读） */}
+                            {relatedBillnos.length > 0 && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                                        关联预测单号（{relatedBillnos.length} 单）
+                                    </label>
+                                    <div className="px-3 py-2 bg-gray-50 rounded-lg border border-gray-100 text-xs text-gray-500 font-mono">
+                                        {relatedBillnos.join('、')}
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

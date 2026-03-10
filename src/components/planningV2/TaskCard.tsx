@@ -74,9 +74,9 @@ export default function TaskCard({
           <span className="text-gray-700">{task.productCode}</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-gray-400 w-8">生产</span>
+          <span className="text-gray-400 w-8">需求</span>
           <span className="text-gray-700">
-            {task.productionStart?.slice(5)} ~ {task.productionEnd?.slice(5)}
+            {task.demandStart?.slice(5)} ~ {task.demandEnd?.slice(5)}
           </span>
         </div>
         {shortageCount !== undefined && (

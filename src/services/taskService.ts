@@ -7,21 +7,93 @@ const STORAGE_KEY = 'planning_v2_tasks';
 function loadAll(): PlanningTask[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    const tasks: PlanningTask[] = raw ? JSON.parse(raw) : [];
-    // 向后兼容：旧 'ended' 状态映射为 'completed'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tasks: any[] = raw ? JSON.parse(raw) : [];
+    // 向后兼容：迁移旧格式任务数据
     for (const t of tasks) {
-      if ((t.status as string) === 'ended') {
+      // v2.x: 'ended' 状态映射为 'completed'
+      if (t.status === 'ended') {
         t.status = 'completed';
       }
+      // v3.1: 迁移 production* 字段 → demand* 字段（PRD 7.1）
+      if (!t.relatedForecastBillnos) {
+        t.relatedForecastBillnos = [];
+      }
+      // 旧任务可能没有 demandEnd 但有 productionEnd，用 productionEnd 兜底
+      if (!t.demandEnd && t.productionEnd) {
+        t.demandEnd = t.productionEnd;
+      }
+      if (!t.demandStart && t.productionStart) {
+        t.demandStart = t.productionStart;
+      }
+      if (!t.demandQuantity && t.productionQuantity) {
+        t.demandQuantity = t.productionQuantity;
+      }
     }
-    return tasks;
+    return tasks as PlanningTask[];
   } catch {
     return [];
   }
 }
 
+/** PRD D4: localStorage 容量监控与清理 */
+const STORAGE_WARN_MB = 3;
+const STORAGE_CLEAN_MB = 4;
+const REPORT_RETENTION_DAYS = 90;
+
+function getLocalStorageSizeMB(): number {
+  let total = 0;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key) total += (key.length + (localStorage.getItem(key)?.length || 0)) * 2;
+    }
+  } catch { /* ignore */ }
+  return total / (1024 * 1024);
+}
+
+function autoCleanStorage(tasks: PlanningTask[]): PlanningTask[] {
+  const sizeMB = getLocalStorageSizeMB();
+  if (sizeMB < STORAGE_WARN_MB) return tasks;
+
+  console.warn(`[TaskService] localStorage 容量 ${sizeMB.toFixed(1)}MB，开始清理...`);
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - REPORT_RETENTION_DAYS);
+  const cutoffISO = cutoff.toISOString();
+
+  // 清理已结束任务超过 90 天的每日报告
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith('planningV2_dailyReports_')) {
+      try {
+        const reports = JSON.parse(localStorage.getItem(key) || '[]');
+        const filtered = reports.filter((r: any) => r.generatedAt > cutoffISO);
+        if (filtered.length < reports.length) {
+          console.log(`[TaskService] 清理每日报告 ${key}: ${reports.length} → ${filtered.length}`);
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  // 如果还超 4MB，清理已结束任务的 summaryReport.keyMaterialsSnapshot
+  if (sizeMB >= STORAGE_CLEAN_MB) {
+    for (const t of tasks) {
+      if ((t.status === 'completed' || t.status === 'incomplete') && t.summaryReport?.keyMaterialsSnapshot) {
+        const endedDate = t.endedAt || t.updatedAt;
+        if (endedDate < cutoffISO) {
+          console.log(`[TaskService] 清理旧任务快照: ${t.id}`);
+          t.summaryReport.keyMaterialsSnapshot = [];
+        }
+      }
+    }
+  }
+
+  return tasks;
+}
+
 function saveAll(tasks: PlanningTask[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(tasks));
+  const cleaned = autoCleanStorage(tasks);
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(cleaned));
 }
 
 /** 获取所有任务（自动过期检测 + 按创建时间倒序） */
@@ -30,7 +102,7 @@ export function getTasks(): PlanningTask[] {
   const now = new Date();
   let changed = false;
   for (const t of tasks) {
-    if (t.status === 'active' && new Date(t.productionEnd) < now) {
+    if (t.status === 'active' && new Date(t.demandEnd) < now) {
       t.status = 'expired';
       t.updatedAt = now.toISOString();
       changed = true;
@@ -119,7 +191,7 @@ export async function checkProductInbound(task: PlanningTask): Promise<EndTaskRe
   }
 
   const inboundDateObj = new Date(latestDate);
-  const planEndObj = new Date(task.productionEnd);
+  const planEndObj = new Date(task.demandEnd);
   const diffMs = inboundDateObj.getTime() - planEndObj.getTime();
   const diffDays = Math.round(diffMs / 86400000);
   const hasSignificantDelay = diffDays > 30;
@@ -170,17 +242,16 @@ export async function endTaskWithReport(
     generatedAt: new Date().toISOString(),
     planVsActual: {
       demandPeriod: { start: task.demandStart, end: task.demandEnd },
-      productionPeriod: { start: task.productionStart, end: task.productionEnd },
       actualInboundDate: endResult.inboundDate,
       inboundQuantity: endResult.inboundQuantity,
       timeDiffDays: endResult.timeDiffDays,
       hasSignificantDelay: endResult.hasSignificantDelay,
     },
     productCompletion: {
-      plannedQuantity: task.productionQuantity,
+      plannedQuantity: task.demandQuantity,
       inboundQuantity: endResult.inboundQuantity,
       completionRate: endResult.inboundQuantity != null
-        ? Math.round((endResult.inboundQuantity / task.productionQuantity) * 100)
+        ? Math.round((endResult.inboundQuantity / task.demandQuantity) * 100)
         : null,
     },
     materialCompletion: {
@@ -249,19 +320,34 @@ export function importTask(pkg: TaskExportPackage): PlanningTask {
     throw new Error('导入文件格式不正确或版本不支持');
   }
 
-  const imported = { ...pkg.task };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const imported: any = { ...pkg.task };
   imported.id = crypto.randomUUID();
   imported.updatedAt = new Date().toISOString();
 
   // 向后兼容旧 ended 状态
-  if ((imported.status as string) === 'ended') {
+  if (imported.status === 'ended') {
     imported.status = 'completed';
+  }
+
+  // PRD D6: v2.10 格式兼容 — production* → demand*
+  if (!imported.demandEnd && imported.productionEnd) {
+    imported.demandEnd = imported.productionEnd;
+  }
+  if (!imported.demandStart && imported.productionStart) {
+    imported.demandStart = imported.productionStart;
+  }
+  if (!imported.demandQuantity && imported.productionQuantity) {
+    imported.demandQuantity = imported.productionQuantity;
+  }
+  if (!imported.relatedForecastBillnos) {
+    imported.relatedForecastBillnos = [];
   }
 
   // active 任务检查是否过期
   if (imported.status === 'active') {
     const now = new Date();
-    if (new Date(imported.productionEnd) < now) {
+    if (new Date(imported.demandEnd) < now) {
       imported.status = 'expired';
       console.log(`[TaskService] 导入的 active 任务已过期，自动设为 expired`);
     }
@@ -282,38 +368,23 @@ export function importTask(pkg: TaskExportPackage): PlanningTask {
 /**
  * 构建关键监测物料清单
  *
- * 筛选范围（PRD v2.10 第 6.4.1 节）:
- *   - 产品（bomLevel === 0）: 始终包含
- *   - 自制件: 始终包含（无论是否缺料）
- *   - 外购/委外: 满足以下任一条件时包含：
- *       1. 有缺料（hasShortage === true）
- *       2. 可用库存为 0 或无库存记录（availableInventoryQty === 0 或 undefined）
+ * 筛选范围（PRD v3.2 第 6.6.1 节）:
+ *   展示全部 BOM 物料（不做筛选过滤）
  *
  * 数据溯源:
  *   - 甘特图数据: ganttBars（已由 ganttService.buildGanttData 构建，含 availableInventoryQty）
- *   - 库存数据: supplychain_hd0202_inventory, material_code in [关键物料编码]
- *   - 新入库判定: inbound_date >= productionStart
+ *   - 库存数据: supplychain_hd0202_inventory, material_code in [物料编码]
+ *   - 新入库判定: inbound_date >= task.createdAt（PRD 6.6.3）
  */
 export async function buildKeyMaterialList(
   ganttBars: GanttBar[],
-  productionStart: string,
+  taskCreatedAt: string,
 ): Promise<KeyMonitorMaterial[]> {
   const flat = ganttService.flattenGanttBars(ganttBars);
 
-  // 辅助：外购/委外 是否需要纳入监测
-  const isExternalAtRisk = (b: GanttBar) =>
-    (b.materialType === '外购' || b.materialType === '委外') &&
-    (b.hasShortage || b.availableInventoryQty === undefined || b.availableInventoryQty <= 0);
-
-  // 筛选关键物料
-  const filtered = flat.filter(b =>
-    b.bomLevel === 0 ||          // 产品
-    b.materialType === '自制' || // 所有自制件
-    isExternalAtRisk(b)          // 缺料或库存为0/无库存的外购/委外
-  );
-
-  const externalRiskCount = filtered.filter(b => isExternalAtRisk(b)).length;
-  console.log(`[TaskService] 关键监测物料筛选: 总BOM ${flat.length} → 关键 ${filtered.length} (产品=${filtered.filter(b => b.bomLevel === 0).length}, 自制=${filtered.filter(b => b.materialType === '自制').length}, 外购/委外风险=${externalRiskCount})`);
+  // PRD v3.2: 展示全部 BOM 物料，不做筛选
+  const filtered = flat;
+  console.log(`[TaskService] 关键监测物料: 总BOM ${flat.length} 条`);
 
   // 查询库存数据
   const materialCodes = filtered.map(b => b.materialCode);
@@ -328,7 +399,7 @@ export async function buildKeyMaterialList(
     latestInboundDate: string;
   }>();
 
-  const productionStartDate = new Date(productionStart);
+  const baseDate = new Date(taskCreatedAt);
 
   for (const inv of inventoryRecords) {
     const existing = inventoryMap.get(inv.material_code) || {
@@ -341,8 +412,8 @@ export async function buildKeyMaterialList(
     existing.totalQty += inv.inventory_qty;
     existing.availableQty += inv.available_inventory_qty;
 
-    // 新入库：inbound_date >= productionStart
-    if (inv.inbound_date && new Date(inv.inbound_date) >= productionStartDate) {
+    // 新入库：inbound_date >= task.createdAt（PRD 6.6.3）
+    if (inv.inbound_date && new Date(inv.inbound_date) >= baseDate) {
       existing.newInboundQty += inv.inventory_qty;
       if (inv.inbound_date > existing.latestInboundDate) {
         existing.latestInboundDate = inv.inbound_date;

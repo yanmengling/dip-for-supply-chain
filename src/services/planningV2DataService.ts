@@ -123,24 +123,74 @@ export interface ProductionPlanAPI {
 }
 
 /**
- * 物料需求计划 (MRP)
- * API 对象: supplychain_hd0202_mrp
- * 数据源: material_demand_plan
- * 数据量: 663 条
+ * 物料需求计划 (MRP) - 旧版接口（向后兼容）
+ * @deprecated v3.7 Phase B: 使用 MRPPlanOrderAPI 替代
  */
 export interface MaterialRequirementPlanAPI {
-    /** 成品料号 */
     finished_product_code: string;
-    /** 规格 */
     specification: string;
-    /** 物料名称 (显示键) */
     component_name: string;
-    /** 计划日期 */
     planned_date: string;
-    /** 物料净需求 (负数=缺口，正数=满足) */
     material_demand_quantity: number;
-    /** 物料编码 (主键) */
     main_material: string;
+}
+
+/**
+ * MRP 计划订单（ERP 新接口，PRD v3.7 Phase B）
+ * API 对象: supplychain_hd0202_mrp
+ * 数据源: erp_mrp_plan_order
+ *
+ * 关键字段说明:
+ *   - bizorderqty: PMC 修正后的实际需求量（优先使用）
+ *   - adviseorderqty: MRP 系统计算的理论需求量（fallback）
+ *   - rootdemandbillno: 关联到预测单号，实现全链路溯源
+ *   - closestatus_title: 正向筛选 '正常' 或 'A'（v3.6）
+ */
+export interface MRPPlanOrderAPI {
+    /** 需求计划订单单据编号 */
+    billno: string;
+    /** 物料编码 */
+    materialplanid_number: string;
+    /** 物料名称 */
+    materialplanid_name: string;
+    /** 物料属性（自制/委外/外购） */
+    materialattr_title: string;
+    /** 建议订单数量（MRP 理论值） */
+    adviseorderqty: number;
+    /** 订单数量（PMC 修正后的实际需求） */
+    bizorderqty: number;
+    /** 投放数量（确定性的采购数量） */
+    bizdropqty: number;
+    /** 建议投放时间 */
+    advisedroptime: string;
+    /** 建议开始时间 */
+    advisestartdate: string;
+    /** 建议结束时间 */
+    adviseenddate: string;
+    /** 计划开始日期 */
+    startdate: string;
+    /** 计划完成日期 */
+    enddate: string;
+    /** 计划准备日期 */
+    orderdate: string;
+    /** 可用日期 */
+    availabledate: string;
+    /** 关闭状态（A:正常, B:关闭, C:拆分关闭, D:合并关闭, E:投放关闭） */
+    closestatus_title: string;
+    /** 投放状态 */
+    dropstatus_title: string;
+    /** 投放单据类型 */
+    dropbilltype_name: string;
+    /** 投放时间 */
+    droptime: string;
+    /** 根需求单号（关联预测单号） */
+    rootdemandbillno: string;
+    /** 计划运算单号 */
+    planoperatenum: string;
+    /** 创建时间 */
+    createtime: string;
+    /** 创建人 */
+    creator_name: string;
 }
 
 // ============================================================================
@@ -488,6 +538,371 @@ export async function getMRPStats(): Promise<{
 }
 
 // ============================================================================
+// MRP 精确查询（v3.7 Phase B: B1+B2）
+// ============================================================================
+
+/** 降级结果包装 */
+export interface DegradedResult<T> {
+    data: T;
+    isDegraded: boolean;
+}
+
+/**
+ * 解析 MRP API 原始记录为 MRPPlanOrderAPI
+ */
+function parseMRPPlanOrder(item: any): MRPPlanOrderAPI {
+    return {
+        billno: item.billno || '',
+        materialplanid_number: item.materialplanid_number || '',
+        materialplanid_name: item.materialplanid_name || '',
+        materialattr_title: item.materialattr_title || '',
+        adviseorderqty: parseFloat(item.adviseorderqty) || 0,
+        bizorderqty: parseFloat(item.bizorderqty) || 0,
+        bizdropqty: parseFloat(item.bizdropqty) || 0,
+        advisedroptime: item.advisedroptime || '',
+        advisestartdate: item.advisestartdate || '',
+        adviseenddate: item.adviseenddate || '',
+        startdate: item.startdate || '',
+        enddate: item.enddate || '',
+        orderdate: item.orderdate || '',
+        availabledate: item.availabledate || '',
+        closestatus_title: item.closestatus_title || '',
+        dropstatus_title: item.dropstatus_title || '',
+        dropbilltype_name: item.dropbilltype_name || '',
+        droptime: item.droptime || '',
+        rootdemandbillno: item.rootdemandbillno || '',
+        planoperatenum: item.planoperatenum || '',
+        createtime: item.createtime || '',
+        creator_name: item.creator_name || '',
+    };
+}
+
+/**
+ * MRP 正向过滤：仅保留「正常」状态的计划订单（PRD 4.4.4 v3.6）
+ */
+function filterActiveMRP(records: MRPPlanOrderAPI[]): MRPPlanOrderAPI[] {
+    return records.filter(r =>
+        r.closestatus_title === '正常' || r.closestatus_title === 'A'
+    );
+}
+
+/**
+ * MRP 取数优先级：优先 bizorderqty，fallback adviseorderqty（PRD 4.4.4）
+ */
+export function getMRPDemandQty(record: MRPPlanOrderAPI): number {
+    return (record.bizorderqty && record.bizorderqty !== 0)
+        ? record.bizorderqty
+        : record.adviseorderqty;
+}
+
+/**
+ * 按预测单号精确查询 MRP（PRD 4.4.5 v3.4）
+ *
+ * 策略1: rootdemandbillno in [billnos]（精确关联）
+ * 策略2: 全量加载后按 finished_product_code 过滤（fallback，旧逻辑）
+ *
+ * 返回: { data, isDegraded }
+ *   - isDegraded=false: 精确关联成功
+ *   - isDegraded=true: 降级到产品编码过滤
+ */
+export async function loadMRPByBillnos(
+    forecastBillnos: string[],
+    productCode: string,
+): Promise<DegradedResult<MRPPlanOrderAPI[]>> {
+    if (forecastBillnos.length === 0) {
+        console.warn('[PlanningV2DataService] loadMRPByBillnos: 无预测单号，直接降级');
+        return { data: [], isDegraded: true };
+    }
+
+    const sortedBillnos = [...forecastBillnos].sort();
+    const cacheKey = `mrp_precise_${sortedBillnos.join(',')}`;
+
+    // 策略1: 精确关联
+    const preciseResult = await withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] MRP 精确查询: rootdemandbillno in [${forecastBillnos.length} 个单号]...`);
+        const chunks = chunkArray(forecastBillnos, BATCH_CHUNK_SIZE);
+        const allData: MRPPlanOrderAPI[] = [];
+
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'rootdemandbillno', operation: 'in', value: chunk }
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+                timeout: 120000,
+            });
+            allData.push(...response.entries.map((item: any) => parseMRPPlanOrder(item)));
+        }
+
+        console.log(`[PlanningV2DataService] MRP 精确查询: ${allData.length} 条（过滤前）`);
+        return allData;
+    }).catch(error => {
+        console.error('[PlanningV2DataService] MRP 精确查询失败:', error);
+        return [] as MRPPlanOrderAPI[];
+    });
+
+    // 精确关联有结果 → 正向过滤后返回
+    if (preciseResult.length > 0) {
+        const filtered = filterActiveMRP(preciseResult);
+        console.log(`[PlanningV2DataService] MRP 精确查询结果: ${preciseResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
+        return { data: filtered, isDegraded: false };
+    }
+
+    // 策略2: 降级到产品编码全量加载
+    console.warn(`[PlanningV2DataService] MRP 精确查询无结果，降级到 productCode=${productCode} 全量查询`);
+    const fallbackCacheKey = `mrp_fallback_${productCode}`;
+    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
+            limit: 10000,
+            need_total: true,
+            timeout: 120000,
+        });
+        return response.entries.map((item: any) => parseMRPPlanOrder(item));
+    }).catch(error => {
+        console.error('[PlanningV2DataService] MRP fallback 查询失败:', error);
+        return [] as MRPPlanOrderAPI[];
+    });
+
+    // 按 materialplanid_number 的产品编码不好过滤（MRP 是物料级别，不是产品级别）
+    // fallback 使用旧 finished_product_code 逻辑（兼容旧数据视图字段）
+    // 注：如果新 API 没有 finished_product_code，则返回全部并让 ganttService 通过 BOM 过滤
+    const filtered = filterActiveMRP(fallbackResult);
+    console.log(`[PlanningV2DataService] MRP fallback: ${fallbackResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
+    return { data: filtered, isDegraded: true };
+}
+
+// ============================================================================
+// PR 精确关联（v3.7 Phase B: B3）
+// ============================================================================
+
+/**
+ * 按 MRP 单号精确查询 PR（PRD 1.6.2）
+ *
+ * 策略1: srcbillid in [mrpBillnos] + biztime >= demandStart（精确关联）
+ * 策略2: material_number in [materialCodes] + biztime >= demandStart（fallback）
+ *
+ * PR 接口需新增 srcbillid 字段
+ */
+export async function loadPRByMRPBillnos(
+    mrpBillnos: string[],
+    materialCodes: string[],
+    demandStart: string,
+): Promise<DegradedResult<PRRecord[]>> {
+    if (mrpBillnos.length === 0 && materialCodes.length === 0) {
+        return { data: [], isDegraded: true };
+    }
+
+    // 策略1: 精确关联（srcbillid in [mrpBillnos]）
+    if (mrpBillnos.length > 0) {
+        const sortedBillnos = [...mrpBillnos].sort();
+        const cacheKey = `pr_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
+
+        const preciseResult = await withCachedLoader(cacheKey, async () => {
+            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号], biztime >= ${demandStart}...`);
+            const chunks = chunkArray(mrpBillnos, BATCH_CHUNK_SIZE);
+            const allData: PRRecord[] = [];
+
+            for (const chunk of chunks) {
+                const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
+                    condition: {
+                        operation: 'and',
+                        sub_conditions: [
+                            { field: 'srcbillid', operation: 'in', value: chunk },
+                            { field: 'biztime', operation: '>=', value: demandStart },
+                        ]
+                    },
+                    limit: 10000,
+                    need_total: true,
+                    timeout: 120000,
+                });
+                allData.push(...response.entries.map((item: any) => parsePRRecord(item)));
+            }
+
+            console.log(`[PlanningV2DataService] PR 精确查询: ${allData.length} 条`);
+            return allData;
+        }).catch(error => {
+            console.error('[PlanningV2DataService] PR 精确查询失败:', error);
+            return [] as PRRecord[];
+        });
+
+        if (preciseResult.length > 0) {
+            return { data: preciseResult, isDegraded: false };
+        }
+        console.warn('[PlanningV2DataService] PR 精确查询无结果，降级到 material_number 查询');
+    }
+
+    // 策略2: fallback（material_number in [codes] + biztime >= demandStart）
+    if (materialCodes.length === 0) {
+        return { data: [], isDegraded: true };
+    }
+
+    const sortedCodes = [...materialCodes].sort();
+    const fallbackCacheKey = `pr_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
+
+    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
+        console.log(`[PlanningV2DataService] PR fallback: material_number in [${materialCodes.length}], biztime >= ${demandStart}...`);
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        const allData: PRRecord[] = [];
+
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_number', operation: 'in', value: chunk },
+                        { field: 'biztime', operation: '>=', value: demandStart },
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+                timeout: 120000,
+            });
+            allData.push(...response.entries.map((item: any) => parsePRRecord(item)));
+        }
+
+        console.log(`[PlanningV2DataService] PR fallback: ${allData.length} 条`);
+        return allData;
+    }).catch(error => {
+        console.error('[PlanningV2DataService] PR fallback 查询失败:', error);
+        return [] as PRRecord[];
+    });
+
+    return { data: fallbackResult, isDegraded: true };
+}
+
+/** 解析 PR 记录（复用，新增 srcbillid 字段） */
+function parsePRRecord(item: any): PRRecord {
+    return {
+        billno: item.billno || '',
+        material_number: item.material_number || '',
+        material_name: item.material_name || '',
+        qty: parseFloat(item.qty) || 0,
+        biztime: item.biztime || '',
+        joinqty: parseFloat(item.joinqty) || 0,
+        auditdate: item.auditdate || '',
+        org_name: item.org_name || '',
+        billtype_name: item.billtype_name || '',
+    };
+}
+
+// ============================================================================
+// PO 精确关联（v3.7 Phase B: B4）
+// ============================================================================
+
+/**
+ * 按 PR ID 精确查询 PO（PRD 1.6.2）
+ *
+ * 策略1: srcbillid in [prBillnos] + biztime >= demandStart（精确关联）
+ * 策略2: material_number in [materialCodes] + biztime >= demandStart（fallback）
+ */
+export async function loadPOByPRBillnos(
+    prBillnos: string[],
+    materialCodes: string[],
+    demandStart: string,
+): Promise<DegradedResult<PORecord[]>> {
+    if (prBillnos.length === 0 && materialCodes.length === 0) {
+        return { data: [], isDegraded: true };
+    }
+
+    // 策略1: 精确关联（srcbillid in [prBillnos]）
+    if (prBillnos.length > 0) {
+        const sortedBillnos = [...prBillnos].sort();
+        const cacheKey = `po_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
+
+        const preciseResult = await withCachedLoader(cacheKey, async () => {
+            console.log(`[PlanningV2DataService] PO 精确查询: srcbillid in [${prBillnos.length} 个PR单号], biztime >= ${demandStart}...`);
+            const chunks = chunkArray(prBillnos, BATCH_CHUNK_SIZE);
+            const allData: PORecord[] = [];
+
+            for (const chunk of chunks) {
+                const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
+                    condition: {
+                        operation: 'and',
+                        sub_conditions: [
+                            { field: 'srcbillid', operation: 'in', value: chunk },
+                            { field: 'biztime', operation: '>=', value: demandStart },
+                        ]
+                    },
+                    limit: 10000,
+                    need_total: true,
+                    timeout: 120000,
+                });
+                allData.push(...response.entries.map((item: any) => parsePORecord(item)));
+            }
+
+            console.log(`[PlanningV2DataService] PO 精确查询: ${allData.length} 条`);
+            return allData;
+        }).catch(error => {
+            console.error('[PlanningV2DataService] PO 精确查询失败:', error);
+            return [] as PORecord[];
+        });
+
+        if (preciseResult.length > 0) {
+            return { data: preciseResult, isDegraded: false };
+        }
+        console.warn('[PlanningV2DataService] PO 精确查询无结果，降级到 material_number 查询');
+    }
+
+    // 策略2: fallback（material_number in [codes] + biztime >= demandStart）
+    if (materialCodes.length === 0) {
+        return { data: [], isDegraded: true };
+    }
+
+    const sortedCodes = [...materialCodes].sort();
+    const fallbackCacheKey = `po_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
+
+    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
+        console.log(`[PlanningV2DataService] PO fallback: material_number in [${materialCodes.length}], biztime >= ${demandStart}...`);
+        const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
+        const allData: PORecord[] = [];
+
+        for (const chunk of chunks) {
+            const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
+                condition: {
+                    operation: 'and',
+                    sub_conditions: [
+                        { field: 'material_number', operation: 'in', value: chunk },
+                        { field: 'biztime', operation: '>=', value: demandStart },
+                    ]
+                },
+                limit: 10000,
+                need_total: true,
+                timeout: 120000,
+            });
+            allData.push(...response.entries.map((item: any) => parsePORecord(item)));
+        }
+
+        console.log(`[PlanningV2DataService] PO fallback: ${allData.length} 条`);
+        return allData;
+    }).catch(error => {
+        console.error('[PlanningV2DataService] PO fallback 查询失败:', error);
+        return [] as PORecord[];
+    });
+
+    return { data: fallbackResult, isDegraded: true };
+}
+
+/** 解析 PO 记录 */
+function parsePORecord(item: any): PORecord {
+    return {
+        billno: item.billno || '',
+        material_number: item.material_number || '',
+        material_name: item.material_name || '',
+        qty: parseFloat(item.qty) || 0,
+        biztime: item.biztime || '',
+        deliverdate: item.deliverdate || '',
+        supplier_name: item.supplier_name || '',
+        operatorname: item.operatorname || '',
+        srcbillnumber: item.srcbillnumber || '',
+        actqty: parseFloat(item.actqty) || 0,
+    };
+}
+
+// ============================================================================
 // BOM 数据加载
 // ============================================================================
 
@@ -550,17 +965,28 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
 
         console.log(`[PlanningV2DataService] BOM ${productCode}: API 返回 ${response.entries?.length ?? 0} 条, total=${(response as any).total ?? 'N/A'}`);
 
-        const data: BOMRecord[] = response.entries.map((item: any) => ({
-            bom_material_code: item.bom_material_code || '',
-            material_code: item.material_code || '',
-            material_name: item.material_name || '',
-            parent_material_code: item.parent_material_code || '',
-            bom_level: parseInt(item.bom_level) || 1,
-            standard_usage: parseFloat(item.standard_usage) || 0,
-            bom_version: item.bom_version || '',
-            alt_part: item.alt_part || '',
-            alt_priority: parseInt(item.alt_priority) || 0,
-        }));
+        // PRD D2: BOM 字段容错解析
+        const data: BOMRecord[] = response.entries.map((item: any) => {
+            const altPriority = item.alt_priority != null ? parseInt(item.alt_priority) : 0;
+            return {
+                bom_material_code: item.bom_material_code || '',
+                material_code: item.material_code || '',
+                material_name: item.material_name || '',
+                parent_material_code: item.parent_material_code || '',
+                bom_level: parseInt(item.bom_level) || 1,
+                standard_usage: parseFloat(item.standard_usage) || 0,
+                bom_version: item.bom_version || '',
+                alt_part: item.alt_part || '',
+                alt_priority: isNaN(altPriority) ? 0 : altPriority,
+            };
+        }).filter(item => {
+            // 容错：跳过缺少关键字段的记录
+            if (!item.material_code) {
+                console.warn(`[PlanningV2DataService] BOM 跳过缺少 material_code 的记录`);
+                return false;
+            }
+            return true;
+        });
 
         // 从根节点做可达性遍历，只保留能从产品根节点到达的 BOM 记录
         // 排除替代料（alt_priority>0 已被 API 过滤）的残留子级（parent 指向替代料编码）
@@ -819,6 +1245,135 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
 }
 
 // ============================================================================
+// MPS 精确关联（v3.7 Phase B: B7）
+// ============================================================================
+
+/**
+ * MPS 生产工单 ERP 接口（PRD 5.1.5）
+ */
+export interface MPSWorkOrderAPI {
+    /** 工单编号 */
+    billno: string;
+    /** 产品编码 */
+    material_number: string;
+    /** 产品名称 */
+    material_name: string;
+    /** 生产数量 */
+    qty: number;
+    /** 计划开工时间 */
+    planstartdate: string;
+    /** 计划完工时间 */
+    planfinishdate: string;
+    /** 实际开工时间 */
+    actualstartdate: string;
+    /** 实际完工时间 */
+    actualfinishdate: string;
+    /** 合格入库数 */
+    stockinqty: number;
+    /** 任务状态 */
+    taskstatus_title: string;
+    /** 领料状态 */
+    pickstatus_title: string;
+    /** 来源单据编号（关联预测单号） */
+    sourcebillnumber: string;
+    /** 来源单据类型 */
+    sourcebilltype: string;
+}
+
+/**
+ * 按预测单号精确查询生产工单（PRD 5.1.5）
+ *
+ * 策略1: sourcebillnumber in [billnos]（精确关联）
+ * 策略2: material_number == productCode（fallback）
+ */
+export async function loadMPSByForecastBillnos(
+    forecastBillnos: string[],
+    productCode: string,
+): Promise<DegradedResult<MPSWorkOrderAPI[]>> {
+    // 策略1: 精确关联
+    if (forecastBillnos.length > 0) {
+        const sortedBillnos = [...forecastBillnos].sort();
+        const cacheKey = `mps_precise_${sortedBillnos.join(',')}`;
+
+        const preciseResult = await withCachedLoader(cacheKey, async () => {
+            console.log(`[PlanningV2DataService] MPS 精确查询: sourcebillnumber in [${forecastBillnos.length} 个单号]...`);
+            const chunks = chunkArray(forecastBillnos, BATCH_CHUNK_SIZE);
+            const allData: MPSWorkOrderAPI[] = [];
+
+            for (const chunk of chunks) {
+                const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
+                    condition: {
+                        operation: 'and',
+                        sub_conditions: [
+                            { field: 'sourcebillnumber', operation: 'in', value: chunk }
+                        ]
+                    },
+                    limit: 10000,
+                    need_total: true,
+                    timeout: 120000,
+                });
+                allData.push(...response.entries.map((item: any) => parseMPSWorkOrder(item)));
+            }
+
+            console.log(`[PlanningV2DataService] MPS 精确查询: ${allData.length} 条`);
+            return allData;
+        }).catch(error => {
+            console.error('[PlanningV2DataService] MPS 精确查询失败:', error);
+            return [] as MPSWorkOrderAPI[];
+        });
+
+        if (preciseResult.length > 0) {
+            return { data: preciseResult, isDegraded: false };
+        }
+        console.warn('[PlanningV2DataService] MPS 精确查询无结果，降级到 material_number 查询');
+    }
+
+    // 策略2: fallback（material_number == productCode）
+    const fallbackCacheKey = `mps_fallback_${productCode}`;
+    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
+        console.log(`[PlanningV2DataService] MPS fallback: material_number == ${productCode}...`);
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'material_number', operation: '==', value: productCode }
+                ]
+            },
+            limit: 10000,
+            need_total: true,
+            timeout: 120000,
+        });
+        const data = response.entries.map((item: any) => parseMPSWorkOrder(item));
+        console.log(`[PlanningV2DataService] MPS fallback: ${data.length} 条`);
+        return data;
+    }).catch(error => {
+        console.error('[PlanningV2DataService] MPS fallback 查询失败:', error);
+        return [] as MPSWorkOrderAPI[];
+    });
+
+    return { data: fallbackResult, isDegraded: true };
+}
+
+/** 解析 MPS 工单记录 */
+function parseMPSWorkOrder(item: any): MPSWorkOrderAPI {
+    return {
+        billno: item.billno || '',
+        material_number: item.material_number || '',
+        material_name: item.material_name || '',
+        qty: parseFloat(item.qty) || 0,
+        planstartdate: item.planstartdate || '',
+        planfinishdate: item.planfinishdate || '',
+        actualstartdate: item.actualstartdate || '',
+        actualfinishdate: item.actualfinishdate || '',
+        stockinqty: parseFloat(item.stockinqty) || 0,
+        taskstatus_title: item.taskstatus_title || '',
+        pickstatus_title: item.pickstatus_title || '',
+        sourcebillnumber: item.sourcebillnumber || '',
+        sourcebilltype: item.sourcebilltype || '',
+    };
+}
+
+// ============================================================================
 // 清除缓存
 // ============================================================================
 
@@ -842,21 +1397,30 @@ export const planningV2DataService = {
     getProductDemandPlansByProduct,
     getUniqueProducts,
     getProductDemandStats,
-    // MPS
+    // MPS（旧接口）
     loadProductionPlans,
-    // MRP
+    // MPS 精确关联（v3.7 Phase B: B7）
+    loadMPSByForecastBillnos,
+    // MRP（旧接口，向后兼容）
     loadMaterialRequirementPlans,
     getMRPByProduct,
     getShortfallMaterials,
     getMRPStats,
+    // MRP 精确查询（v3.7 Phase B: B1+B2）
+    loadMRPByBillnos,
+    getMRPDemandQty,
     // BOM
     loadBOMByProduct,
     // Material
     loadMaterialsByCode,
-    // PR
+    // PR（旧接口，向后兼容）
     loadPRByMaterials,
-    // PO
+    // PR 精确关联（v3.7 Phase B: B3）
+    loadPRByMRPBillnos,
+    // PO（旧接口，向后兼容）
     loadPOByMaterials,
+    // PO 精确关联（v3.7 Phase B: B4）
+    loadPOByPRBillnos,
     // Inventory
     loadInventoryByMaterials,
     // Cache

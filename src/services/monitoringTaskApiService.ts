@@ -141,9 +141,9 @@ export function mapPlanningTaskToRecord(task: PlanningTask): MonitoringTaskRecor
         demand_start: toDateOnly(task.demandStart),
         demand_end: toDateOnly(task.demandEnd),
         demand_quantity: task.demandQuantity,
-        production_start: toDateOnly(task.productionStart),
-        production_end: toDateOnly(task.productionEnd),
-        production_quantity: task.productionQuantity,
+        production_start: toDateOnly(task.demandStart),   // v3.1: 使用 demandStart 兼容 DIP 字段
+        production_end: toDateOnly(task.demandEnd),
+        production_quantity: task.demandQuantity,
         created_by: 'supply-chain-brain',
     };
 }

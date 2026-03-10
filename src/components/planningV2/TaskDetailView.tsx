@@ -18,12 +18,17 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Loader2, AlertTriangle, RefreshCw, FileDown, ChevronDown } from 'lucide-react';
+import { ArrowLeft, Loader2, AlertTriangle, RefreshCw, FileDown, ChevronDown, ShieldAlert } from 'lucide-react';
 import type { PlanningTask, GanttBar, KeyMonitorMaterial } from '../../types/planningV2';
 import { ganttService } from '../../services/ganttService';
+import type { DegradationInfo } from '../../services/ganttService';
 import { taskService } from '../../services/taskService';
 import GanttChart from './gantt/GanttChart';
 import ShortageList from './ShortageList';
+import MatchingStatusCard from './MatchingStatusCard';
+import WorkOrderTracker from './WorkOrderTracker';
+import AlertBanner from './AlertBanner';
+import DailyMonitoringReport from './DailyMonitoringReport';
 import TaskSummaryReportView from './TaskSummaryReport';
 import ConfirmDialog from './ConfirmDialog';
 import DataLineagePanel from './DataLineagePanel';
@@ -53,6 +58,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
   const [endingTask, setEndingTask] = useState(false);
   const [endCheckMessage, setEndCheckMessage] = useState<string | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [degradation, setDegradation] = useState<DegradationInfo>({ mrp: false, pr: false, po: false });
   const exportMenuRef = useRef<HTMLDivElement>(null);
 
   // 关闭导出菜单的外部点击处理
@@ -70,17 +76,22 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
     setLoading(true);
     setError(null);
     try {
-      const bars = await ganttService.buildGanttData(
+      // PRD v3.7: 精确查询链（传入 forecastBillnos + demandStart）
+      const result = await ganttService.buildGanttData(
         task.productCode,
-        task.productionStart,
-        task.productionEnd,
+        task.demandStart,
+        task.demandEnd,
+        task.relatedForecastBillnos,
+        task.demandStart,
       );
-      setGanttBars(bars);
+      setGanttBars(result.bars);
+      setDegradation(result.degradation);
+      console.log(`[TaskDetailView] 降级状态: MRP=${result.degradation.mrp}, PR=${result.degradation.pr}, PO=${result.degradation.po}`);
 
       // 加载关键监测物料清单（含库存）
       setKeyMaterialsLoading(true);
       try {
-        const km = await taskService.buildKeyMaterialList(bars, task.productionStart);
+        const km = await taskService.buildKeyMaterialList(result.bars, task.createdAt);
         setKeyMaterials(km);
       } catch (err) {
         console.error('[TaskDetailView] 关键物料清单加载失败:', err);
@@ -93,7 +104,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
     } finally {
       setLoading(false);
     }
-  }, [task.productCode, task.productionStart, task.productionEnd]);
+  }, [task.productCode, task.demandStart, task.demandEnd, task.createdAt]);
 
   useEffect(() => {
     fetchGantt();
@@ -163,10 +174,9 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
       `| 任务名称 | ${task.name} |`,
       `| 产品编码 | ${task.productCode} |`,
       `| 产品名称 | ${task.productName} |`,
-      `| 产品需求周期 | ${task.demandStart} ~ ${task.demandEnd} |`,
+      `| 需求周期 | ${task.demandStart} ~ ${task.demandEnd} |`,
       `| 需求数量 | ${task.demandQuantity.toLocaleString()} 套 |`,
-      `| 生产计划周期 | ${task.productionStart} ~ ${task.productionEnd} |`,
-      `| 生产数量 | ${task.productionQuantity.toLocaleString()} 套 |`,
+      `| 关联预测单 | ${task.relatedForecastBillnos?.join(', ') || '-'} |`,
       `| 任务状态 | ${statusLabels[task.status] || task.status} |`,
       `| 创建时间 | ${task.createdAt} |`,
       ``,
@@ -229,9 +239,9 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
       taskName: task.name,
       productCode: task.productCode,
       productName: task.productName,
-      productionStart: task.productionStart,
-      productionEnd: task.productionEnd,
-      productionQuantity: task.productionQuantity,
+      productionStart: task.demandStart,
+      productionEnd: task.demandEnd,
+      productionQuantity: task.demandQuantity,
       demandStart: task.demandStart,
       demandEnd: task.demandEnd,
       demandQuantity: task.demandQuantity,
@@ -363,11 +373,11 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
             </div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 mb-1">生产计划</div>
+            <div className="text-xs text-slate-500 mb-1">关联预测单</div>
             <div className="text-sm text-slate-800">
-              <div>{task.productionStart} ~ {task.productionEnd}</div>
-              <div className="text-xs text-slate-500 mt-0.5">
-                {task.productionQuantity.toLocaleString()} 套
+              <div>{task.relatedForecastBillnos?.length || 0} 单</div>
+              <div className="text-xs text-slate-500 mt-0.5 font-mono truncate max-w-[200px]">
+                {task.relatedForecastBillnos?.join(', ') || '-'}
               </div>
             </div>
           </div>
@@ -389,6 +399,25 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
           </div>
         </div>
       </div>
+
+      {/* 降级模式标识 (PRD C4) */}
+      {!loading && (degradation.mrp || degradation.pr || degradation.po) && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-700">
+          <ShieldAlert className="w-4 h-4 shrink-0" />
+          <span>
+            数据精度：兜底模式
+            {degradation.mrp && ' [MRP]'}
+            {degradation.pr && ' [PR]'}
+            {degradation.po && ' [PO]'}
+            — 部分环节使用物料编码匹配，数据可能包含非本预测单的记录
+          </span>
+        </div>
+      )}
+
+      {/* 预警横幅 (PRD 10.3) */}
+      {!loading && !error && ganttBars.length > 0 && task.status === 'active' && (
+        <AlertBanner ganttBars={ganttBars} demandEnd={task.demandEnd} />
+      )}
 
       {/* 总结报告（仅已结束任务） */}
       {isEnded && task.summaryReport && (
@@ -412,7 +441,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
             </button>
           </div>
         ) : (
-          <GanttChart bars={ganttBars} productionStart={task.productionStart} productionEnd={task.productionEnd} />
+          <GanttChart bars={ganttBars} productionStart={task.demandStart} productionEnd={task.demandEnd} />
         )}
       </div>
 
@@ -423,6 +452,28 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
           productCode={task.productCode}
           loading={keyMaterialsLoading}
         />
+      )}
+
+      {/* 物料齐套状态 (PRD 6.4) */}
+      {!loading && !error && ganttBars.length > 0 && (
+        <MatchingStatusCard
+          ganttBars={ganttBars}
+          demandEnd={task.demandEnd}
+          degradation={degradation}
+        />
+      )}
+
+      {/* 关联生产工单 (PRD 6.5) */}
+      {!loading && !error && (
+        <WorkOrderTracker
+          forecastBillnos={task.relatedForecastBillnos || []}
+          productCode={task.productCode}
+        />
+      )}
+
+      {/* 每日监测报告 (PRD 8.3) */}
+      {!loading && !error && ganttBars.length > 0 && (
+        <DailyMonitoringReport task={task} ganttBars={ganttBars} />
       )}
 
       {/* 数据溯源信息板 */}

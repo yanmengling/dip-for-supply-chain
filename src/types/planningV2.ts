@@ -290,32 +290,39 @@ export interface PlanningAIAssistant {
 /** 视图路由状态 */
 export type PlanningViewMode = 'task-list' | 'new-task' | 'task-detail';
 
-/** 新建任务流程步骤 */
-export type NewTaskStep = 1 | 2 | 3 | 4;
+/** 新建任务流程步骤（v3.1: 四步→三步，移除生产计划步骤） */
+export type NewTaskStep = 1 | 2 | 3;
 
 /** 任务状态 */
 export type TaskStatus = 'active' | 'completed' | 'incomplete' | 'expired';
 
-/** 监测任务对象（localStorage 持久化） */
+/** 监测任务对象（localStorage 持久化）
+ * PRD v3.1: 移除 production* 字段，新增 relatedForecastBillnos
+ * demandEnd 作为甘特图倒排锚点（替代原 productionStart）
+ */
 export interface PlanningTask {
   id: string;
   name: string;
   status: TaskStatus;
   createdAt: string;
   updatedAt: string;
-  // 步骤① 产品需求计划
+  // 步骤1 产品需求预测（PRD 7.1）
   productCode: string;
   productName: string;
-  demandStart: string;       // YYYY-MM-DD
-  demandEnd: string;
+  demandStart: string;       // YYYY-MM-DD（预测单最早 startdate）
+  demandEnd: string;         // YYYY-MM-DD（需求截止时间，甘特图倒排锚点）
   demandQuantity: number;
-  // 步骤② 生产计划
-  productionStart: string;   // YYYY-MM-DD（甘特图倒排起点）
-  productionEnd: string;
-  productionQuantity: number;
+  relatedForecastBillnos: string[];  // 关联的预测单号列表（v3.1 新增）
   // 任务结束相关（可选，向后兼容）
   endedAt?: string;          // 任务结束时间（ISO 格式）
   summaryReport?: TaskSummaryReport;
+  // ⚠️ 已废弃字段（向后兼容读取旧任务时可能存在）
+  /** @deprecated v3.1 移除，使用 demandEnd 作为甘特图锚点 */
+  productionStart?: string;
+  /** @deprecated v3.1 移除，使用 demandEnd */
+  productionEnd?: string;
+  /** @deprecated v3.1 移除，使用 demandQuantity */
+  productionQuantity?: number;
 }
 
 // ============= 总结报告 =============
@@ -324,7 +331,8 @@ export interface TaskSummaryReport {
   generatedAt: string;
   planVsActual: {
     demandPeriod: { start: string; end: string };
-    productionPeriod: { start: string; end: string };
+    /** @deprecated v3.1 移除，保留用于旧报告兼容读取 */
+    productionPeriod?: { start: string; end: string };
     actualInboundDate: string | null;
     inboundQuantity: number | null;
     timeDiffDays: number | null;
@@ -397,21 +405,25 @@ export interface TaskExportPackage {
   keyMaterials: KeyMonitorMaterial[];
 }
 
-/** 步骤①确认数据 */
+/** 步骤1确认数据（PRD 4.3.5） */
 export interface Step1Data {
   productCode: string;
   productName: string;
   demandStart: string;
   demandEnd: string;
   demandQuantity: number;
+  relatedForecastBillnos: string[];  // v3.1: 关联的预测单号列表
 }
 
-/** 步骤②确认数据 */
+/** @deprecated v3.1 移除步骤2（生产计划），保留类型定义用于旧代码过渡 */
 export interface Step2Data {
   productionStart: string;
   productionEnd: string;
   productionQuantity: number;
 }
+
+/** 物料供需状态（PRD 4.4.6 v3.7 三分类） */
+export type SupplyStatus = 'shortage' | 'sufficient' | 'sufficient_no_mrp' | 'anomaly';
 
 /** 甘特图条目（运行时，不持久化） */
 export interface GanttBar {
@@ -426,6 +438,7 @@ export interface GanttBar {
   status: 'on_time' | 'risk' | 'ordered';
   hasShortage: boolean;
   shortageQuantity: number;
+  supplyStatus: SupplyStatus;  // v3.7: 物料供需三分类
   poStatus: 'has_po' | 'no_po' | 'not_applicable';
   prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
   poDeliverDate?: string;    // 最新PO交货日
