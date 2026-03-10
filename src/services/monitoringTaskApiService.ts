@@ -141,10 +141,17 @@ export function mapPlanningTaskToRecord(task: PlanningTask): MonitoringTaskRecor
         demand_start: toDateOnly(task.demandStart),
         demand_end: toDateOnly(task.demandEnd),
         demand_quantity: task.demandQuantity,
+<<<<<<< HEAD
         production_start: toDateOnly(task.demandStart),   // v3.1: 使用 demandStart 兼容 DIP 字段
         production_end: toDateOnly(task.demandEnd),
         production_quantity: task.demandQuantity,
         created_by: 'supply-chain-brain',
+=======
+        production_start: toDateOnly(task.productionStart),
+        production_end: toDateOnly(task.productionEnd),
+        production_quantity: task.productionQuantity,
+        created_by: 'dip-for-supply-chain',
+>>>>>>> 6b475a4 (fix: 修复修改应用名称导致 APP 无法运行的问题)
     };
 }
 
