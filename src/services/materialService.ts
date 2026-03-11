@@ -40,8 +40,10 @@ export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
             console.log(`[MaterialService] Querying purchase orders (${purchaseOrderTypeId})...`);
             queries.push(
                 ontologyApi.queryObjectInstances(purchaseOrderTypeId, {
-                    limit: 10000,
+                    limit: 200,
                     need_total: false,
+                    include_logic_params: false,
+                    timeout: 30000,
                 }).catch(err => {
                     console.error('[MaterialService] Failed to query purchase orders:', err);
                     return { entries: [] };
@@ -55,8 +57,10 @@ export async function getMainMaterialsFromSupplierData(): Promise<any[]> {
             console.log(`[MaterialService] Querying purchase requests (${purchaseRequestTypeId})...`);
             queries.push(
                 ontologyApi.queryObjectInstances(purchaseRequestTypeId, {
-                    limit: 10000,
+                    limit: 200,
                     need_total: false,
+                    include_logic_params: false,
+                    timeout: 30000,
                 }).catch(err => {
                     console.error('[MaterialService] Failed to query purchase requests:', err);
                     return { entries: [] };

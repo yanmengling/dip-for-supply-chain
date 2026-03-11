@@ -134,6 +134,8 @@ export interface QueryOptions {
   filterMode?: 'normal' | 'error' | 'ignore';
   /** 是否忽略高基查询保护（默认 false，传 true 可绕过高基数限制） */
   ignoringHcts?: boolean;
+  /** 请求超时时间（毫秒） */
+  timeout?: number;
 }
 
 // ============================================================================
@@ -287,7 +289,7 @@ class MetricModelApiService {
     }
 
     const url = `${this.baseUrl}/metric-models/${modelId}${this.buildQueryParams(options)}`;
-    const promise = httpClient.postAsGet<MetricQueryResult>(url, request)
+    const promise = httpClient.postAsGet<MetricQueryResult>(url, request, { timeout: options?.timeout })
       .then(r => r.data)
       .catch(err => {
         // 请求失败时清除缓存，允许下次重试
@@ -335,7 +337,7 @@ class MetricModelApiService {
 
     const ids = modelIds.join(',');
     const url = `${this.baseUrl}/metric-models/${ids}${this.buildQueryParams(options)}`;
-    const promise = httpClient.postAsGet<MetricQueryResult[]>(url, requests)
+    const promise = httpClient.postAsGet<MetricQueryResult[]>(url, requests, { timeout: options?.timeout })
       .then(r => r.data)
       .catch(err => {
         _apiBatchCache.delete(cacheKey);
@@ -360,7 +362,7 @@ class MetricModelApiService {
   ): Promise<MetricQueryResult[]> {
     const url = `${this.baseUrl}/metric-model-groups/${encodeURIComponent(groupName)}/metric-models${this.buildQueryParams(options)}`;
 
-    const response = await httpClient.postAsGet<MetricQueryResult[]>(url, requests);
+    const response = await httpClient.postAsGet<MetricQueryResult[]>(url, requests, { timeout: options?.timeout });
     return response.data;
   }
 

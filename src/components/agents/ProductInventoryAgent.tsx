@@ -66,68 +66,45 @@ const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
 
                 const timeRange = createLastDaysRange(1);
 
-                // ── 第一步：不传维度，查询模型获取 model.analysis_dimensions ─
-                const firstResult = await metricModelApi.queryByModelId(
-                    modelId,
-                    { instant: true, start: timeRange.start, end: timeRange.end },
-                    { includeModel: true }
-                );
-
-                if (!isMounted) return;
-
-                // 从模型信息中提取有效的分析维度，只保留需要的字段
-                const rawDims = firstResult.model?.analysis_dimensions ?? [];
-                const allDims: string[] = rawDims.map((d) =>
-                    typeof d === 'string' ? d : (d as { name: string }).name
-                ).filter(Boolean);
-
-                // material_name 在底层 SQL 视图中跨多表存在（Column is ambiguous），不能用作维度
-                // 数量查询只用无歧义的编码 + 数量字段
+                // ── 第一步：获取模型维度，失败则降级用固定维度 ──────────
                 const NEEDED_DIMS = ['material_code', 'inventory_qty', 'available_inventory_qty'];
-                const validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
-
-                console.log('[产品库存智能体] 全部维度:', allDims, '使用维度:', validDims);
-
-                // ── 第二步：若有有效维度则用其下钻，否则使用第一步结果 ───
-                let result = firstResult;
-                if (validDims.length > 0) {
-                    result = await metricModelApi.queryByModelId(
-                        modelId,
-                        {
-                            instant: true,
-                            start: timeRange.start,
-                            end: timeRange.end,
-                            analysis_dimensions: validDims,
-                        },
-                        { includeModel: false, ignoringHcts: true }
-                    );
-                    if (!isMounted) return;
-                }
-
-                console.log('[产品库存智能体] 指标模型返回数据条数:', result.datas?.length ?? 0);
-
-                // ── 第三步：建立名称映射 ──
-                // 由于产品库存模型的 material_name 字段在底层 SQL 有歧义，单独查询也会报错，
-                // 这里我们直接从本体数据加载产品基础信息，以建立准确的编号到名称的映射
-                const nameMap = new Map<string, string>();
-
+                let validDims: string[] = NEEDED_DIMS;
                 try {
-                    const productData = await loadProductData();
-                    if (isMounted && productData) {
-                        const NIL_LIKE_NAME = /^(\\<nil\\>|nil|null|undefined|none)$/i;
-                        for (const p of productData) {
-                            const c = (p.productCode || '').trim();
-                            const n = (p.productName || '').trim();
-                            if (c && !NIL_LIKE_NAME.test(c) && n && !NIL_LIKE_NAME.test(n)) {
-                                nameMap.set(c, n);
-                            }
+                    const modelInfo = await metricModelApi.queryByModelId(
+                        modelId,
+                        { instant: true, start: timeRange.start, end: timeRange.end },
+                        { includeModel: true, timeout: 90000 }
+                    );
+                    if (isMounted) {
+                        const rawDims = modelInfo.model?.analysis_dimensions ?? [];
+                        const allDims: string[] = rawDims.map((d) =>
+                            typeof d === 'string' ? d : (d as { name: string }).name
+                        ).filter(Boolean);
+                        if (allDims.length > 0) {
+                            validDims = NEEDED_DIMS.filter(d => allDims.includes(d));
                         }
                     }
-                    console.log('[产品库存智能体] 从本体加载产品名称映射条数:', nameMap.size);
-                } catch (nameErr) {
-                    // 名称查询失败不影响库存数据显示，降级为显示编号
-                    console.warn('[产品库存智能体] 产品名称查询失败，降级显示编号:', nameErr);
+                } catch {
+                    // 第一步失败（超时/500）：直接用固定维度继续
                 }
+                if (!isMounted) return;
+
+                // ── 第二步：按维度下钻（给 90s 时间）────────────────────
+                const result = await metricModelApi.queryByModelId(
+                    modelId,
+                    {
+                        instant: true,
+                        start: timeRange.start,
+                        end: timeRange.end,
+                        analysis_dimensions: validDims,
+                    },
+                    { includeModel: false, ignoringHcts: true, timeout: 90000 }
+                );
+                if (!isMounted) return;
+
+                // ── 第三步：名称映射（不阻塞渲染，异步补充）──
+                // 先用空 Map 渲染，名称加载完成后再触发一次更新
+                const nameMap = new Map<string, string>();
 
                 // 使用 Map 按 code 合并，避免同一产品编码因多条 series 重复出现
                 const mergedMap = new Map<string, ProductInventoryResult>();
@@ -198,12 +175,30 @@ const ProductInventoryAgent = ({ onNavigate: _onNavigate }: Props) => {
                 // 按库存量降序排序
                 resultList.sort((a, b) => b.calculatedStock - a.calculatedStock);
 
-                console.log('[产品库存智能体] 最终结果数量:', resultList.length);
-                // 写入模块级缓存
+                // 先展示数据（可能只有编码，没有名称）
                 _productAgentCache = resultList;
                 _productAgentCacheTime = Date.now();
                 if (!isMounted) return;
                 setProducts(resultList);
+
+                // 异步补充产品名称，不阻塞已渲染的列表
+                loadProductData().then(productData => {
+                    if (!isMounted || !productData) return;
+                    const NIL_LIKE_NAME = /^(\\<nil\\>|nil|null|undefined|none)$/i;
+                    let updated = false;
+                    for (const p of productData) {
+                        const c = (p.productCode || '').trim();
+                        const n = (p.productName || '').trim();
+                        if (!c || NIL_LIKE_NAME.test(c) || !n || NIL_LIKE_NAME.test(n)) continue;
+                        nameMap.set(c, n);
+                        updated = true;
+                    }
+                    if (!updated) return;
+                    setProducts(prev => prev.map(item => ({
+                        ...item,
+                        productName: nameMap.get(item.productCode) || item.productName,
+                    })));
+                }).catch(() => { /* 名称查询失败不影响展示 */ });
             } catch (err) {
                 if (!isMounted) return;
                 console.error('[产品库存智能体] 指标模型查询失败:', err);

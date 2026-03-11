@@ -79,14 +79,14 @@ class ProcurementService {
     private async _loadProcurementSummary(): Promise<ProcurementSummary> {
         console.log('[ProcurementService] Fetching procurement summary...');
 
-        // 1. Resolve Object Type IDs
-        const poConfig = await dynamicConfigService.getConfigByEntityType('purchase_order');
-        const prConfig = await dynamicConfigService.getConfigByEntityType('purchase_request');
+        // 1. Resolve Object Type IDs — 并行获取，共享 dynamicConfigService in-flight
+        const [poConfig, prConfig] = await Promise.all([
+            dynamicConfigService.getConfigByEntityType('purchase_order'),
+            dynamicConfigService.getConfigByEntityType('purchase_request'),
+        ]);
 
         const poTypeId = poConfig?.objectTypeId;
         const prTypeId = prConfig?.objectTypeId;
-
-        console.log('[ProcurementService] Resolved Object Type IDs:', { poTypeId, prTypeId });
 
         // Initialize default empty summary
         const summary: ProcurementSummary = {
@@ -96,44 +96,29 @@ class ProcurementService {
             top5Materials: []
         };
 
-        // 2. Fetch Data if Object Types exist
+        // 2. Fetch PO + PR 并行
         let purchaseOrders: any[] = [];
         let purchaseRequests: any[] = [];
 
-        if (poTypeId) {
-            try {
-                // Fetch recent POs (last 100 to calculate items)
-                const response = await ontologyApi.queryObjectInstances(poTypeId, {
-                    limit: 100,
-                    include_logic_params: true // In case items are a logic property
-                });
-                purchaseOrders = response.entries;
-                console.log(`[ProcurementService] Fetched ${purchaseOrders.length} Purchase Orders`);
-                if (purchaseOrders.length > 0) {
-                    console.log('[ProcurementService] Sample PO:', JSON.stringify(purchaseOrders[0], null, 2));
-                }
-            } catch (error) {
-                console.error('[ProcurementService] Failed to fetch Purchase Orders:', error);
-            }
-        } else {
-            console.warn('[ProcurementService] No Purchase Order Object Type ID resolved!');
+        const [poResult, prResult] = await Promise.allSettled([
+            poTypeId
+                ? ontologyApi.queryObjectInstances(poTypeId, { limit: 100, include_logic_params: false, timeout: 30000 })
+                : Promise.resolve(null),
+            prTypeId
+                ? ontologyApi.queryObjectInstances(prTypeId, { limit: 100, timeout: 30000 })
+                : Promise.resolve(null),
+        ]);
+
+        if (poResult.status === 'fulfilled' && poResult.value) {
+            purchaseOrders = poResult.value.entries;
+        } else if (poResult.status === 'rejected') {
+            console.error('[ProcurementService] Failed to fetch Purchase Orders:', poResult.reason);
         }
 
-        if (prTypeId) {
-            try {
-                const response = await ontologyApi.queryObjectInstances(prTypeId, {
-                    limit: 100
-                });
-                purchaseRequests = response.entries;
-                console.log(`[ProcurementService] Fetched ${purchaseRequests.length} Purchase Requests`);
-                if (purchaseRequests.length > 0) {
-                    console.log('[ProcurementService] Sample PR:', JSON.stringify(purchaseRequests[0], null, 2));
-                }
-            } catch (error) {
-                console.error('[ProcurementService] Failed to fetch Purchase Requests:', error);
-            }
-        } else {
-            console.warn('[ProcurementService] No Purchase Request Object Type ID resolved!');
+        if (prResult.status === 'fulfilled' && prResult.value) {
+            purchaseRequests = prResult.value.entries;
+        } else if (prResult.status === 'rejected') {
+            console.error('[ProcurementService] Failed to fetch Purchase Requests:', prResult.reason);
         }
 
         // 3. Calculate Metrics from Real Data

@@ -1,13 +1,17 @@
 /**
- * CopilotPanel — lazy-loaded wrapper around @kweaver-ai/chatkit Copilot.
+ * CopilotPanel — lazy-loaded wrapper around DecisionAgentCopilot.
  *
- * Kept in its own file so that `React.lazy()` can defer the chatkit import
- * (and its Tailwind v3 CSS injection) until the user first opens the panel.
+ * Inherits all chatkit CopilotBase UI capabilities (message bubbles, history
+ * sidebar, progress display, regenerate button) but calls the Decision Agent
+ * API endpoint: POST /app/{agentKey}/api/chat/completion
+ *
+ * Kept in its own file so that React.lazy() can defer the import until the
+ * user first opens the panel.
  */
 import { useEffect, useRef } from 'react';
 import type { ComponentType } from 'react';
-import { Copilot } from '@kweaver-ai/chatkit';
-import type { Copilot as CopilotInstance } from '@kweaver-ai/chatkit';
+import type { CopilotBase } from '@kweaver-ai/chatkit';
+import { DecisionAgentCopilot } from './DecisionAgentCopilot';
 import { getAgentConfigForView, getContextForView } from '../../utils/copilotConfig';
 import { dipEnvironmentService } from '../../services/dipEnvironmentService';
 import { getServiceConfig, getAuthToken } from '../../config/apiConfig';
@@ -19,12 +23,11 @@ interface CopilotPanelProps {
   onClose: () => void;
 }
 
-// Copilot uses TypeScript mixin pattern (Copilot_base: any) which causes JSX
-// to complain it has no 'props'. Cast to ComponentType<any> to fix the error.
-const CopilotComponent = Copilot as ComponentType<any>;
+// DecisionAgentCopilot uses the same TypeScript mixin pattern; cast to ComponentType<any>
+const DecisionAgentCopilotComponent = DecisionAgentCopilot as unknown as ComponentType<any>;
 
 const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
-  const copilotRef = useRef<CopilotInstance>(null);
+  const copilotRef = useRef<CopilotBase>(null);
   const { agentKey, title } = getAgentConfigForView(currentView);
 
   useEffect(() => {
@@ -35,22 +38,21 @@ const CopilotPanel = ({ currentView, onClose }: CopilotPanelProps) => {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <CopilotComponent
+    <DecisionAgentCopilotComponent
       ref={copilotRef}
       title={title}
       visible={true}
       onClose={onClose}
+      // Decision Agent endpoint base — same as existing DIP proxy path
       baseUrl={getServiceConfig('agent').baseUrl}
       agentKey={agentKey}
       token={getAuthToken()}
       refreshToken={async () => {
-        // In DIP mode, use DIP refresh; otherwise fall back to current token
-        // NOTE: Return raw token only — Copilot component adds "Bearer " prefix internally.
         const t = dipEnvironmentService.isDipMode()
           ? await dipEnvironmentService.refreshToken()
           : getAuthToken();
         if (!t) return '';
-        // Strip any accidental "Bearer " prefix so the component doesn't double it
+        // Strip accidental "Bearer " prefix; DecisionAgentCopilot adds it internally
         return t.startsWith('Bearer ') ? t.slice(7) : t;
       }}
       businessDomain="bd_public"

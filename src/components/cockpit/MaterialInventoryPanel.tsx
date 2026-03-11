@@ -70,36 +70,39 @@ const MaterialInventoryPanel = ({ onNavigate }: Props) => {
         const modelId = getMaterialInventoryModelId();
         const timeRange = createLastDaysRange(1);
 
-        // ── 第一步：获取模型维度列表 ──────────────────────────────────
-        const firstResult = await metricModelApi.queryByModelId(
-          modelId,
-          { instant: true, start: timeRange.start, end: timeRange.end },
-          { includeModel: true }
-        );
+        // ── 第一步：尝试获取模型维度，失败则降级用固定维度 ────────────
+        let validDims: string[] = [];
+        try {
+          const modelInfo = await metricModelApi.queryByModelId(
+            modelId,
+            { instant: true, start: timeRange.start, end: timeRange.end },
+            { includeModel: true, timeout: 30000 }
+          );
+          if (isMounted) {
+            const rawDims = modelInfo.model?.analysis_dimensions ?? [];
+            const allDims: string[] = rawDims.map((d) =>
+              typeof d === 'string' ? d : (d as { name: string }).name
+            ).filter(Boolean);
+            validDims = allDims.length > 0 ? QUERY_DIMS.filter(d => allDims.includes(d)) : QUERY_DIMS;
+          }
+        } catch {
+          // 第一步失败（500/超时）：直接用固定维度继续
+          validDims = QUERY_DIMS;
+        }
         if (!isMounted) return;
 
-        const rawDims = firstResult.model?.analysis_dimensions ?? [];
-        const allDims: string[] = rawDims.map((d) =>
-          typeof d === 'string' ? d : (d as { name: string }).name
-        ).filter(Boolean);
-
-        const validDims = QUERY_DIMS.filter(d => allDims.includes(d));
-
-        // ── 第二步：按维度下钻，获取物料明细 ─────────────────────────
-        let result = firstResult;
-        if (validDims.length > 0) {
-          result = await metricModelApi.queryByModelId(
-            modelId,
-            {
-              instant: true,
-              start: timeRange.start,
-              end: timeRange.end,
-              analysis_dimensions: validDims,
-            },
-            { includeModel: false, ignoringHcts: true }
-          );
-          if (!isMounted) return;
-        }
+        // ── 第二步：按维度下钻，获取物料明细（给 90s 时间）──────────
+        const result = await metricModelApi.queryByModelId(
+          modelId,
+          {
+            instant: true,
+            start: timeRange.start,
+            end: timeRange.end,
+            analysis_dimensions: validDims,
+          },
+          { includeModel: false, ignoringHcts: true, timeout: 90000 }
+        );
+        if (!isMounted) return;
 
         // ── 合并：按 material_code 去重并累加库存 ──────────────────
         const NIL_LIKE = /^(<nil>|nil|null|undefined|none)$/i;

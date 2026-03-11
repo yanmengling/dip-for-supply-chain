@@ -93,7 +93,7 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 const firstResult = await metricModelApi.queryByModelId(
                     modelId,
                     { instant: true, start: timeRange.start, end: timeRange.end },
-                    { includeModel: true }
+                    { includeModel: true, timeout: 300000 }
                 );
 
                 const rawDims = firstResult.model?.analysis_dimensions ?? [];
@@ -115,7 +115,7 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                             end: timeRange.end,
                             analysis_dimensions: validDims,
                         },
-                        { includeModel: false, ignoringHcts: true }
+                        { includeModel: false, ignoringHcts: true, timeout: 300000 }
                     );
                 }
 

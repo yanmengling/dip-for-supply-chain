@@ -62,7 +62,7 @@ export class ApiError extends Error {
 // ============================================================================
 
 class HttpClient {
-  private defaultTimeout = 60000;
+  private defaultTimeout = 30000;
   private defaultRetries = 0;
   private defaultRetryDelay = 1000;
 
@@ -88,11 +88,6 @@ class HttpClient {
       const token = getAuthToken(); // Use dynamic token getter
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
-
-        // Always log the token prefix for debugging
-        const environment = getCurrentEnvironment();
-        const envConfig = getEnvironmentConfig(environment);
-        console.log(`[HTTP Client] Using environment: ${envConfig.name}, Token prefix: ${token.substring(0, 20)}...`);
       }
     }
 
@@ -150,9 +145,17 @@ class HttpClient {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     // 合并外部 signal
-    const combinedSignal = signal
-      ? new AbortController().signal // 简化处理
-      : controller.signal;
+    let combinedSignal = controller.signal;
+    if (signal) {
+      if ('any' in AbortSignal) {
+        combinedSignal = (AbortSignal as any).any([signal, controller.signal]);
+      } else {
+        const abortObj = new AbortController();
+        signal.addEventListener('abort', () => abortObj.abort(signal.reason));
+        controller.signal.addEventListener('abort', () => abortObj.abort(controller.signal.reason));
+        combinedSignal = abortObj.signal;
+      }
+    }
 
     try {
       const response = await fetch(url, {

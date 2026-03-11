@@ -10,12 +10,12 @@ import { apiConfigService } from '../services/apiConfigService';
 import type { ApplicationContext } from '@kweaver-ai/chatkit';
 
 const FALLBACK_AGENT_NAMES: Record<string, string> = {
-  evaluation:   '供应商评估助手',
-  cockpit:      '供应链驾驶舱助手',
-  inventory:    '库存优化助手',
+  evaluation: '供应商评估助手',
+  cockpit: '供应链驾驶舱助手',
+  inventory: '库存优化助手',
   optimization: '产品供应优化助手',
-  delivery:     '订单交付助手',
-  search:       '搜索助手',
+  delivery: '订单交付助手',
+  search: '搜索助手',
 };
 
 /**
@@ -23,13 +23,15 @@ const FALLBACK_AGENT_NAMES: Record<string, string> = {
  * Picks the most recently updated enabled agent, so user edits in the config center
  * always take effect without needing to know the exact agent ID.
  */
-export function getAgentConfigForView(viewId: string): { agentKey: string; title: string } {
+export function getAgentConfigForView(viewId: string): { agentKey: string; agentId: string; title: string } {
   const enabledAgents = apiConfigService.getEnabledConfigsByType(ApiConfigType.AGENT) as import('../types/apiConfig').AgentConfig[];
   // Sort by updatedAt descending — the agent most recently saved in the config center wins
   const sorted = [...enabledAgents].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
   const agentKey = sorted[0]?.agentKey || '';
   return {
     agentKey,
+    // Decision Agent API requires agent_id in the request body; its value equals agentKey
+    agentId: agentKey,
     title: FALLBACK_AGENT_NAMES[viewId] ?? '供应链智能助手',
   };
 }

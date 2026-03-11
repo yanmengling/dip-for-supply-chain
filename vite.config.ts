@@ -41,8 +41,8 @@ export default defineConfig({
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
-        timeout: 180000, // 3分钟超时
-        proxyTimeout: 180000, // 代理超时3分钟
+        timeout: 300000, // 5分钟超时
+        proxyTimeout: 300000, // 代理超时5分钟
         configure: (proxy, _options) => {
           proxy.on('error', (err, _req, _res) => {
             console.error('[Vite Proxy] Ontology Query 代理错误:', err.message);
@@ -91,6 +91,8 @@ export default defineConfig({
         target: 'https://dip.aishu.cn',
         changeOrigin: true,
         secure: false,
+        timeout: 300000, // 5分钟超时
+        proxyTimeout: 300000, // 代理超时5分钟
       },
       // DIP API 代理 - mdl-data-model
       '/api/mdl-data-model': {

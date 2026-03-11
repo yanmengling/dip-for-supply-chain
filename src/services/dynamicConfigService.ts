@@ -121,10 +121,11 @@ class DynamicConfigService {
     private objectTypeConfigsCache: OntologyObjectConfig[] | null = null;
     private lastFetchTime: number = 0;
     private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+    private _inFlight: Promise<OntologyObjectConfig[]> | null = null;
 
     /**
      * Get all object type configurations from backend
-     * 
+     *
      * @param forceRefresh - Force refresh even if cache is valid
      * @returns Array of object type configurations
      */
@@ -137,10 +138,24 @@ class DynamicConfigService {
             this.objectTypeConfigsCache &&
             now - this.lastFetchTime < this.CACHE_TTL
         ) {
-            console.log('[DynamicConfig] Using cached object type configs');
             return this.objectTypeConfigsCache;
         }
 
+        // In-flight dedup: if a fetch is already in progress, reuse its promise
+        if (!forceRefresh && this._inFlight) {
+            return this._inFlight;
+        }
+
+        this._inFlight = this._fetchObjectTypeConfigs();
+        try {
+            const result = await this._inFlight;
+            return result;
+        } finally {
+            this._inFlight = null;
+        }
+    }
+
+    private async _fetchObjectTypeConfigs(): Promise<OntologyObjectConfig[]> {
         try {
             console.log('[DynamicConfig] Fetching object types from backend...');
 
@@ -154,13 +169,7 @@ class DynamicConfigService {
 
             // Update cache
             this.objectTypeConfigsCache = configs;
-            this.lastFetchTime = now;
-
-            console.log('[DynamicConfig] Object type configs:', configs.map(c => ({
-                id: c.id,
-                entityType: c.entityType,
-                objectTypeId: c.objectTypeId,
-            })));
+            this.lastFetchTime = Date.now();
 
             return configs;
         } catch (error) {

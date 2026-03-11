@@ -651,34 +651,9 @@ class OntologyApiClient {
     const urlPrefix = '/api/ontology-query/v1';
     const url = `${urlPrefix}/knowledge-networks/${knId}/object-types/${objectTypeId}/properties`;
 
-    console.log(`[OntologyAPI] queryObjectPropertyValues - Requesting URL: ${url}`);
-    console.log(`[OntologyAPI] queryObjectPropertyValues - Request Payload:`, JSON.stringify(options, null, 2));
-
-    // 方法1：标准 POST body + X-HTTP-Method-Override: GET（规范要求）
-    try {
-      const response = await httpClient.postAsGet<ObjectPropertyValuesResponse>(url, options);
-      console.log(`[OntologyAPI] queryObjectPropertyValues (方法1 postAsGet) 成功, status: ${response.status}`);
-      console.log(`[OntologyAPI] queryObjectPropertyValues - Response Data:`, JSON.stringify(response.data, null, 2));
-      return response.data;
-    } catch (err1: any) {
-      console.warn(`[OntologyAPI] /properties 方法1 失败 (${err1?.status}): ${err1?.message}`);
-    }
-
-    // 方法2：参数放入 URL query string + X-HTTP-Method-Override: GET
-    // 假设后端在收到 override header 时从 query string 读参数（而非 body）
-    console.warn(`[OntologyAPI] /properties 尝试方法2: URL query string 参数`);
-    const params = new URLSearchParams();
-    params.set('unique_identities', JSON.stringify(options.unique_identities));
-    params.set('properties', JSON.stringify(options.properties));
-    if (options.dynamic_params) {
-      params.set('dynamic_params', JSON.stringify(options.dynamic_params));
-    }
-    const urlWithParams = `${url}?${params.toString()}`;
-    console.log(`[OntologyAPI] 方法2 URL:`, urlWithParams);
-    const response2 = await httpClient.postAsGet<ObjectPropertyValuesResponse>(urlWithParams, options);
-    console.log(`[OntologyAPI] queryObjectPropertyValues (方法2 URL params) 成功, status: ${response2.status}`);
-    console.log(`[OntologyAPI] queryObjectPropertyValues - Response Data:`, JSON.stringify(response2.data, null, 2));
-    return response2.data;
+    // 标准 POST body + X-HTTP-Method-Override: GET（ADP Ontology Query API 规范）
+    const response = await httpClient.postAsGet<ObjectPropertyValuesResponse>(url, options);
+    return response.data;
   }
 }
 

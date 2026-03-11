@@ -59,10 +59,11 @@ async function _loadDeliveryOrdersImpl(): Promise<DeliveryOrder[]> {
     console.log(`[DeliveryDataService] Using object type ID: ${objectTypeId} (${orderConfig.name})`);
 
     const response = await ontologyApi.queryObjectInstances(objectTypeId, {
-      limit: 10000,
+      limit: 500,
       need_total: false,
-      include_type_info: true,
+      include_type_info: false,
       include_logic_params: false,
+      timeout: 30000,
     });
 
     console.log(`[DeliveryDataService] API returned ${response.entries.length} entries`);

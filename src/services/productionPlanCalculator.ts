@@ -33,6 +33,7 @@ export interface ProductAnalysis {
     orderNumber: string;
     code: string;
     name?: string;  // 产品名称
+    order_number: string;  // 工单号
     quantity: number;
     cycleDays: number;
     startTime: string;  // 计划开工时间
@@ -64,9 +65,10 @@ const DEFAULT_MPS_OBJECT_TYPE_ID = 'supplychain_hd0202_mps';
  * 其次从配置中心（apiConfigService）获取，最后使用默认 MPS 对象类型。
  */
 async function getProductionPlanObjectTypeId(): Promise<string> {
-    // 1. 从 Context/Dynamic 加载：从 Ontology API 获取对象类型列表，匹配 production_plan / mps
-    const dynamicConfig = await dynamicConfigService.getConfigByEntityType('production_plan')
-        || await dynamicConfigService.getConfigByEntityType('mps');
+    // 1. 从 Context/Dynamic 加载：一次性获取所有配置，避免串行两次调用
+    const configs = await dynamicConfigService.getObjectTypeConfigs().catch(() => []);
+    const dynamicConfig = configs.find(c => c.entityType === 'production_plan')
+        || configs.find(c => c.entityType === 'mps');
     if (dynamicConfig?.objectTypeId) {
         console.log(`[ProductionPlanCalculator] 使用 Context 加载的生产计划对象类型ID: ${dynamicConfig.objectTypeId}`);
         return dynamicConfig.objectTypeId;
@@ -98,92 +100,97 @@ function getSalesOrderObjectTypeId(): string | null {
     return config.objectTypeId;
 }
 
+// ── In-flight 去重：防止并发调用（如 React StrictMode 双 useEffect）发出两个 MPS 请求 ──
+let _mpsInFlight: Promise<ProductionPlan[]> | null = null;
+
 /**
  * 加载生产计划数据 (通过 Context 加载对象类型，再查询 Ontology API)
- * 数据源：Context_loader（dynamicConfigService 从 Ontology 动态获取对象类型）-> Ontology API
+ * 带 in-flight 去重：并发调用共享同一个 Promise，避免重复请求。
+ * 失败时抛出异常（不再静默返回 []），由调用方决定如何处理。
  */
 export async function loadProductionPlanData(): Promise<ProductionPlan[]> {
-    try {
-        console.log('[ProductionPlanCalculator] 通过 Context 加载生产计划对象类型，并查询 Ontology API...');
+    if (_mpsInFlight) return _mpsInFlight;
 
-        const productionPlanObjectTypeId = await getProductionPlanObjectTypeId();
+    _mpsInFlight = _doLoadProductionPlanData().finally(() => {
+        _mpsInFlight = null;
+    });
+    return _mpsInFlight;
+}
 
-        const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
-            limit: 10000,
-            timeout: 120000,
+async function _doLoadProductionPlanData(): Promise<ProductionPlan[]> {
+    const productionPlanObjectTypeId = await getProductionPlanObjectTypeId();
+
+    const response = await ontologyApi.queryObjectInstances(productionPlanObjectTypeId, {
+        limit: 10000,
+        timeout: 120000,
+    });
+
+    const entries = response.entries || [];
+
+    if (entries.length > 0) {
+        console.log(`[ProductionPlanCalculator] Ontology API 返回 ${entries.length} 条生产计划记录`);
+        console.log('[ProductionPlanCalculator] 第一条数据示例:', entries[0]);
+
+        return entries.map((item: any) => {
+            // 优先使用 supplychain_hd0202_mps (HD供应链业务知识网络 v3) 字段，再兼容旧格式
+            // v3 工厂生产计划: material_number=物料编码, material_name=物料名称, qty=生产数量,
+            // planbegintime=计划开工时间, planendtime=计划完工时间, billno=生产工单单号,
+            // taskstatus_title=任务状态[A:未开工,B:开工,C:完工,D:部分完工], billstatus=单据状态
+            const code =
+                item.material_number ??
+                item.product_code ??
+                item.productCode ??
+                item.code ??
+                item.bom_code ??
+                '';
+            const name =
+                item.material_name ??
+                item.product_name ??
+                item.productName ??
+                item.name ??
+                '';
+            const orderNumber =
+                item.billno ?? item.order_number ?? item.orderNumber ?? item.id ?? `mps-${item.seq_no ?? ''}`;
+            const startTime =
+                item.planbegintime ??
+                item.start_time ??
+                item.startTime ??
+                item.startDate ??
+                item.planned_start_date ??
+                '';
+            const endTime =
+                item.planendtime ??
+                item.end_time ??
+                item.endTime ??
+                item.endDate ??
+                item.planned_end_date ??
+                '';
+            const quantity = parseFloat(item.qty ?? item.quantity) || 0;
+            const status =
+                item.taskstatus_title ??
+                item.billstatus ??
+                item.status ??
+                item.order_type ??
+                '待确认';
+            const qualifiedInboundQty = parseFloat(item.xkquainwaqty) || 0;
+
+            return {
+                order_number: orderNumber,
+                code,
+                name: name || undefined,
+                quantity,
+                ordered: parseFloat(item.ordered) || 0,
+                start_time: startTime,
+                end_time: endTime,
+                status,
+                priority: parseInt(item.priority) || 0,
+                qualifiedInboundQty: qualifiedInboundQty || undefined,
+            };
         });
-
-        const entries = response.entries || [];
-
-        if (entries.length > 0) {
-            console.log(`[ProductionPlanCalculator] Ontology API 返回 ${entries.length} 条生产计划记录`);
-            console.log('[ProductionPlanCalculator] 第一条数据示例:', entries[0]);
-
-            return entries.map((item: any) => {
-                // 优先使用 supplychain_hd0202_mps (HD供应链业务知识网络 v3) 字段，再兼容旧格式
-                // v3 工厂生产计划: material_number=物料编码, material_name=物料名称, qty=生产数量,
-                // planbegintime=计划开工时间, planendtime=计划完工时间, billno=生产工单单号,
-                // taskstatus_title=任务状态[A:未开工,B:开工,C:完工,D:部分完工], billstatus=单据状态
-                const code =
-                    item.material_number ??
-                    item.product_code ??
-                    item.productCode ??
-                    item.code ??
-                    item.bom_code ??
-                    '';
-                const name =
-                    item.material_name ??
-                    item.product_name ??
-                    item.productName ??
-                    item.name ??
-                    '';
-                const orderNumber =
-                    item.billno ?? item.order_number ?? item.orderNumber ?? item.id ?? `mps-${item.seq_no ?? ''}`;
-                const startTime =
-                    item.planbegintime ??
-                    item.start_time ??
-                    item.startTime ??
-                    item.startDate ??
-                    item.planned_start_date ??
-                    '';
-                const endTime =
-                    item.planendtime ??
-                    item.end_time ??
-                    item.endTime ??
-                    item.endDate ??
-                    item.planned_end_date ??
-                    '';
-                const quantity = parseFloat(item.qty ?? item.quantity) || 0;
-                const status =
-                    item.taskstatus_title ??
-                    item.billstatus ??
-                    item.status ??
-                    item.order_type ??
-                    '待确认';
-                const qualifiedInboundQty = parseFloat(item.xkquainwaqty) || 0;
-
-                return {
-                    order_number: orderNumber,
-                    code,
-                    name: name || undefined,
-                    quantity,
-                    ordered: parseFloat(item.ordered) || 0,
-                    start_time: startTime,
-                    end_time: endTime,
-                    status,
-                    priority: parseInt(item.priority) || 0,
-                    qualifiedInboundQty: qualifiedInboundQty || undefined,
-                };
-            });
-        }
-
-        console.warn('[ProductionPlanCalculator] Ontology API 返回空数据');
-        return [];
-
-    } catch (error) {
-        console.error('[ProductionPlanCalculator] Ontology API 加载失败:', error);
-        return [];
     }
+
+    console.warn('[ProductionPlanCalculator] Ontology API 返回空数据');
+    return [];
 }
 
 /**
