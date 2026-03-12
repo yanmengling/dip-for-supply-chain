@@ -821,6 +821,12 @@ export async function loadPRByMRPBillnos(
                 need_total: true,
                 timeout: 120000,
             });
+            // 诊断：打印首条 PR 原始字段，确认 srcbillid/srcbillnumber 实际值
+            if (response.entries?.length > 0 && chunk === chunks[0]) {
+                const raw = response.entries[0];
+                console.log(`[PlanningV2DataService] PR 原始字段列表:`, Object.keys(raw));
+                console.log(`[PlanningV2DataService] PR 首条原始记录 srcbillid="${raw.srcbillid}" srcbillnumber="${raw.srcbillnumber}"`, raw);
+            }
             return response.entries.map((item: any) => parsePRRecord(item));
         });
 
