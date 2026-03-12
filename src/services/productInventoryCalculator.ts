@@ -320,14 +320,21 @@ export function calculateProductInventory(
  * 计算所有产品的库存
  */
 export async function calculateAllProductInventory(): Promise<ProductInventoryResult[]> {
+    const t0 = performance.now();
+    const perf: Record<string, number | string> = {};
+
+    const tLoad = performance.now();
     const [bomData, inventoryData, productData] = await Promise.all([
         loadBOMData(),
         loadInventoryData(),
         loadProductData(),
     ]);
+    perf['1_数据加载(并行)'] = Math.round(performance.now() - tLoad);
+    perf['BOM条数'] = bomData.length;
+    perf['库存条数'] = inventoryData.length;
+    perf['产品数'] = productData.length;
 
-
-
+    const tCalc = performance.now();
     const globalCache = new Map<string, number>();
     const results = productData.map(product =>
         calculateProductInventory(
@@ -338,10 +345,14 @@ export async function calculateAllProductInventory(): Promise<ProductInventoryRe
             globalCache
         )
     );
+    perf['2_库存计算(CPU)'] = Math.round(performance.now() - tCalc);
 
-    // 计算总库存
     const totalStock = results.reduce((sum, r) => sum + r.calculatedStock, 0);
+    perf['总耗时_ms'] = Math.round(performance.now() - t0);
+    perf['总库存'] = totalStock;
 
+    console.log('[产品库存计算] ⏱ 性能报告');
+    console.table(perf);
 
     return results;
 }

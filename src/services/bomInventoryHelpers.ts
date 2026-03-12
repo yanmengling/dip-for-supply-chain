@@ -25,8 +25,10 @@ export function initHelpers(deps: {
     DEFAULT_IDS = deps.DEFAULT_IDS;
 }
 
-// 批量分片大小（与 planningV2DataService 保持一致）
-const BATCH_CHUNK_SIZE = 50;
+// 批量分片大小
+const BATCH_CHUNK_SIZE = 100;
+// 分片并发数
+const CHUNK_CONCURRENCY = 5;
 
 function chunkArray<T>(arr: T[], size: number): T[][] {
     const chunks: T[][] = [];
@@ -34,6 +36,21 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
         chunks.push(arr.slice(i, i + size));
     }
     return chunks;
+}
+
+/** 受控并发执行分片任务，每个任务返回数组，最终合并为扁平数组 */
+async function parallelChunks<TChunk, TResult>(
+    chunks: TChunk[][],
+    fn: (chunk: TChunk[]) => Promise<TResult[]>,
+    concurrency = CHUNK_CONCURRENCY
+): Promise<TResult[]> {
+    const results: TResult[] = [];
+    for (let i = 0; i < chunks.length; i += concurrency) {
+        const batch = chunks.slice(i, i + concurrency);
+        const batchResults = await Promise.all(batch.map(fn));
+        for (const r of batchResults) results.push(...r);
+    }
+    return results;
 }
 
 // ============================================================================
@@ -204,9 +221,9 @@ async function fetchInventoryMap(
     try {
         const typeId = getObjectTypeId('inventory', DEFAULT_IDS.inventory);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
-        console.log(`[BOM服务] 查询库存: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批`);
+        console.log(`[BOM服务] 查询库存: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批(并发${CHUNK_CONCURRENCY})`);
 
-        for (const chunk of chunks) {
+        const allRecords = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(typeId, {
                 condition: {
                     operation: 'and',
@@ -215,33 +232,31 @@ async function fetchInventoryMap(
                 limit: 5000,
                 need_total: false,
             });
-            const records = response.entries || (response as any).datas || [];
+            return response.entries || (response as any).datas || [];
+        });
 
-            for (const r of records) {
-                const code = String(r.material_code || '').trim();
-                if (!code) continue;
+        for (const r of allRecords) {
+            const code = String(r.material_code || '').trim();
+            if (!code) continue;
 
-                const currentStock   = Number(r.inventory_qty          ?? r.inventory_data    ?? r.current_stock ?? 0);
-                const availableStock = Number(r.available_inventory_qty ?? r.available_quantity ?? currentStock);
-                const storageDays    = r.inbound_date
-                    ? Math.floor((Date.now() - new Date(r.inbound_date).getTime()) / 86_400_000)
-                    : Number(r.inventory_age ?? r.storage_days ?? 0);
-                // 库存对象里通常携带标准成本/单价，尝试多个可能字段名
-                const unitPrice = Number(
-                    r.unit_price ?? r.unit_cost ?? r.standard_cost ??
-                    r.standard_price ?? r.move_price ?? r.price ?? 0
-                );
+            const currentStock   = Number(r.inventory_qty          ?? r.inventory_data    ?? r.current_stock ?? 0);
+            const availableStock = Number(r.available_inventory_qty ?? r.available_quantity ?? currentStock);
+            const storageDays    = r.inbound_date
+                ? Math.floor((Date.now() - new Date(r.inbound_date).getTime()) / 86_400_000)
+                : Number(r.inventory_age ?? r.storage_days ?? 0);
+            const unitPrice = Number(
+                r.unit_price ?? r.unit_cost ?? r.standard_cost ??
+                r.standard_price ?? r.move_price ?? r.price ?? 0
+            );
 
-                if (map.has(code)) {
-                    const e = map.get(code)!;
-                    e.currentStock   += currentStock;
-                    e.availableStock += availableStock;
-                    e.storageDays = Math.max(e.storageDays, storageDays);
-                    // 取第一条非零价格（多仓库时价格应一致）
-                    if (e.unitPrice === 0 && unitPrice > 0) e.unitPrice = unitPrice;
-                } else {
-                    map.set(code, { currentStock, availableStock, storageDays, unitPrice });
-                }
+            if (map.has(code)) {
+                const e = map.get(code)!;
+                e.currentStock   += currentStock;
+                e.availableStock += availableStock;
+                e.storageDays = Math.max(e.storageDays, storageDays);
+                if (e.unitPrice === 0 && unitPrice > 0) e.unitPrice = unitPrice;
+            } else {
+                map.set(code, { currentStock, availableStock, storageDays, unitPrice });
             }
         }
 
@@ -264,9 +279,9 @@ async function fetchUnitPriceMap(materialCodes: string[]): Promise<Map<string, n
     try {
         const typeId = getObjectTypeId('material', DEFAULT_IDS.material);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
-        console.log(`[BOM服务] 查询物料单价: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批`);
+        console.log(`[BOM服务] 查询物料单价: ${typeId}，物料数: ${materialCodes.length}，分 ${chunks.length} 批(并发${CHUNK_CONCURRENCY})`);
 
-        for (const chunk of chunks) {
+        const allRecords = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(typeId, {
                 condition: {
                     operation: 'and',
@@ -275,13 +290,13 @@ async function fetchUnitPriceMap(materialCodes: string[]): Promise<Map<string, n
                 limit: 5000,
                 need_total: false,
             });
-            const records = response.entries || (response as any).datas || [];
+            return response.entries || (response as any).datas || [];
+        });
 
-            for (const r of records) {
-                const code = String(r.material_code || '').trim();
-                const price = Number(r.material_standard_price ?? r.unit_price ?? r.unit_cost ?? r.standard_price ?? 0);
-                if (code) map.set(code, price);
-            }
+        for (const r of allRecords) {
+            const code = String(r.material_code || '').trim();
+            const price = Number(r.material_standard_price ?? r.unit_price ?? r.unit_cost ?? r.standard_price ?? 0);
+            if (code) map.set(code, price);
         }
 
         console.log(`[BOM服务] 有单价物料: ${map.size} 个`);
@@ -339,26 +354,25 @@ function enrichNodes(
  * 流程：
  *   1. 从产品对象的 identity 中取出真实主键字段值，作为 bom_material_code 的过滤条件
  *   2. 查询 BOM 对象（bom_material_code == primaryKeyValue），取最新 bom_version
- *   3. 用平面记录构建 BOM 树（buildTreeFromFlatRecords）
- *   4. 并行查询库存 + 物料单价（分批，每批 50 个物料）
+ *   3. 精确查询最新版本的 BOM 主料（alt_priority=0）
+ *   4. 并发查询库存 + 物料单价（分批，每批 100 个物料，5 路并发）
  *   5. 将库存/单价填充到树节点（enrichNodes）
  */
 export async function loadSingleBOMTreeViaQueryInstances(
     productCode: string,
     identity?: any
 ): Promise<ProductBOMTree | null> {
-    const t0 = Date.now();
+    const t0 = performance.now();
+    const perf: Record<string, number | string> = {};
     try {
         const bomTypeId = getObjectTypeId('bom', DEFAULT_IDS.bom);
 
         // ── Step 1: 从产品对象的真实主键字段取值 ────────────────────────────
-        // identity 由 loadProductList 传入，包含 _raw（原始字段）和 __primaryKeys（主键字段名列表）
-        // 例：primaryKeyField = 'material_number'，则取 identity.material_number 的值
         const primaryKeyFields: string[] = identity?.__primaryKeys || [];
         const primaryKeyField = primaryKeyFields[0] || '';
         const bomFilterValue = (primaryKeyField && identity?.[primaryKeyField])
             ? String(identity[primaryKeyField]).trim()
-            : productCode;   // 无 identity 时降级使用 productCode
+            : productCode;
 
         console.log(
             `[BOM服务] 加载 BOM 数据: productCode=${productCode}，` +
@@ -366,7 +380,8 @@ export async function loadSingleBOMTreeViaQueryInstances(
             `bom过滤值=${bomFilterValue}，对象类型=${bomTypeId}`
         );
 
-        // ── Step 2: 获取最新 bom_version（查少量数据取版本号）────
+        // ── Step 2: 获取最新 bom_version（小查询，仅取版本号）────
+        const tVersion = performance.now();
         const versionResp = await ontologyApi.queryObjectInstances(bomTypeId, {
             condition: {
                 operation: 'and',
@@ -383,6 +398,7 @@ export async function loadSingleBOMTreeViaQueryInstances(
             (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max),
             ''
         );
+        perf['1_BOM版本查询'] = Math.round(performance.now() - tVersion);
 
         if (versionEntries.length === 0 || !latestVersion) {
             console.warn(`[BOM服务] 未找到产品 ${bomFilterValue} 的 BOM 数据`);
@@ -390,7 +406,8 @@ export async function loadSingleBOMTreeViaQueryInstances(
         }
         console.log(`[BOM服务] 最新版本: "${latestVersion}"`);
 
-        // ── Step 3: 精确查询 = bom_material_code + bom_version + alt_priority=0 ──
+        // ── Step 3: 精确查询 BOM 主料 ──
+        const tBom = performance.now();
         const response = await ontologyApi.queryObjectInstances(bomTypeId, {
             condition: {
                 operation: 'and',
@@ -406,20 +423,24 @@ export async function loadSingleBOMTreeViaQueryInstances(
         });
 
         const records = response.entries || (response as any).datas || [];
+        perf['2_BOM主料查询'] = Math.round(performance.now() - tBom);
         console.log(`[BOM服务] 版本 "${latestVersion}" 主料记录: ${records.length} 条`);
 
         // ── Step 4: 构建 BOM 树 ──────────────────────────────────────────────
-        // 必须用 bomFilterValue 作为根节点编码，因为 BOM 记录中 parent_material_code
-        // 存的是产品对象的真实主键值（如 material_number），而非 UI 层用的 productCode
+        const tTree = performance.now();
         const rootNode = buildTreeFromFlatRecords(bomFilterValue, records);
+        perf['3_BOM树构建(CPU)'] = Math.round(performance.now() - tTree);
 
         // ── Step 5: 并行查询库存 + 单价 ─────────────────────────────────────
         const materialCodes = collectMaterialCodes(rootNode);
-        console.log(`[BOM服务] 并行查询库存 + 单价，物料数: ${materialCodes.length}`);
+        console.log(`[BOM服务] 并发查询库存 + 单价，物料数: ${materialCodes.length}，分片: ${Math.ceil(materialCodes.length / BATCH_CHUNK_SIZE)} 批(${CHUNK_CONCURRENCY}路并发)×2`);
+
+        const tInvPrice = performance.now();
         const [inventoryMap, priceMap] = await Promise.all([
             fetchInventoryMap(materialCodes),
             fetchUnitPriceMap(materialCodes),
         ]);
+        perf['4_库存+单价(并发)'] = Math.round(performance.now() - tInvPrice);
 
         // ── Step 6: 填充库存/单价到节点 ─────────────────────────────────────
         enrichNodes(rootNode, inventoryMap, priceMap);
@@ -427,18 +448,27 @@ export async function loadSingleBOMTreeViaQueryInstances(
         // ── Step 7: 汇总统计 ─────────────────────────────────────────────────
         const stats = { totalValue: 0, stagnantCount: 0, insufficientCount: 0 };
         calcTreeStats(rootNode, stats);
-        const totalMaterials = countNodes(rootNode) - 1; // 去掉根节点
+        const totalMaterials = countNodes(rootNode) - 1;
 
-        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+        perf['总耗时_ms'] = Math.round(performance.now() - t0);
+        perf['BOM记录数'] = records.length;
+        perf['物料编码数'] = materialCodes.length;
+        perf['分片数'] = Math.ceil(materialCodes.length / BATCH_CHUNK_SIZE);
+        perf['库存覆盖'] = `${inventoryMap.size}/${materialCodes.length}`;
+        perf['有单价'] = `${priceMap.size}/${materialCodes.length}`;
+        perf['子件数'] = totalMaterials;
+
+        console.log(`[BOM服务] ⏱ 性能报告`);
+        console.table(perf);
         console.log(
-            `[BOM服务] ✅ 完成 (${elapsed}s)，子件数: ${totalMaterials}，` +
+            `[BOM服务] ✅ 完成 (${(perf['总耗时_ms'] as number / 1000).toFixed(2)}s)，子件数: ${totalMaterials}，` +
             `库存覆盖: ${inventoryMap.size}/${materialCodes.length}，` +
             `有单价: ${priceMap.size}/${materialCodes.length}`
         );
 
         return {
             productCode,
-            productName: productCode, // 由调用方根据产品列表补充
+            productName: productCode,
             productModel: '',
             rootNode,
             totalMaterials,
@@ -448,6 +478,10 @@ export async function loadSingleBOMTreeViaQueryInstances(
         };
 
     } catch (error) {
+        perf['总耗时_ms'] = Math.round(performance.now() - t0);
+        perf['错误'] = String(error);
+        console.log(`[BOM服务] ⏱ 性能报告（失败）`);
+        console.table(perf);
         console.error('[BOM服务] ❌ BOM 查询失败:', error);
         return null;
     }

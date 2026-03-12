@@ -76,10 +76,14 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
             // 命中模块级缓存则直接渲染，跳过所有 API 请求
             const now = Date.now();
             if (_prodInvCache && now - _prodInvCacheTime < _PROD_INV_CACHE_TTL) {
+                console.log('[ProductInventoryPanel] 使用缓存，跳过API请求');
                 setProducts(_prodInvCache);
                 setLoading(false);
                 return;
             }
+
+            const t0 = performance.now();
+            const perf: Record<string, number | string> = {};
 
             try {
                 setLoading(true);
@@ -88,25 +92,27 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 const timeRange = createLastDaysRange(1);
                 const modelId = getProductInventoryModelId();
 
-                // ── 第一步：由于底层维度经常发生变化，并且 material_name 可能存在歧义 ——
-                // 先进行一次无对应维度的查询，由服务端返回合法的 analysis_dimensions
+                // ── 第一步：发现维度
+                const tStep1 = performance.now();
                 const firstResult = await metricModelApi.queryByModelId(
                     modelId,
                     { instant: true, start: timeRange.start, end: timeRange.end },
                     { includeModel: true, timeout: 300000 }
                 );
+                perf['1_维度发现'] = Math.round(performance.now() - tStep1);
 
                 const rawDims = firstResult.model?.analysis_dimensions ?? [];
                 const allDims: string[] = rawDims.map((d: any) =>
                     typeof d === 'string' ? d : d.name
                 ).filter(Boolean);
 
-                // 根据目前能够处理的候选维度，过滤出该模型实际支持的维度，并剔除可能引发歧义的名称字段进行下钻
                 const validDims = PRODUCT_INVENTORY_DIMENSIONS.filter(d => allDims.includes(d) && !d.includes('name'));
+                perf['有效维度数'] = validDims.length;
 
-                // ── 第二步：若有有效维度则用其下钻，否则使用第一步盲查的结果 ───
+                // ── 第二步：详细查询
                 let result = firstResult;
                 if (validDims.length > 0) {
+                    const tStep2 = performance.now();
                     result = await metricModelApi.queryByModelId(
                         modelId,
                         {
@@ -117,6 +123,7 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                         },
                         { includeModel: false, ignoringHcts: true, timeout: 300000 }
                     );
+                    perf['2_详细查询'] = Math.round(performance.now() - tStep2);
                 }
 
                 // 合并 Map 中按 Code 去重的数据，转换 API 数据为组件期望格式
@@ -208,6 +215,12 @@ export const ProductInventoryPanel: React.FC<Props> = ({ onNavigate }) => {
                 _prodInvCacheTime = Date.now();
 
                 setProducts(transformedData);
+
+                perf['总耗时_ms'] = Math.round(performance.now() - t0);
+                perf['数据条数'] = result.datas?.length || 0;
+                perf['去重后产品数'] = transformedData.length;
+                console.log('[ProductInventoryPanel] ⏱ 性能报告');
+                console.table(perf);
             } catch (err) {
                 console.error('[ProductInventoryPanel] API call failed:', err);
                 setError(err instanceof Error ? err.message : '获取数据失败');

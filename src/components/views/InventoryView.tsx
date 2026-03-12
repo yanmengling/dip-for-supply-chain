@@ -62,12 +62,15 @@ const InventoryView = ({ toggleCopilot }: Props) => {
       // 命中模块级缓存则直接使用
       const now = Date.now();
       if (_allProductsCache && now - _allProductsCacheTime < _INV_VIEW_CACHE_TTL) {
+        console.log('[InventoryView] 使用缓存的产品库存数据');
         setProducts(_allProductsCache);
         return;
       }
       try {
         setLoading(true);
+        const t0 = performance.now();
         const results = await calculateAllProductInventory();
+        console.log(`[InventoryView] calculateAllProductInventory 耗时: ${Math.round(performance.now() - t0)}ms，${results.length} 个产品`);
         _allProductsCache = results;
         _allProductsCacheTime = Date.now();
         setProducts(results);
