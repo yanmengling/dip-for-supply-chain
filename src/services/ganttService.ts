@@ -86,7 +86,9 @@ export async function buildGanttData(
   // ── Phase 2 优化：重排数据加载流程 ──
   // 流程: Step2+5 并行 → 用物料属性过滤外购件 → Step3+4(PR+PO) 并行
   const mrpBillnos = mrpRecords.map(m => m.billno).filter(Boolean);
+  console.log(`[GanttService] MRP billnos (${mrpBillnos.length} 个):`, mrpBillnos.slice(0, 5), mrpBillnos.length > 5 ? `...共 ${mrpBillnos.length}` : '');
   const effectiveDemandStart = demandStart || productionStart;
+  console.log(`[GanttService] effectiveDemandStart=${effectiveDemandStart}, demandStart=${demandStart}, productionStart=${productionStart}`);
 
   // ── Round 1: 物料主数据 + 库存（并行） ──
   const tR1 = performance.now();
@@ -121,20 +123,19 @@ export async function buildGanttData(
   });
   console.log(`[GanttService] 外购/委外物料: ${externalCodes.length} 个（总 ${codeList.length} 个），PR/PO fallback 仅查外购件`);
 
-  // ── Round 2: PR + PO（并行，PR fallback 只传外购件编码） ──
+  // ── Round 2: PR → PO（串行链：PR 结果的 billno 用于 PO 精确查询） ──
   const tR2 = performance.now();
-  const [prResult, poResult] = await Promise.all([
-    // Step 3: PR
-    planningV2DataService.loadPRByMRPBillnos(mrpBillnos, externalCodes, effectiveDemandStart),
-    // Step 4: PO（精确查询用 mrpBillnos→prBillnos 链，但精确查询在 loadPO 内部处理）
-    // 注意：PO 精确查询需要 prBillnos（来自 PR 结果），但当前 MRP=0 导致 PR 精确查询无 srcbillid，
-    // 两者都走 fallback，可以安全并行
-    planningV2DataService.loadPOByPRBillnos([], externalCodes, effectiveDemandStart),
-  ]);
 
+  // Step 3: PR（精确查询: srcbillid in [mrpBillnos]）
+  const prResult = await planningV2DataService.loadPRByMRPBillnos(mrpBillnos, externalCodes, effectiveDemandStart);
   perf['3_PR查询'] = Math.round(performance.now() - tR2);
-  perf['4_PO查询'] = Math.round(performance.now() - tR2);
-  perf['3+4_并行实际'] = Math.round(performance.now() - tR2);
+
+  // Step 4: PO（精确查询: srcbillid in [prBillnos]，需要 PR 结果）
+  const tPO = performance.now();
+  const prBillnos = prResult.data.map(pr => pr.billno).filter(Boolean);
+  const poResult = await planningV2DataService.loadPOByPRBillnos(prBillnos, externalCodes, effectiveDemandStart);
+  perf['4_PO查询'] = Math.round(performance.now() - tPO);
+  perf['3+4_串行实际'] = Math.round(performance.now() - tR2);
 
   const prRecords = prResult.data;
   degradation.pr = prResult.isDegraded;

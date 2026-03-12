@@ -1,10 +1,12 @@
 /**
- * 步骤③ 物料需求计划(MRP) - BOM级物料需求 + PR/PO状态跟踪
+ * 步骤② 物料需求计划(MRP) - BOM级物料需求 + PR/PO状态跟踪
+ * 精确关联：预测单号 → MRP → PR → PO
+ * 降级链：预测单号匹配失败 → 按产品编码模糊查询
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, AlertCircle, Check, X, Minus, Filter } from 'lucide-react';
 import { planningV2DataService } from '../../services/planningV2DataService';
-import type { Step1Data, MRPDisplayRow, PRRecord, PORecord } from '../../types/planningV2';
+import type { Step1Data, MRPDisplayRow, PRRecord, PORecord, MRPPlanOrderAPI } from '../../types/planningV2';
 
 interface MaterialRequirementPanelProps {
   active: boolean;
@@ -43,39 +45,74 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
     setLoading(true);
     setError(null);
     try {
-      const { productCode } = step1Data;
-      const [mrpData, bomData] = await Promise.all([
-        planningV2DataService.getMRPByProduct(productCode),
+      const { productCode, relatedForecastBillnos, demandStart } = step1Data;
+
+      // Round 1: BOM + MRP 并行
+      // MRP: 优先精确关联（rootdemandbillno in [预测单号]），降级到 productCode 全量查询
+      const [mrpResult, bomData] = await Promise.all([
+        planningV2DataService.loadMRPByBillnos(relatedForecastBillnos, productCode),
         planningV2DataService.loadBOMByProduct(productCode),
       ]);
 
-      // BOM 数据已在 API 层用 alt_priority=0 过滤了主料，无需客户端再过滤
-      // 注：alt_part 字段表示"是否存在替代料组"，主料也可能有 alt_part 非空值
+      const mrpRecords = mrpResult.data;
+      console.log(`[MRP Panel] MRP: ${mrpRecords.length} 条 (降级=${mrpResult.isDegraded})`);
+
       const codeSet = new Set<string>();
       bomData.forEach(b => codeSet.add(b.material_code));
       setBomRecordCount(bomData.length);
-      (window as any).__bomData = bomData;
 
       const codes = Array.from(codeSet);
       console.log(`[MRP Panel] 产品 ${productCode}: BOM ${bomData.length} 条记录, ${codes.length} 种唯一物料`);
 
-      const [materials, prRecords, poRecords] = await Promise.all([
-        planningV2DataService.loadMaterialsByCode(codes),
-        planningV2DataService.loadPRByMaterials(codes),
-        planningV2DataService.loadPOByMaterials(codes),
-      ]);
-
+      // Round 2: 物料主数据（用于物料属性判断）
+      const materials = await planningV2DataService.loadMaterialsByCode(codes);
       const materialMap = new Map(materials.map(m => [m.material_code, m]));
+
+      // 过滤外购/委外物料（用于 PR/PO fallback）
+      const externalCodes = codes.filter(code => {
+        const attr = materialMap.get(code)?.materialattr;
+        return attr === '外购' || attr === '委外';
+      });
+
+      // Round 3: PR → PO（串行链：PR.billno → PO.srcbillnumber）
+      // PR: 优先 srcbillid in [MRP.billno]，降级到 material_number
+      const mrpBillnos = mrpRecords.map(m => m.billno).filter(Boolean);
+      const effectiveDemandStart = demandStart;
+      const prResult = await planningV2DataService.loadPRByMRPBillnos(mrpBillnos, externalCodes, effectiveDemandStart);
+      console.log(`[MRP Panel] PR: ${prResult.data.length} 条 (降级=${prResult.isDegraded})`);
+
+      // PO: 优先 srcbillnumber in [PR.billno]，降级到 material_number
+      const prBillnos = prResult.data.map(pr => pr.billno).filter(Boolean);
+      const poResult = await planningV2DataService.loadPOByPRBillnos(prBillnos, externalCodes, effectiveDemandStart);
+      console.log(`[MRP Panel] PO: ${poResult.data.length} 条 (降级=${poResult.isDegraded})`);
+
       const group = <T extends { material_number: string }>(arr: T[]) => {
         const map = new Map<string, T[]>();
         arr.forEach(r => { const k = r.material_number; if (!map.has(k)) map.set(k, []); map.get(k)!.push(r); });
         return map;
       };
-      const prByMat = group(prRecords);
-      const poByMat = group(poRecords);
+      const prByMat = group(prResult.data);
+      const poByMat = group(poResult.data);
 
+      // MRP 映射：物料编码 → 需求量（优先 bizorderqty，fallback adviseorderqty）
       const mrpMap = new Map<string, { demand: number; name: string }>();
-      mrpData.forEach(m => mrpMap.set(m.main_material, { demand: m.material_demand_quantity, name: m.component_name }));
+      if (mrpResult.isDegraded) {
+        // 降级模式：用旧接口数据
+        const oldMrpData = await planningV2DataService.getMRPByProduct(productCode);
+        oldMrpData.forEach(m => mrpMap.set(m.main_material, { demand: m.material_demand_quantity, name: m.component_name }));
+      } else {
+        // 精确模式：用 MRPPlanOrderAPI 数据
+        mrpRecords.forEach((m: MRPPlanOrderAPI) => {
+          const code = m.materialplanid_number;
+          if (!code) return;
+          const qty = planningV2DataService.getMRPDemandQty(m);
+          const existing = mrpMap.get(code);
+          mrpMap.set(code, {
+            demand: (existing?.demand ?? 0) + qty,
+            name: existing?.name || m.materialplanid_name || code,
+          });
+        });
+      }
 
       const bomLevelMap = new Map<string, number>();
       bomData.forEach(b => bomLevelMap.set(b.material_code, b.bom_level));
@@ -217,7 +254,7 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
     <div className="space-y-4">
       {/* Header */}
       <div>
-        <h2 className="text-lg font-semibold text-slate-800">步骤③ 物料需求计划（MRP）</h2>
+        <h2 className="text-lg font-semibold text-slate-800">步骤② 物料需求计划（MRP）</h2>
         <p className="text-sm text-slate-500 mt-1">
           产品: <span className="font-medium text-slate-700">{step1Data.productCode}</span>{' '}
           <span className="text-slate-700">{step1Data.productName}</span>

@@ -146,8 +146,8 @@ const Step2Content = ({ productCode, stats }: { productCode?: string; stats?: St
         <Row label="MRP 过滤" value={<>正向筛选 <Code>closestatus_title === &apos;正常&apos;</Code>（v3.6），排除关闭/拆分/合并/投放关闭状态</>} />
         <Row label="MRP 取数" value={<>优先 <Code>bizorderqty</Code>（PMC 修正值），fallback <Code>adviseorderqty</Code>（MRP 理论值）</>} />
         <Row label="物料集合" value={<>BOM 可达主料 <Code>material_code</Code> 去重，<strong>不</strong> union MRP 额外物料编码</>} />
-        <Row label="PR 查询" value={<>优先 <Code>srcbillid in [MRP单号]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
-        <Row label="PO 查询" value={<>优先 <Code>srcbillid in [PR单号]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
+        <Row label="PR 查询" value={<>优先 <Code>srcbillid in [MRP.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
+        <Row label="PO 查询" value={<>优先 <Code>srcbillnumber in [PR.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
         <Row label="分片/缓存" value={<>分片 50 个/批，串行执行；各查询独立缓存 key，TTL 5 分钟</>} />
       </div>
     </div>
@@ -203,8 +203,8 @@ const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: St
       <div className="space-y-0.5">
         <Row label="BOM" value={<>同步骤②：两步精确查询取最新版本主料（<Code>alt_priority == 0</Code>）+ 可达性遍历</>} />
         <Row label="MRP" value={<>优先 <Code>rootdemandbillno in [预测单号]</Code> 精确关联；降级到全量加载 + 正向过滤</>} highlight />
-        <Row label="PR" value={<>优先 <Code>srcbillid in [MRP.billno]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code></>} highlight />
-        <Row label="PO" value={<>优先 <Code>srcbillid in [PR.billno]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code></>} highlight />
+        <Row label="PR" value={<>优先 <Code>srcbillid in [MRP.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
+        <Row label="PO" value={<>优先 <Code>srcbillnumber in [PR.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
         <Row label="物料集合" value={<>BOM 所有可达 <Code>material_code</Code> + 产品自身 + MRP <Code>materialplanid_number</Code>（合并去重）</>} />
         <Row label="串行查询" value={<>物料主数据 → PR → PO → 库存，<Code>in [codes]</Code> 分片 50 个/批</>} />
         <Row label="缓存" value="各查询均有独立缓存 key，TTL 5 分钟" />
@@ -278,10 +278,10 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
       <div className="space-y-0.5">
         <Row label="BOM" value={<>两步精确查询：<Code>bom_material_code == {task?.productCode ?? '…'}</Code> 取最新版本 + <Code>alt_priority == 0</Code> + 可达性遍历</>} />
         <Row label="MRP" value={<>优先 <Code>rootdemandbillno in [预测单号]</Code> 精确关联；降级到全量加载 + <Code>closestatus_title === &apos;正常&apos;</Code> 正向过滤</>} highlight />
-        <Row label="PR" value={<>优先 <Code>srcbillid in [MRP.billno]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
-        <Row label="PO" value={<>优先 <Code>srcbillid in [PR.billno]</Code> + <Code>biztime {'>'}= demandStart</Code>；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
+        <Row label="PR" value={<>优先 <Code>srcbillid in [MRP.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
+        <Row label="PO" value={<>优先 <Code>srcbillnumber in [PR.billno]</Code>（精确关联）；降级到 <Code>material_number in [codes]</Code> + 时间过滤</>} highlight />
         <Row label="物料集合" value={<>BOM 可达物料 + 产品自身 + MRP <Code>materialplanid_number</Code>，合并去重</>} />
-        <Row label="串行查询" value={<>物料主数据 → PR → PO → 库存，<Code>in [codes]</Code> 分片 50 个/批</>} />
+        <Row label="串行链" value={<>物料主数据+库存（并行）→ PR（精确）→ PO（精确，依赖PR结果）</>} />
         <Row label="缓存" value="各查询独立缓存 key，TTL 5 分钟" />
       </div>
     </div>

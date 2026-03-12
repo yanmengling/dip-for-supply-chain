@@ -653,7 +653,7 @@ export async function loadMRPByBillnos(
 
     // 策略1: 精确关联
     const preciseResult = await withCachedLoader(cacheKey, async () => {
-        console.log(`[PlanningV2DataService] MRP 精确查询: rootdemandbillno in [${forecastBillnos.length} 个单号]...`);
+        console.log(`[PlanningV2DataService] MRP 精确查询: rootdemandbillno in [${forecastBillnos.length} 个单号]`, forecastBillnos);
         const chunks = chunkArray(forecastBillnos, BATCH_CHUNK_SIZE);
         // Phase 2b: 分片并行化
         const allData: MRPPlanOrderAPI[] = await parallelChunks(chunks, async (chunk) => {
@@ -668,6 +668,10 @@ export async function loadMRPByBillnos(
                 need_total: true,
                 timeout: 120000,
             });
+            console.log(`[PlanningV2DataService] MRP 精确查询 API 响应: entries=${response.entries?.length}, total=${(response as any).total_count ?? 'N/A'}`);
+            if (response.entries?.length > 0) {
+                console.log(`[PlanningV2DataService] MRP 首条记录 rootdemandbillno="${response.entries[0].rootdemandbillno}"`, response.entries[0]);
+            }
             return response.entries.map((item: any) => parseMRPPlanOrder(item));
         });
 
@@ -705,6 +709,28 @@ export async function loadMRPByBillnos(
     // 注：如果新 API 没有 finished_product_code，则返回全部并让 ganttService 通过 BOM 过滤
     const filtered = filterActiveMRP(fallbackResult);
     console.log(`[PlanningV2DataService] MRP fallback: ${fallbackResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
+
+    // 诊断：在全量数据中搜索目标 billno，确认数据是否存在
+    const matchInFallback = fallbackResult.filter(r =>
+        forecastBillnos.some(bn => r.rootdemandbillno?.includes(bn))
+    );
+    if (matchInFallback.length > 0) {
+        console.warn(`[PlanningV2DataService] ⚠️ 诊断: 全量数据中找到 ${matchInFallback.length} 条匹配 rootdemandbillno，但精确查询未命中！`);
+        console.log(`[PlanningV2DataService] 匹配记录示例:`, matchInFallback.slice(0, 3).map(r => ({
+            billno: r.billno,
+            rootdemandbillno: r.rootdemandbillno,
+            closestatus_title: r.closestatus_title,
+            materialplanid_number: r.materialplanid_number,
+        })));
+    } else {
+        console.warn(`[PlanningV2DataService] ⚠️ 诊断: 全量数据 ${fallbackResult.length} 条中也未找到 rootdemandbillno 匹配！`);
+        // 打印全量数据中有 rootdemandbillno 的记录数
+        const withBillno = fallbackResult.filter(r => r.rootdemandbillno && r.rootdemandbillno.trim() !== '');
+        console.log(`[PlanningV2DataService] 全量数据中有 rootdemandbillno 的记录: ${withBillno.length}/${fallbackResult.length}`);
+        if (withBillno.length > 0) {
+            console.log(`[PlanningV2DataService] rootdemandbillno 样本:`, withBillno.slice(0, 5).map(r => r.rootdemandbillno));
+        }
+    }
     return { data: filtered, isDegraded: true };
 }
 
@@ -715,10 +741,8 @@ export async function loadMRPByBillnos(
 /**
  * 按 MRP 单号精确查询 PR（PRD 1.6.2）
  *
- * 策略1: srcbillid in [mrpBillnos] + biztime >= demandStart（精确关联）
+ * 策略1: srcbillid in [mrpBillnos]（精确关联，PR.srcbillid = MRP.billno）
  * 策略2: material_number in [materialCodes] + biztime >= demandStart（fallback）
- *
- * PR 接口需新增 srcbillid 字段
  */
 export async function loadPRByMRPBillnos(
     mrpBillnos: string[],
@@ -735,8 +759,8 @@ export async function loadPRByMRPBillnos(
         const cacheKey = `pr_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
 
         const preciseResult = await withCachedLoader(cacheKey, async () => {
-            const biztimeValue = ensureDatetime(demandStart);
-            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号], biztime >= ${biztimeValue}...`);
+            // 精确关联已通过 srcbillid 锁定单据，不再用 biztime 过滤
+            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号]`, mrpBillnos.slice(0, 5));
             const chunks = chunkArray(mrpBillnos, BATCH_CHUNK_SIZE);
             // Phase 2b: 分片并行化
             const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
@@ -745,7 +769,6 @@ export async function loadPRByMRPBillnos(
                         operation: 'and',
                         sub_conditions: [
                             { field: 'srcbillid', operation: 'in', value: chunk },
-                            { field: 'biztime', operation: '>=', value: biztimeValue },
                         ]
                     },
                     limit: 10000,
@@ -768,7 +791,8 @@ export async function loadPRByMRPBillnos(
         console.warn('[PlanningV2DataService] PR 精确查询无结果，降级到 material_number 查询');
     }
 
-    // 策略2: fallback（material_number in [codes] + biztime >= demandStart）
+    // 策略2: fallback（material_number in [codes]，前推6个月时间窗口）
+    // 注意：demandStart 是需求交货日期，PR 下单时间远早于此，需前推
     if (materialCodes.length === 0) {
         return { data: [], isDegraded: true };
     }
@@ -777,8 +801,11 @@ export async function loadPRByMRPBillnos(
     const fallbackCacheKey = `pr_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
 
     const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        const biztimeValue = ensureDatetime(demandStart);
-        console.log(`[PlanningV2DataService] PR fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeValue}...`);
+        // 前推 6 个月：PR 的 biztime 远早于需求交货日期
+        const startDate = new Date(demandStart);
+        startDate.setMonth(startDate.getMonth() - 6);
+        const biztimeFloor = ensureDatetime(startDate.toISOString().slice(0, 10));
+        console.log(`[PlanningV2DataService] PR fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeFloor} (demandStart前推6个月)...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         // Phase 2b: 分片并行化
         const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
@@ -787,7 +814,7 @@ export async function loadPRByMRPBillnos(
                     operation: 'and',
                     sub_conditions: [
                         { field: 'material_number', operation: 'in', value: chunk },
-                        { field: 'biztime', operation: '>=', value: biztimeValue },
+                        { field: 'biztime', operation: '>=', value: biztimeFloor },
                     ]
                 },
                 limit: 10000,
@@ -827,9 +854,9 @@ function parsePRRecord(item: any): PRRecord {
 // ============================================================================
 
 /**
- * 按 PR ID 精确查询 PO（PRD 1.6.2）
+ * 按 PR 单号精确查询 PO（PRD 1.6.2）
  *
- * 策略1: srcbillid in [prBillnos] + biztime >= demandStart（精确关联）
+ * 策略1: srcbillnumber in [prBillnos]（精确关联，PO.srcbillnumber = PR.billno）
  * 策略2: material_number in [materialCodes] + biztime >= demandStart（fallback）
  */
 export async function loadPOByPRBillnos(
@@ -841,14 +868,14 @@ export async function loadPOByPRBillnos(
         return { data: [], isDegraded: true };
     }
 
-    // 策略1: 精确关联（srcbillid in [prBillnos]）
+    // 策略1: 精确关联（srcbillnumber in [prBillnos]，PO.srcbillnumber = PR.billno）
     if (prBillnos.length > 0) {
         const sortedBillnos = [...prBillnos].sort();
         const cacheKey = `po_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
 
         const preciseResult = await withCachedLoader(cacheKey, async () => {
-            const biztimeValue = demandStart; // PO biztime 使用 strict_date 格式(yyyy-MM-dd)，不能追加时间
-            console.log(`[PlanningV2DataService] PO 精确查询: srcbillid in [${prBillnos.length} 个PR单号], biztime >= ${biztimeValue}...`);
+            // 精确关联已通过 srcbillnumber 锁定单据，不再用 biztime 过滤
+            console.log(`[PlanningV2DataService] PO 精确查询: srcbillnumber in [${prBillnos.length} 个PR单号]`, prBillnos.slice(0, 5));
             const chunks = chunkArray(prBillnos, BATCH_CHUNK_SIZE);
             // Phase 2b: 分片并行化
             const allData: PORecord[] = await parallelChunks(chunks, async (chunk) => {
@@ -856,8 +883,7 @@ export async function loadPOByPRBillnos(
                     condition: {
                         operation: 'and',
                         sub_conditions: [
-                            { field: 'srcbillid', operation: 'in', value: chunk },
-                            { field: 'biztime', operation: '>=', value: biztimeValue },
+                            { field: 'srcbillnumber', operation: 'in', value: chunk },
                         ]
                     },
                     limit: 10000,
@@ -880,7 +906,8 @@ export async function loadPOByPRBillnos(
         console.warn('[PlanningV2DataService] PO 精确查询无结果，降级到 material_number 查询');
     }
 
-    // 策略2: fallback（material_number in [codes] + biztime >= demandStart）
+    // 策略2: fallback（material_number in [codes]，前推6个月时间窗口）
+    // 注意：demandStart 是需求交货日期，PO 下单时间远早于此，需前推
     if (materialCodes.length === 0) {
         return { data: [], isDegraded: true };
     }
@@ -889,8 +916,11 @@ export async function loadPOByPRBillnos(
     const fallbackCacheKey = `po_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
 
     const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        const biztimeValue = demandStart; // PO biztime 使用 strict_date 格式(yyyy-MM-dd)，不能追加时间
-        console.log(`[PlanningV2DataService] PO fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeValue}...`);
+        // 前推 6 个月：PO 的 biztime 远早于需求交货日期
+        const startDate = new Date(demandStart);
+        startDate.setMonth(startDate.getMonth() - 6);
+        const biztimeFloor = startDate.toISOString().slice(0, 10); // PO biztime 使用 strict_date 格式(yyyy-MM-dd)
+        console.log(`[PlanningV2DataService] PO fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeFloor} (demandStart前推6个月)...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         // Phase 2b: 分片并行化
         const allData: PORecord[] = await parallelChunks(chunks, async (chunk) => {
@@ -899,7 +929,7 @@ export async function loadPOByPRBillnos(
                     operation: 'and',
                     sub_conditions: [
                         { field: 'material_number', operation: 'in', value: chunk },
-                        { field: 'biztime', operation: '>=', value: biztimeValue },
+                        { field: 'biztime', operation: '>=', value: biztimeFloor },
                     ]
                 },
                 limit: 10000,
