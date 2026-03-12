@@ -379,19 +379,31 @@ export function importTask(pkg: TaskExportPackage): PlanningTask {
 export async function buildKeyMaterialList(
   ganttBars: GanttBar[],
   taskCreatedAt: string,
+  /** Phase 2 优化：复用 buildGanttData 已查过的库存数据，避免重复 API 调用 */
+  cachedInventory?: import('../types/planningV2').InventoryRecord[],
 ): Promise<KeyMonitorMaterial[]> {
+  // ⏱ 性能计量（Phase 1）
+  const perfStart = performance.now();
+  const perf: Record<string, number> = {};
+
   const flat = ganttService.flattenGanttBars(ganttBars);
 
   // PRD v3.2: 展示全部 BOM 物料，不做筛选
   const filtered = flat;
   console.log(`[TaskService] 关键监测物料: 总BOM ${flat.length} 条`);
 
-  // 查询库存数据
+  // 查询库存数据（优先复用缓存）
   const materialCodes = filtered.map(b => b.materialCode);
-  const inventoryRecords = await planningV2DataService.loadInventoryByMaterials(materialCodes);
-  console.log(`[TaskService] 库存查询返回: ${inventoryRecords.length} 条`);
+  const tInv = performance.now();
+  const inventoryRecords = cachedInventory
+    ? cachedInventory
+    : await planningV2DataService.loadInventoryByMaterials(materialCodes);
+  perf['库存查询'] = Math.round(performance.now() - tInv);
+  perf['库存复用'] = cachedInventory ? 1 : 0;
+  console.log(`[TaskService] 库存查询返回: ${inventoryRecords.length} 条${cachedInventory ? '（复用缓存）' : ''}`);
 
   // 按 material_code 汇总库存
+  const tCalc = performance.now();
   const inventoryMap = new Map<string, {
     totalQty: number;
     availableQty: number;
@@ -446,6 +458,14 @@ export async function buildKeyMaterialList(
       leadtime: bar.leadtime,
     };
   });
+  perf['汇总+组装'] = Math.round(performance.now() - tCalc);
+
+  // ⏱ 性能报告
+  perf['总耗时_ms'] = Math.round(performance.now() - perfStart);
+  perf['物料数'] = materialCodes.length;
+  perf['库存条数'] = inventoryRecords.length;
+  console.log('%c[TaskService] ⏱ buildKeyMaterialList 性能报告', 'color: #6366f1; font-weight: bold');
+  console.table(perf);
 
   return result;
 }

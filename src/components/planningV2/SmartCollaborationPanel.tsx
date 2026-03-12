@@ -75,7 +75,7 @@ const SmartCollaborationPanel = ({
 
       // 甘特图加载完成后，异步加载关键监测物料清单（含库存）
       setKeyMaterialsLoading(true);
-      taskService.buildKeyMaterialList(result.bars, new Date().toISOString())
+      taskService.buildKeyMaterialList(result.bars, new Date().toISOString(), result.inventoryRecords)
         .then(list => {
           console.log(`[SmartCollaboration] 关键监测物料清单: ${list.length} 条`);
           setKeyMaterials(list);

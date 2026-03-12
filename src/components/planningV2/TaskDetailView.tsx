@@ -91,7 +91,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
       // 加载关键监测物料清单（含库存）
       setKeyMaterialsLoading(true);
       try {
-        const km = await taskService.buildKeyMaterialList(result.bars, task.createdAt);
+        const km = await taskService.buildKeyMaterialList(result.bars, task.createdAt, result.inventoryRecords);
         setKeyMaterials(km);
       } catch (err) {
         console.error('[TaskDetailView] 关键物料清单加载失败:', err);

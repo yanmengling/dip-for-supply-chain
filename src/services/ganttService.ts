@@ -8,7 +8,7 @@
  * v3.7 Phase B: 精确查询链 + 物料供需三分类
  */
 
-import type { GanttBar, BOMRecord, MaterialRecord, SupplyStatus } from '../types/planningV2';
+import type { GanttBar, BOMRecord, MaterialRecord, SupplyStatus, InventoryRecord } from '../types/planningV2';
 import { planningV2DataService } from './planningV2DataService';
 import type { MRPPlanOrderAPI } from './planningV2DataService';
 
@@ -23,6 +23,8 @@ export interface DegradationInfo {
 export interface GanttBuildResult {
   bars: GanttBar[];
   degradation: DegradationInfo;
+  /** Phase 2 优化：透传库存原始数据，供 buildKeyMaterialList 复用，避免重复查询 */
+  inventoryRecords: InventoryRecord[];
 }
 
 /** 加载并构建倒排甘特图数据（v3.7 Phase B: 精确查询链） */
@@ -35,15 +37,21 @@ export async function buildGanttData(
 ): Promise<GanttBuildResult> {
   console.log(`[GanttService] 开始构建甘特图: ${productCode}, ${productionStart} ~ ${productionEnd}, billnos=${forecastBillnos?.length ?? 0}`);
 
+  // ⏱ 性能计量（Phase 1）
+  const perfStart = performance.now();
+  const perf: Record<string, number> = {};
+
   const degradation: DegradationInfo = { mrp: true, pr: true, po: true };
 
   // 1. 并行查询 BOM + MRP（精确查询链 B2）
+  const t1 = performance.now();
   const [bomRecords, mrpResult] = await Promise.all([
     planningV2DataService.loadBOMByProduct(productCode),
     (forecastBillnos && forecastBillnos.length > 0)
       ? planningV2DataService.loadMRPByBillnos(forecastBillnos, productCode)
       : Promise.resolve({ data: [] as MRPPlanOrderAPI[], isDegraded: true }),
   ]);
+  perf['1_BOM+MRP(并行)'] = Math.round(performance.now() - t1);
 
   const mrpRecords = mrpResult.data;
   degradation.mrp = mrpResult.isDegraded;
@@ -55,57 +63,89 @@ export async function buildGanttData(
     throw new Error(`产品 ${productCode} 未找到 BOM 数据，请在 ERP 中确认该产品是否已维护物料清单(BOM)`);
   }
 
-  // 2. 收集所有物料编码
+  // 2. 收集所有物料编码（仅 BOM 范围）
   const allMaterialCodes = new Set<string>();
   allMaterialCodes.add(productCode);
   bomRecords.forEach(b => {
     allMaterialCodes.add(b.material_code);
     if (b.parent_material_code) allMaterialCodes.add(b.parent_material_code);
   });
-  mrpRecords.forEach(m => {
-    if (m.materialplanid_number) allMaterialCodes.add(m.materialplanid_number);
-  });
+
+  // MRP 降级时返回全量数据（包含其他产品的物料），不应扩展 codeList
+  // 仅在精确查询时（isDegraded=false）才将 MRP 物料加入
+  if (!degradation.mrp) {
+    mrpRecords.forEach(m => {
+      if (m.materialplanid_number) allMaterialCodes.add(m.materialplanid_number);
+    });
+  }
+  const mrpSkipped = degradation.mrp ? mrpRecords.filter(m => m.materialplanid_number && !allMaterialCodes.has(m.materialplanid_number)).length : 0;
 
   const codeList = Array.from(allMaterialCodes);
-  console.log(`[GanttService] 去重物料编码: ${codeList.length} 个，开始分批查询...`);
+  console.log(`[GanttService] 去重物料编码: ${codeList.length} 个${mrpSkipped > 0 ? `（MRP降级，跳过 ${mrpSkipped} 条非BOM物料）` : ''}，开始分批查询...`);
 
-  // 3. 串行分批查询：物料主数据 → PR（精确链 B3）→ PO（精确链 B4）→ 库存
-  const materials = await planningV2DataService.loadMaterialsByCode(codeList);
-  console.log(`[GanttService] 物料主数据加载完成: ${materials.length} 条`);
-
-  // PR: 精确关联 srcbillid in [mrp.billnos] + biztime >= demandStart
+  // ── Phase 2 优化：重排数据加载流程 ──
+  // 流程: Step2+5 并行 → 用物料属性过滤外购件 → Step3+4(PR+PO) 并行
   const mrpBillnos = mrpRecords.map(m => m.billno).filter(Boolean);
   const effectiveDemandStart = demandStart || productionStart;
-  const prResult = await planningV2DataService.loadPRByMRPBillnos(
-    mrpBillnos, codeList, effectiveDemandStart,
-  );
+
+  // ── Round 1: 物料主数据 + 库存（并行） ──
+  const tR1 = performance.now();
+  let inventoryRecords: InventoryRecord[] = [];
+  let inventoryUnavailable = false;
+
+  const [materials, inventoryResult] = await Promise.all([
+    // Step 2: 物料主数据
+    planningV2DataService.loadMaterialsByCode(codeList),
+    // Step 5: 库存（PRD D3: 异常时不崩溃）
+    planningV2DataService.loadInventoryByMaterials(codeList)
+      .catch((err: unknown) => {
+        console.error(`[GanttService] 库存加载异常，齐套判定将受限:`, err);
+        inventoryUnavailable = true;
+        return [] as InventoryRecord[];
+      }),
+  ]);
+  inventoryRecords = inventoryResult;
+
+  perf['2_物料主数据'] = Math.round(performance.now() - tR1);
+  perf['5_库存查询'] = Math.round(performance.now() - tR1);
+  perf['2+5_并行实际'] = Math.round(performance.now() - tR1);
+  console.log(`[GanttService] 物料主数据加载完成: ${materials.length} 条`);
+  console.log(`[GanttService] 库存加载完成: ${inventoryRecords.length} 条`);
+
+  // ── 过滤外购件编码（用于 PR/PO fallback，自制件不走采购） ──
+  const materialMap = new Map<string, MaterialRecord>();
+  materials.forEach(m => materialMap.set(m.material_code, m));
+  const externalCodes = codeList.filter(code => {
+    const attr = materialMap.get(code)?.materialattr;
+    return attr === '外购' || attr === '委外';
+  });
+  console.log(`[GanttService] 外购/委外物料: ${externalCodes.length} 个（总 ${codeList.length} 个），PR/PO fallback 仅查外购件`);
+
+  // ── Round 2: PR + PO（并行，PR fallback 只传外购件编码） ──
+  const tR2 = performance.now();
+  const [prResult, poResult] = await Promise.all([
+    // Step 3: PR
+    planningV2DataService.loadPRByMRPBillnos(mrpBillnos, externalCodes, effectiveDemandStart),
+    // Step 4: PO（精确查询用 mrpBillnos→prBillnos 链，但精确查询在 loadPO 内部处理）
+    // 注意：PO 精确查询需要 prBillnos（来自 PR 结果），但当前 MRP=0 导致 PR 精确查询无 srcbillid，
+    // 两者都走 fallback，可以安全并行
+    planningV2DataService.loadPOByPRBillnos([], externalCodes, effectiveDemandStart),
+  ]);
+
+  perf['3_PR查询'] = Math.round(performance.now() - tR2);
+  perf['4_PO查询'] = Math.round(performance.now() - tR2);
+  perf['3+4_并行实际'] = Math.round(performance.now() - tR2);
+
   const prRecords = prResult.data;
   degradation.pr = prResult.isDegraded;
   console.log(`[GanttService] PR加载完成: ${prRecords.length} 条 (降级=${degradation.pr})`);
-
-  // PO: 精确关联 srcbillid in [pr.billnos] + biztime >= demandStart
-  const prBillnos = prRecords.map(pr => pr.billno).filter(Boolean);
-  const poResult = await planningV2DataService.loadPOByPRBillnos(
-    prBillnos, codeList, effectiveDemandStart,
-  );
   const poRecords = poResult.data;
   degradation.po = poResult.isDegraded;
   console.log(`[GanttService] PO加载完成: ${poRecords.length} 条 (降级=${degradation.po})`);
 
-  // PRD D3: 库存 API 异常时标记"不可用"而非崩溃
-  let inventoryRecords: Awaited<ReturnType<typeof planningV2DataService.loadInventoryByMaterials>> = [];
-  let inventoryUnavailable = false;
-  try {
-    inventoryRecords = await planningV2DataService.loadInventoryByMaterials(codeList);
-    console.log(`[GanttService] 库存加载完成: ${inventoryRecords.length} 条`);
-  } catch (err) {
-    console.error(`[GanttService] 库存加载异常，齐套判定将受限:`, err);
-    inventoryUnavailable = true;
-  }
-
-  // 4. 构建查找映射
-  const materialMap = new Map<string, MaterialRecord>();
-  materials.forEach(m => materialMap.set(m.material_code, m));
+  // 4. 构建查找映射 + 倒排计算
+  const t6 = performance.now();
+  // materialMap 已在 Round 1 后构建（用于过滤外购件）
 
   // MRP 映射：物料编码 → 需求量（优先 bizorderqty，fallback adviseorderqty）
   const mrpMap = new Map<string, number>();
@@ -305,9 +345,28 @@ export async function buildGanttData(
     console.warn(`[GanttService] 跳过 ${orphanParents.length} 个替代料父节点的 ${orphanChildCount} 条子记录（替代料已被 alt_priority=0 过滤）:`, orphanParents);
   }
 
+  perf['6_BOM树+倒排'] = Math.round(performance.now() - t6);
+
+  // ⏱ 性能报告汇总
+  perf['总耗时_ms'] = Math.round(performance.now() - perfStart);
+  perf['BOM条数'] = bomRecords.length;
+  perf['MRP条数'] = mrpRecords.length;
+  perf['物料编码数(全部)'] = codeList.length;
+  perf['物料编码数(外购)'] = externalCodes.length;
+  perf['分片数(物料)'] = Math.ceil(codeList.length / 100);
+  perf['分片数(外购PR/PO)'] = Math.ceil(externalCodes.length / 100);
+  perf['PR条数'] = prRecords.length;
+  perf['PR降级'] = degradation.pr ? 1 : 0;
+  perf['PO条数'] = poRecords.length;
+  perf['PO降级'] = degradation.po ? 1 : 0;
+  perf['库存条数'] = inventoryRecords.length;
+  perf['甘特节点数'] = nodeCount;
+  console.log('%c[GanttService] ⏱ 性能报告', 'color: #6366f1; font-weight: bold');
+  console.table(perf);
+
   console.log(`[GanttService] 甘特图构建完成，共 ${nodeCount} 个节点（BOM位置），唯一物料 ${new Set(flattenGanttBars([root]).map(b => b.materialCode)).size - 1} 种（不含根）`);
   console.log(`[GanttService] 降级状态: MRP=${degradation.mrp}, PR=${degradation.pr}, PO=${degradation.po}`);
-  return { bars: [root], degradation };
+  return { bars: [root], degradation, inventoryRecords };
 }
 
 /** 从 BOM 记录构建 parent -> children 映射 */

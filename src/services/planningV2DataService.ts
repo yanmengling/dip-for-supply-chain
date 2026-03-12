@@ -245,7 +245,10 @@ async function withCachedLoader<T>(cacheKey: string, loader: () => Promise<T>): 
 }
 
 /** 批量分片大小 - 避免 in 条件过大导致 API 超时 */
-const BATCH_CHUNK_SIZE = 50;
+const BATCH_CHUNK_SIZE = 100;
+
+/** 分片并行最大并发数 — 避免 API 限流 */
+const CHUNK_CONCURRENCY = 5;
 
 /** 将数组分片 */
 function chunkArray<T>(arr: T[], size: number): T[][] {
@@ -254,6 +257,37 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
         chunks.push(arr.slice(i, i + size));
     }
     return chunks;
+}
+
+/**
+ * 并行执行分片任务，控制最大并发数。
+ * Phase 2b 性能优化：将串行 for...of 改为受控并行。
+ */
+async function parallelChunks<T>(
+    chunks: T[][],
+    fn: (chunk: T[]) => Promise<any[]>,
+    concurrency = CHUNK_CONCURRENCY,
+): Promise<any[]> {
+    const allData: any[] = [];
+    for (let i = 0; i < chunks.length; i += concurrency) {
+        const batch = chunks.slice(i, i + concurrency);
+        const results = await Promise.all(batch.map(chunk => fn(chunk)));
+        results.forEach(r => allData.push(...r));
+    }
+    return allData;
+}
+
+/**
+ * 将日期字符串补全为 OpenSearch 兼容的 datetime 格式。
+ * OpenSearch 的 biztime 字段要求 `yyyy-MM-dd HH:mm:ss` 格式，
+ * 而前端传入的 demandStart 通常是 `yyyy-MM-dd` 纯日期。
+ * BUG-001 修复。
+ */
+function ensureDatetime(dateStr: string): string {
+    if (!dateStr) return dateStr;
+    // 已经包含时间部分则原样返回
+    if (dateStr.includes(' ') || dateStr.includes('T')) return dateStr;
+    return `${dateStr} 00:00:00`;
 }
 
 // ============================================================================
@@ -621,9 +655,8 @@ export async function loadMRPByBillnos(
     const preciseResult = await withCachedLoader(cacheKey, async () => {
         console.log(`[PlanningV2DataService] MRP 精确查询: rootdemandbillno in [${forecastBillnos.length} 个单号]...`);
         const chunks = chunkArray(forecastBillnos, BATCH_CHUNK_SIZE);
-        const allData: MRPPlanOrderAPI[] = [];
-
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: MRPPlanOrderAPI[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
                 condition: {
                     operation: 'and',
@@ -635,8 +668,8 @@ export async function loadMRPByBillnos(
                 need_total: true,
                 timeout: 120000,
             });
-            allData.push(...response.entries.map((item: any) => parseMRPPlanOrder(item)));
-        }
+            return response.entries.map((item: any) => parseMRPPlanOrder(item));
+        });
 
         console.log(`[PlanningV2DataService] MRP 精确查询: ${allData.length} 条（过滤前）`);
         return allData;
@@ -702,25 +735,25 @@ export async function loadPRByMRPBillnos(
         const cacheKey = `pr_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
 
         const preciseResult = await withCachedLoader(cacheKey, async () => {
-            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号], biztime >= ${demandStart}...`);
+            const biztimeValue = ensureDatetime(demandStart);
+            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号], biztime >= ${biztimeValue}...`);
             const chunks = chunkArray(mrpBillnos, BATCH_CHUNK_SIZE);
-            const allData: PRRecord[] = [];
-
-            for (const chunk of chunks) {
+            // Phase 2b: 分片并行化
+            const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
                 const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
                     condition: {
                         operation: 'and',
                         sub_conditions: [
                             { field: 'srcbillid', operation: 'in', value: chunk },
-                            { field: 'biztime', operation: '>=', value: demandStart },
+                            { field: 'biztime', operation: '>=', value: biztimeValue },
                         ]
                     },
                     limit: 10000,
                     need_total: true,
                     timeout: 120000,
                 });
-                allData.push(...response.entries.map((item: any) => parsePRRecord(item)));
-            }
+                return response.entries.map((item: any) => parsePRRecord(item));
+            });
 
             console.log(`[PlanningV2DataService] PR 精确查询: ${allData.length} 条`);
             return allData;
@@ -744,25 +777,25 @@ export async function loadPRByMRPBillnos(
     const fallbackCacheKey = `pr_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
 
     const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        console.log(`[PlanningV2DataService] PR fallback: material_number in [${materialCodes.length}], biztime >= ${demandStart}...`);
+        const biztimeValue = ensureDatetime(demandStart);
+        console.log(`[PlanningV2DataService] PR fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeValue}...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
-        const allData: PRRecord[] = [];
-
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
                 condition: {
                     operation: 'and',
                     sub_conditions: [
                         { field: 'material_number', operation: 'in', value: chunk },
-                        { field: 'biztime', operation: '>=', value: demandStart },
+                        { field: 'biztime', operation: '>=', value: biztimeValue },
                     ]
                 },
                 limit: 10000,
                 need_total: true,
                 timeout: 120000,
             });
-            allData.push(...response.entries.map((item: any) => parsePRRecord(item)));
-        }
+            return response.entries.map((item: any) => parsePRRecord(item));
+        });
 
         console.log(`[PlanningV2DataService] PR fallback: ${allData.length} 条`);
         return allData;
@@ -814,25 +847,25 @@ export async function loadPOByPRBillnos(
         const cacheKey = `po_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
 
         const preciseResult = await withCachedLoader(cacheKey, async () => {
-            console.log(`[PlanningV2DataService] PO 精确查询: srcbillid in [${prBillnos.length} 个PR单号], biztime >= ${demandStart}...`);
+            const biztimeValue = demandStart; // PO biztime 使用 strict_date 格式(yyyy-MM-dd)，不能追加时间
+            console.log(`[PlanningV2DataService] PO 精确查询: srcbillid in [${prBillnos.length} 个PR单号], biztime >= ${biztimeValue}...`);
             const chunks = chunkArray(prBillnos, BATCH_CHUNK_SIZE);
-            const allData: PORecord[] = [];
-
-            for (const chunk of chunks) {
+            // Phase 2b: 分片并行化
+            const allData: PORecord[] = await parallelChunks(chunks, async (chunk) => {
                 const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
                     condition: {
                         operation: 'and',
                         sub_conditions: [
                             { field: 'srcbillid', operation: 'in', value: chunk },
-                            { field: 'biztime', operation: '>=', value: demandStart },
+                            { field: 'biztime', operation: '>=', value: biztimeValue },
                         ]
                     },
                     limit: 10000,
                     need_total: true,
                     timeout: 120000,
                 });
-                allData.push(...response.entries.map((item: any) => parsePORecord(item)));
-            }
+                return response.entries.map((item: any) => parsePORecord(item));
+            });
 
             console.log(`[PlanningV2DataService] PO 精确查询: ${allData.length} 条`);
             return allData;
@@ -856,25 +889,25 @@ export async function loadPOByPRBillnos(
     const fallbackCacheKey = `po_fallback_${sortedCodes.length}_${sortedCodes[0]}_${demandStart}`;
 
     const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        console.log(`[PlanningV2DataService] PO fallback: material_number in [${materialCodes.length}], biztime >= ${demandStart}...`);
+        const biztimeValue = demandStart; // PO biztime 使用 strict_date 格式(yyyy-MM-dd)，不能追加时间
+        console.log(`[PlanningV2DataService] PO fallback: material_number in [${materialCodes.length}], biztime >= ${biztimeValue}...`);
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
-        const allData: PORecord[] = [];
-
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: PORecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
                 condition: {
                     operation: 'and',
                     sub_conditions: [
                         { field: 'material_number', operation: 'in', value: chunk },
-                        { field: 'biztime', operation: '>=', value: demandStart },
+                        { field: 'biztime', operation: '>=', value: biztimeValue },
                     ]
                 },
                 limit: 10000,
                 need_total: true,
                 timeout: 120000,
             });
-            allData.push(...response.entries.map((item: any) => parsePORecord(item)));
-        }
+            return response.entries.map((item: any) => parsePORecord(item));
+        });
 
         console.log(`[PlanningV2DataService] PO fallback: ${allData.length} 条`);
         return allData;
@@ -1041,8 +1074,8 @@ export async function loadMaterialsByCode(codes: string[]): Promise<MaterialReco
         const chunks = chunkArray(codes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] 物料主数据分 ${chunks.length} 批查询`);
 
-        const allData: MaterialRecord[] = [];
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: MaterialRecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MATERIAL, {
                 condition: {
                     operation: 'and',
@@ -1054,16 +1087,14 @@ export async function loadMaterialsByCode(codes: string[]): Promise<MaterialReco
                 need_total: true,
                 timeout: 120000,
             });
-
-            const data: MaterialRecord[] = response.entries.map((item: any) => ({
+            return response.entries.map((item: any) => ({
                 material_code: item.material_code || '',
                 material_name: item.material_name || '',
                 materialattr: item.materialattr || '',
                 purchase_fixedleadtime: item.purchase_fixedleadtime || '0',
                 product_fixedleadtime: item.product_fixedleadtime || '0',
             }));
-            allData.push(...data);
-        }
+        });
 
         console.log(`[PlanningV2DataService] 物料主数据: ${allData.length} 条`);
         return allData;
@@ -1091,8 +1122,8 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] PR 分 ${chunks.length} 批查询`);
 
-        const allData: PRRecord[] = [];
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PR, {
                 condition: {
                     operation: 'and',
@@ -1104,8 +1135,7 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
                 need_total: true,
                 timeout: 120000,
             });
-
-            const data: PRRecord[] = response.entries.map((item: any) => ({
+            return response.entries.map((item: any) => ({
                 billno: item.billno || '',
                 material_number: item.material_number || '',
                 material_name: item.material_name || '',
@@ -1116,8 +1146,7 @@ export async function loadPRByMaterials(materialCodes: string[]): Promise<PRReco
                 org_name: item.org_name || '',
                 billtype_name: item.billtype_name || '',
             }));
-            allData.push(...data);
-        }
+        });
 
         console.log(`[PlanningV2DataService] PR: ${allData.length} 条`);
         return allData;
@@ -1145,8 +1174,8 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] PO 分 ${chunks.length} 批查询`);
 
-        const allData: PORecord[] = [];
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化
+        const allData: PORecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.PO, {
                 condition: {
                     operation: 'and',
@@ -1158,8 +1187,7 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
                 need_total: true,
                 timeout: 120000,
             });
-
-            const data: PORecord[] = response.entries.map((item: any) => ({
+            return response.entries.map((item: any) => ({
                 billno: item.billno || '',
                 material_number: item.material_number || '',
                 material_name: item.material_name || '',
@@ -1171,8 +1199,7 @@ export async function loadPOByMaterials(materialCodes: string[]): Promise<POReco
                 srcbillnumber: item.srcbillnumber || '',
                 actqty: parseFloat(item.actqty) || 0,
             }));
-            allData.push(...data);
-        }
+        });
 
         console.log(`[PlanningV2DataService] PO: ${allData.length} 条`);
         return allData;
@@ -1205,8 +1232,8 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
         const chunks = chunkArray(materialCodes, BATCH_CHUNK_SIZE);
         console.log(`[PlanningV2DataService] 库存数据分 ${chunks.length} 批查询`);
 
-        const allData: InventoryRecord[] = [];
-        for (const chunk of chunks) {
+        // Phase 2b: 分片并行化（原串行 for...of → 受控并发）
+        const allData: InventoryRecord[] = await parallelChunks(chunks, async (chunk) => {
             const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.INVENTORY, {
                 condition: {
                     operation: 'and',
@@ -1218,8 +1245,7 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
                 need_total: true,
                 timeout: 120000,
             });
-
-            const data: InventoryRecord[] = response.entries.map((item: any) => ({
+            return response.entries.map((item: any) => ({
                 seq_no: parseInt(item.seq_no) || 0,
                 material_code: item.material_code || '',
                 material_name: item.material_name || '',
@@ -1233,8 +1259,7 @@ export async function loadInventoryByMaterials(materialCodes: string[]): Promise
                 batch_no: item.batch_no || '',
                 purchase_qty: parseFloat(item.purchase_qty) || 0,
             }));
-            allData.push(...data);
-        }
+        });
 
         console.log(`[PlanningV2DataService] 库存数据: ${allData.length} 条`);
         return allData;
@@ -1298,9 +1323,8 @@ export async function loadMPSByForecastBillnos(
         const preciseResult = await withCachedLoader(cacheKey, async () => {
             console.log(`[PlanningV2DataService] MPS 精确查询: sourcebillnumber in [${forecastBillnos.length} 个单号]...`);
             const chunks = chunkArray(forecastBillnos, BATCH_CHUNK_SIZE);
-            const allData: MPSWorkOrderAPI[] = [];
-
-            for (const chunk of chunks) {
+            // Phase 2b: 分片并行化
+            const allData: MPSWorkOrderAPI[] = await parallelChunks(chunks, async (chunk) => {
                 const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
                     condition: {
                         operation: 'and',
@@ -1312,8 +1336,8 @@ export async function loadMPSByForecastBillnos(
                     need_total: true,
                     timeout: 120000,
                 });
-                allData.push(...response.entries.map((item: any) => parseMPSWorkOrder(item)));
-            }
+                return response.entries.map((item: any) => parseMPSWorkOrder(item));
+            });
 
             console.log(`[PlanningV2DataService] MPS 精确查询: ${allData.length} 条`);
             return allData;
