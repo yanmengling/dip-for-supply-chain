@@ -10,6 +10,8 @@ on:
 jobs:
   build:
     name: Build .dip package (${{ matrix.arch }})
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
