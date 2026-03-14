@@ -19,7 +19,7 @@ export default defineConfig({
     proxy: {
       // DIP API 代理 - ontology-manager
       '/api/ontology-manager': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {
@@ -38,7 +38,7 @@ export default defineConfig({
       },
       // DIP API 代理 - ontology-query
       '/api/ontology-query': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
         timeout: 300000, // 5分钟超时
@@ -64,7 +64,7 @@ export default defineConfig({
       },
       // DIP API 代理 - agent-app
       '/api/agent-app': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
         configure: (proxy, _options) => {
@@ -82,13 +82,13 @@ export default defineConfig({
       },
       // DIP API 代理 - automation (workflow)
       '/api/automation': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
       },
       // DIP API 代理 - mdl-uniquery (metric model)
       '/api/mdl-uniquery': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
         timeout: 300000, // 5分钟超时
@@ -96,7 +96,7 @@ export default defineConfig({
       },
       // DIP API 代理 - mdl-data-model
       '/api/mdl-data-model': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
       },
@@ -109,7 +109,7 @@ export default defineConfig({
       },
       // DIP API 代理 - agent-factory (SDK 用于加载开场白和预置问题)
       '/api/agent-factory': {
-        target: 'https://dip.aishu.cn',
+        target: 'https://dip-poc.aishu.cn',
         changeOrigin: true,
         secure: false,
       },

@@ -354,7 +354,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={agent.agentKey || ''}
                                 onChange={(e) => handleChange('agentKey', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: 01KFT0E68A1RES94ZV6DA131X4"
+                                placeholder="例如: 01KKDTP7ES9NWMZRDD0PJZA8GH"
                             />
                         </FormField>
                         <FormField label="App Key" required error={getFieldError('appKey')}>
@@ -363,7 +363,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={agent.appKey || ''}
                                 onChange={(e) => handleChange('appKey', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: 01KFT0E68A1RES94ZV6DA131X4"
+                                placeholder="例如: 01KKDTP7ES9NWMZRDD0PJZA8GH"
                             />
                         </FormField>
                         <FormField label="Agent 版本">

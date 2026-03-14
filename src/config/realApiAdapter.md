@@ -42,7 +42,7 @@
 ## 需要修改的地方
 
 ### ✅ 已完成的配置
-1. Base URL: `https://dip.aishu.cn:443/api/agent-app/v1`
+1. Base URL: `https://dip-poc.aishu.cn:443/api/agent-app/v1`
 2. App Key: `01KBCGGGD7RT20RW7J7DXJ5K96`
 3. Token: `ory_at_iXcCg575R9gcCIsPADfexfERLzvTPlLALzoef-oPTp4.EVBtfGYlBEEZpMiRJEbWamiTR9djvvQRODQXI6vr53U`
 

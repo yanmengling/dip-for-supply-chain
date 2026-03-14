@@ -204,21 +204,28 @@ export async function fetchBOMData(productCode: string): Promise<BOMItem[]> {
     (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max), ''
   );
 
-  if (!latestVersion) {
+  if (versionEntries.length === 0) {
     console.warn(`[mpsDataService] 未找到产品 ${productCode} 的 BOM 数据`);
     return [];
   }
-  console.log(`[mpsDataService] BOM 最新版本: "${latestVersion}"`);
+  if (latestVersion) {
+    console.log(`[mpsDataService] BOM 最新版本: "${latestVersion}"`);
+  } else {
+    console.warn(`[mpsDataService] API 未返回 bom_version，跳过版本过滤`);
+  }
 
-  // Step 2: 精确查询 = bom_material_code + bom_version + alt_priority=0
+  // Step 2: 精确查询 = bom_material_code + bom_version(可选) + alt_priority=0
+  const step2SubConditions: any[] = [
+    { field: 'bom_material_code', operation: '==', value: productCode },
+    { field: 'alt_priority', operation: '==', value: 0 },
+  ];
+  if (latestVersion) {
+    step2SubConditions.splice(1, 0, { field: 'bom_version', operation: '==', value: latestVersion });
+  }
   const response = await ontologyApi.queryObjectInstances(objectTypeIds.BOM, {
     condition: {
       operation: 'and',
-      sub_conditions: [
-        { field: 'bom_material_code', operation: '==', value: productCode },
-        { field: 'bom_version', operation: '==', value: latestVersion },
-        { field: 'alt_priority', operation: '==', value: 0 },
-      ]
+      sub_conditions: step2SubConditions,
     },
     limit: 10000,
     need_total: true,

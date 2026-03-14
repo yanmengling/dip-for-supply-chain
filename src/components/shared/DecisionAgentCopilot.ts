@@ -41,7 +41,7 @@ import { getAuthToken } from '../../config/apiConfig';
 export interface DecisionAgentCopilotProps extends CopilotBaseProps {
     /** Agent Key — used as both the URL path segment and the agent_id body field. */
     agentKey: string;
-    /** Base URL, e.g. "/api/agent-app/v1" or "https://dip.aishu.cn:443/api/agent-app/v1". */
+    /** Base URL, e.g. "/api/agent-app/v1" or "https://dip-poc.aishu.cn:443/api/agent-app/v1". */
     baseUrl?: string;
     /** Bearer token (without the "Bearer " prefix). */
     token?: string;
@@ -105,6 +105,91 @@ export class DecisionAgentCopilot extends CopilotBase<DecisionAgentCopilotProps>
     private _pendingConversationId: string | null = null;
 
     // ── Helpers ────────────────────────────────────────────────────────────────
+    protected observer?: MutationObserver;
+
+    async componentDidMount() {
+        await super.componentDidMount();
+        this.setupIframeObserver();
+    }
+
+    componentWillUnmount() {
+        if (this.observer) {
+            this.observer.disconnect();
+        }
+    }
+
+    /**
+     * Sets up a MutationObserver to watch for <pre><code class="language-html"> containing <iframe>
+     * and replaces them with actual DOM iframe elements.
+     */
+    private setupIframeObserver() {
+        this.observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                        this.processNodeForIframes(node);
+                    });
+                }
+            }
+        });
+
+        // Use setTimeout to ensure we observe the container once it's mounted
+        setTimeout(() => {
+            const container = this.props.drawerContainer || document.body;
+            this.observer?.observe(container, {
+                childList: true,
+                subtree: true,
+            });
+            // Initial scan in case messages are already rendered
+            this.processNodeForIframes(container);
+        }, 100);
+    }
+
+    private processNodeForIframes(node: Node) {
+        if (node.nodeType !== Node.ELEMENT_NODE) return;
+        const el = node as HTMLElement;
+        
+        // Find all code blocks that might contain html
+        const codeBlocks = el.querySelectorAll('pre > code.language-html, pre > code.language-xml');
+        // Also check if the added node itself is the target
+        const targets = [...Array.from(codeBlocks)];
+        if (el.matches?.('pre > code.language-html, pre > code.language-xml')) {
+            targets.push(el);
+        }
+
+        targets.forEach(codeEl => {
+            const preEl = codeEl.parentElement;
+            if (!preEl || preEl.dataset.iframeProcessed === 'true') return;
+
+            const content = codeEl.textContent || '';
+            if (content.includes('<iframe') && content.includes('</iframe>')) {
+                // Mark as processed so we don't do this continuously on streaming updates
+                preEl.dataset.iframeProcessed = 'true';
+                
+                // Extract just the iframe part using a simple regex or DOM parser
+                const iframeMatch = content.match(/<iframe[\s\S]*?<\/iframe>/i);
+                if (iframeMatch) {
+                    const iframeStr = iframeMatch[0];
+                    
+                    // Create a container for the real iframe
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'custom-iframe-wrapper';
+                    wrapper.style.margin = '10px 0';
+                    wrapper.style.borderRadius = '8px';
+                    wrapper.style.overflow = 'hidden';
+                    wrapper.innerHTML = iframeStr;
+
+                    // Hide the pre block
+                    preEl.style.display = 'none';
+                    
+                    // Insert the wrapper after the pre block
+                    if (preEl.parentNode) {
+                        preEl.parentNode.insertBefore(wrapper, preEl.nextSibling);
+                    }
+                }
+            }
+        });
+    }
 
     private get _baseUrl(): string {
         return (this.props.baseUrl || '/api/agent-app/v1').replace(/\/$/, '');

@@ -115,7 +115,7 @@ try {
 VITE_API_TOKEN=ory_at_xxxxx.xxxxx
 
 # 指标模型 API
-VITE_METRIC_MODEL_BASE_URL=https://dip.aishu.cn/api/mdl-uniquery/v1
+VITE_METRIC_MODEL_BASE_URL=https://dip-poc.aishu.cn/api/mdl-uniquery/v1
 
 # 调试模式
 VITE_API_DEBUG=true

@@ -105,8 +105,6 @@ class ConfigStorageService {
                 }
 
                 const newMetricIds = [
-                    'mm_product_inventory_optimization',
-                    'mm_material_inventory_optimization',
                     'mm_order_demand',
                     'mm_product_count',
                     'mm_material_count',
@@ -585,36 +583,6 @@ class ConfigStorageService {
                     updatedAt: now
                 },
 
-                // 库存优化指标
-                {
-                    id: 'mm_product_inventory_optimization',
-                    type: ApiConfigType.METRIC_MODEL,
-                    name: '产品库存优化模型',
-                    description: '库存优化 - 产品库存分析核心模型',
-                    modelId: 'd58keb5g5lk40hvh48og',
-                    groupName: '库存优化',
-                    modelName: '产品库存优化',
-                    unit: '个',
-                    enabled: true,
-                    tags: ['inventory', 'product', 'optimization'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-                {
-                    id: 'mm_material_inventory_optimization',
-                    type: ApiConfigType.METRIC_MODEL,
-                    name: '物料库存优化模型',
-                    description: '库存优化 - 物料库存分析核心模型',
-                    modelId: 'd58ihclg5lk40hvh48mg',
-                    groupName: '库存优化',
-                    modelName: '物料库存优化',
-                    unit: '个',
-                    enabled: true,
-                    tags: ['inventory', 'material', 'optimization'],
-                    createdAt: now,
-                    updatedAt: now
-                },
-
                 // 供应链图谱指标 (新命名规范)
                 {
                     id: 'mm_order_demand',
@@ -696,7 +664,7 @@ class ConfigStorageService {
                     type: ApiConfigType.WORKFLOW,
                     name: 'AI 分析工作流',
                     description: '供应链 AI 智能分析工作流',
-                    dagId: '600565437910010238',
+                    dagId: '610447862345543805',
                     triggerType: 'manual' as const,
                     enabled: true,
                     tags: ['ai', 'analysis', 'cockpit'],

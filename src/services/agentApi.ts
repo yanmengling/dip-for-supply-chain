@@ -14,7 +14,7 @@ const RETRY_DELAY = 1000; // 1 second base delay for exponential backoff
 
 /**
  * Chat Completion Request interface based on OFFICIAL API documentation
- * API Endpoint: POST https://dip.aishu.cn:443/api/agent-app/v1/app/{app_key}/api/chat/completion
+ * API Endpoint: POST https://dip-poc.aishu.cn:443/api/agent-app/v1/app/{app_key}/api/chat/completion
  * IMPORTANT: Official API uses agent_key in request body (app_key is in URL path)
  * Official example: { agent_key: "01KBCGGGD7RT20RW7J7ABRA7YW", agent_version: "v2", query, stream }
  */

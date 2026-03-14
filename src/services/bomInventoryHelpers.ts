@@ -400,22 +400,29 @@ export async function loadSingleBOMTreeViaQueryInstances(
         );
         perf['1_BOM版本查询'] = Math.round(performance.now() - tVersion);
 
-        if (versionEntries.length === 0 || !latestVersion) {
+        if (versionEntries.length === 0) {
             console.warn(`[BOM服务] 未找到产品 ${bomFilterValue} 的 BOM 数据`);
             return null;
         }
-        console.log(`[BOM服务] 最新版本: "${latestVersion}"`);
+        if (latestVersion) {
+            console.log(`[BOM服务] 最新版本: "${latestVersion}"`);
+        } else {
+            console.warn(`[BOM服务] API 未返回 bom_version，跳过版本过滤`);
+        }
 
         // ── Step 3: 精确查询 BOM 主料 ──
         const tBom = performance.now();
+        const step3SubConditions: any[] = [
+            { operation: '==', field: 'bom_material_code', value: bomFilterValue },
+            { operation: '==', field: 'alt_priority', value: 0 },
+        ];
+        if (latestVersion) {
+            step3SubConditions.splice(1, 0, { operation: '==', field: 'bom_version', value: latestVersion });
+        }
         const response = await ontologyApi.queryObjectInstances(bomTypeId, {
             condition: {
                 operation: 'and',
-                sub_conditions: [
-                    { operation: '==', field: 'bom_material_code', value: bomFilterValue },
-                    { operation: '==', field: 'bom_version', value: latestVersion },
-                    { operation: '==', field: 'alt_priority', value: 0 },
-                ]
+                sub_conditions: step3SubConditions,
             },
             limit: 10000,
             need_total: false,

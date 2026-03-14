@@ -1011,21 +1011,29 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
             (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max), ''
         );
 
-        if (!latestVersion) {
-            console.warn(`[PlanningV2DataService] BOM ${productCode}: 未找到任何版本`);
+        if (versionEntries.length === 0) {
+            console.warn(`[PlanningV2DataService] BOM ${productCode}: 无任何记录`);
             return [];
         }
-        console.log(`[PlanningV2DataService] BOM ${productCode}: 最新版本 "${latestVersion}"`);
+        if (latestVersion) {
+            console.log(`[PlanningV2DataService] BOM ${productCode}: 最新版本 "${latestVersion}"`);
+        } else {
+            console.warn(`[PlanningV2DataService] BOM ${productCode}: API 未返回 bom_version，跳过版本过滤`);
+        }
 
-        // Step 2: 精确查询 = bom_material_code + bom_version + alt_priority=0
+        // Step 2: 精确查询 = bom_material_code + bom_version(可选) + alt_priority=0
+        // 注: 部分 API 环境不返回 bom_version 字段，此时跳过版本过滤直接取全量
+        const step2SubConditions: any[] = [
+            { field: 'bom_material_code', operation: '==', value: productCode },
+            { field: 'alt_priority', operation: '==', value: 0 },
+        ];
+        if (latestVersion) {
+            step2SubConditions.splice(1, 0, { field: 'bom_version', operation: '==', value: latestVersion });
+        }
         const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
             condition: {
                 operation: 'and',
-                sub_conditions: [
-                    { field: 'bom_material_code', operation: '==', value: productCode },
-                    { field: 'bom_version', operation: '==', value: latestVersion },
-                    { field: 'alt_priority', operation: '==', value: 0 },
-                ]
+                sub_conditions: step2SubConditions,
             },
             limit: 10000,
             need_total: true,

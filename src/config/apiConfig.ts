@@ -318,7 +318,7 @@ const DEFAULT_CONFIG: GlobalApiConfig = {
       name: 'Agent API',
       baseUrl: envConfig.agentBaseUrl || '/api/agent-app/v1',  // DIP-native path
       // 默认 appKey，可通过配置中心覆盖
-      appKey: '01KFT0E68A1RES94ZV6DA131X4',
+      appKey: '01KKDTP7ES9NWMZRDD0PJZA8GH',
       timeout: 120000,
       streamTimeout: 300000,
       maxRetries: 3,
