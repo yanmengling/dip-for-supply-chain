@@ -1,0 +1,112 @@
+name: Build DIP Package
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build .dip package (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+
+    steps:
+      # ── 1. 拉取代码 ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. 设置 Node.js 环境 ─────────────────────────────────────────────────
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: package-lock.json
+
+      # ── 3. 安装前端依赖（构建由 build_package.py 统一执行）─────────────────
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # ── 4. 设置 Python（uv）环境 ──────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+          allow-python-prereleases: true
+
+      - name: Install Python dependencies (buildkit)
+        working-directory: buildkit
+        run: uv sync
+
+      # ── 5. 安装打包工具 ───────────────────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Install skopeo
+        run: sudo apt-get install -y skopeo
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      # ── 6. 读取 config.yaml 中的版本号用于 Release tag ─────────────────────────
+      - name: Read version from config.yaml
+        id: config
+        working-directory: buildkit
+        run: |
+          VERSION=$(uv run python -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['version'])")
+          APP_NAME=$(uv run python -c "import yaml; c=yaml.safe_load(open('config.yaml')); print(c['name'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "app_name=$APP_NAME" >> $GITHUB_OUTPUT
+
+      # ── 7. 构建 .dip 应用包 ──────────────────────────────────────────────────
+      - name: Build DIP package (${{ matrix.arch }})
+        working-directory: buildkit
+        run: uv run scripts/build_package.py --arch ${{ matrix.arch }}
+
+      # ── 8. 找到生成的 .dip 文件路径 ─────────────────────────────────────────
+      - name: Locate .dip artifact
+        id: locate
+        working-directory: buildkit
+        run: |
+          DIP_FILE=$(find .cache -name "*.dip" | sort | tail -n 1)
+          if [ -z "$DIP_FILE" ]; then
+            echo "ERROR: No .dip file found under buildkit/.cache"
+            exit 1
+          fi
+          echo "dip_file=buildkit/$DIP_FILE" >> $GITHUB_OUTPUT
+          echo "dip_name=$(basename $DIP_FILE)" >> $GITHUB_OUTPUT
+
+      # ── 9. 上传到 GitHub Artifacts（30天临时存储）───────────────────────────
+      - name: Upload to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.locate.outputs.dip_name }}
+          path: ${{ steps.locate.outputs.dip_file }}
+          retention-days: 30
+
+      # ── 10. 上传到 GitHub Release ────────────────────────────────────────────
+      - name: Create or update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.config.outputs.version }}-build.${{ github.run_number }}
+          name: "v${{ steps.config.outputs.version }} (build #${{ github.run_number }})"
+          body: |
+            自动构建 - 由 commit [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) 触发
+
+            **分支**: `${{ github.ref_name }}`
+            **应用名**: `${{ steps.config.outputs.app_name }}`
+            **版本**: `${{ steps.config.outputs.version }}`
+          files: ${{ steps.locate.outputs.dip_file }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

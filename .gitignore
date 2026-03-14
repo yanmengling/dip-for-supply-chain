@@ -35,6 +35,7 @@ lerna-debug.log*
 # Build logs and errors
 build_*
 build-*
+!.github/workflows/build-*
 
 # Test files - ignore all files starting with test (anywhere)
 **/test-*
