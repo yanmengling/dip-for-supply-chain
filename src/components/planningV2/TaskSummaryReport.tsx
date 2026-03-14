@@ -38,7 +38,7 @@ export default function TaskSummaryReport({ report }: TaskSummaryReportProps) {
             <div>
               <span className="text-slate-400">计划生产周期</span>
               <div className="text-slate-700 mt-0.5">
-                {planVsActual.productionPeriod.start} ~ {planVsActual.productionPeriod.end}
+                {planVsActual.productionPeriod?.start ?? '-'} ~ {planVsActual.productionPeriod?.end ?? '-'}
               </div>
             </div>
             <div>

@@ -6,7 +6,8 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, AlertCircle, Check, X, Minus, Filter } from 'lucide-react';
 import { planningV2DataService } from '../../services/planningV2DataService';
-import type { Step1Data, MRPDisplayRow, PRRecord, PORecord, MRPPlanOrderAPI } from '../../types/planningV2';
+import type { Step1Data, MRPDisplayRow, PRRecord, PORecord } from '../../types/planningV2';
+import type { MRPPlanOrderAPI } from '../../services/planningV2DataService';
 
 interface MaterialRequirementPanelProps {
   active: boolean;

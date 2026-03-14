@@ -196,7 +196,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
       const diffStr = r.planVsActual.timeDiffDays != null
         ? `${r.planVsActual.timeDiffDays > 0 ? '+' : ''}${r.planVsActual.timeDiffDays} 天`
         : '-';
-      lines.push(`| 生产周期 | ${r.planVsActual.productionPeriod.start} ~ ${r.planVsActual.productionPeriod.end} | ${inboundStr} | ${diffStr} |`);
+      lines.push(`| 生产周期 | ${r.planVsActual.productionPeriod?.start ?? '-'} ~ ${r.planVsActual.productionPeriod?.end ?? '-'} | ${inboundStr} | ${diffStr} |`);
       const qtyStr = r.productCompletion.inboundQuantity != null
         ? `入库 ${r.productCompletion.inboundQuantity.toLocaleString()} 套`
         : '-';
