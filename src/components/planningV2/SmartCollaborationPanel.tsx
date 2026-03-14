@@ -171,6 +171,9 @@ const SmartCollaborationPanel = ({
               bars={ganttBars}
               productionStart={step1Data.demandStart}
               productionEnd={step1Data.demandEnd}
+              productCode={step1Data.productCode}
+              productName={step1Data.productName}
+              forecastBillnos={step1Data.relatedForecastBillnos}
             />
           </div>
         ) : (

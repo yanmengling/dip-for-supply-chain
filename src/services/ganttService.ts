@@ -10,7 +10,7 @@
 
 import type { GanttBar, BOMRecord, MaterialRecord, SupplyStatus, InventoryRecord } from '../types/planningV2';
 import { planningV2DataService } from './planningV2DataService';
-import type { MRPPlanOrderAPI } from './planningV2DataService';
+import type { MRPPlanOrderAPI, DegradedResult } from './planningV2DataService';
 
 /** 各环节降级状态（v3.7 Phase B） */
 export interface DegradationInfo {
@@ -49,13 +49,14 @@ export async function buildGanttData(
     planningV2DataService.loadBOMByProduct(productCode),
     (forecastBillnos && forecastBillnos.length > 0)
       ? planningV2DataService.loadMRPByBillnos(forecastBillnos, productCode)
-      : Promise.resolve({ data: [] as MRPPlanOrderAPI[], isDegraded: true }),
+      : Promise.resolve({ data: [] as MRPPlanOrderAPI[], isDegraded: true } as DegradedResult<MRPPlanOrderAPI[]>),
   ]);
   perf['1_BOM+MRP(并行)'] = Math.round(performance.now() - t1);
 
-  const mrpRecords = mrpResult.data;
+  // 使用全部 MRP 记录（含已关闭），不做 filterActiveMRP 过滤
+  const mrpRecords = mrpResult.allMrpRecords ?? mrpResult.data;
   degradation.mrp = mrpResult.isDegraded;
-  console.log(`[GanttService] BOM: ${bomRecords.length} 条, MRP(v2): ${mrpRecords.length} 条 (降级=${degradation.mrp})`);
+  console.log(`[GanttService] BOM: ${bomRecords.length} 条, MRP(全量): ${mrpRecords.length} 条 (降级=${degradation.mrp})`);
 
   // PRD D3: BOM 为空时友好提示
   if (bomRecords.length === 0) {
@@ -85,8 +86,9 @@ export async function buildGanttData(
 
   // ── Phase 2 优化：重排数据加载流程 ──
   // 流程: Step2+5 并行 → 用物料属性过滤外购件 → Step3+4(PR+PO) 并行
-  const mrpBillnos = mrpRecords.map(m => m.billno).filter(Boolean);
-  console.log(`[GanttService] MRP billnos (${mrpBillnos.length} 个):`, mrpBillnos.slice(0, 5), mrpBillnos.length > 5 ? `...共 ${mrpBillnos.length}` : '');
+  // 用全部 MRP billno（含已关闭），因为已关闭的 MRP 可能已生成 PR/PO
+  const mrpBillnos = mrpResult.allMrpBillnos ?? mrpRecords.map(m => m.billno).filter(Boolean);
+  console.log(`[GanttService] MRP billnos (${mrpBillnos.length} 个，含已关闭):`, mrpBillnos.slice(0, 5), mrpBillnos.length > 5 ? `...共 ${mrpBillnos.length}` : '');
   const effectiveDemandStart = demandStart || productionStart;
   console.log(`[GanttService] effectiveDemandStart=${effectiveDemandStart}, demandStart=${demandStart}, productionStart=${productionStart}`);
 
@@ -126,11 +128,11 @@ export async function buildGanttData(
   // ── Round 2: PR → PO（串行链：PR 结果的 billno 用于 PO 精确查询） ──
   const tR2 = performance.now();
 
-  // Step 3: PR（精确查询: srcbillid in [mrpBillnos]）
+  // Step 3: PR（精确查询: srcbillnumber in [mrpBillnos]）
   const prResult = await planningV2DataService.loadPRByMRPBillnos(mrpBillnos, externalCodes, effectiveDemandStart);
   perf['3_PR查询'] = Math.round(performance.now() - tR2);
 
-  // Step 4: PO（精确查询: srcbillid in [prBillnos]，需要 PR 结果）
+  // Step 4: PO（精确查询: srcbillnumber in [prBillnos]，需要 PR 结果）
   const tPO = performance.now();
   const prBillnos = prResult.data.map(pr => pr.billno).filter(Boolean);
   const poResult = await planningV2DataService.loadPOByPRBillnos(prBillnos, externalCodes, effectiveDemandStart);
@@ -151,6 +153,8 @@ export async function buildGanttData(
   // MRP 映射：物料编码 → 需求量（优先 bizorderqty，fallback adviseorderqty）
   const mrpMap = new Map<string, number>();
   const mrpHasRecord = new Set<string>();  // 记录哪些物料有 MRP 记录（用于三分类）
+  // MRP 投放信息映射：物料编码 → { dropStatusTitle, bizdropqty }（累加投放数量，取最新投放状态）
+  const mrpDropMap = new Map<string, { dropStatusTitle: string; bizdropqty: number }>();
   mrpRecords.forEach(m => {
     const code = m.materialplanid_number;
     if (!code) return;
@@ -158,6 +162,18 @@ export async function buildGanttData(
     const qty = planningV2DataService.getMRPDemandQty(m);
     // 同一物料可能有多条 MRP，累加
     mrpMap.set(code, (mrpMap.get(code) || 0) + qty);
+    // 投放信息累加
+    const existing = mrpDropMap.get(code);
+    if (existing) {
+      existing.bizdropqty += m.bizdropqty || 0;
+      // 取最新一条的投放状态
+      if (m.dropstatus_title) existing.dropStatusTitle = m.dropstatus_title;
+    } else {
+      mrpDropMap.set(code, {
+        dropStatusTitle: m.dropstatus_title || '',
+        bizdropqty: m.bizdropqty || 0,
+      });
+    }
   });
 
   const prByMaterial = new Map<string, number>();
@@ -323,6 +339,8 @@ export async function buildGanttData(
         prStatus: isExternal ? (hasPR ? 'has_pr' : 'no_pr') : 'not_applicable',
         poDeliverDate,
         availableInventoryQty: availableInvMap.get(bomItem.material_code),
+        dropStatusTitle: mrpDropMap.get(bomItem.material_code)?.dropStatusTitle,
+        bizdropqty: mrpDropMap.get(bomItem.material_code)?.bizdropqty,
         children: [],
       };
 
@@ -481,9 +499,10 @@ export function getGanttSummary(
   // 超期物料：到货日晚于生产计划结束日
   const overdueItems = materials.filter(b => b.endDate > planEndDate);
 
-  // 过期物料：应开始采购日已过，且外购/委外未下PO
+  // 过期物料：应开始采购日已过，且外购/委外未下PO，且MRP有净需求缺口（shortage）
+  // 没有MRP记录或MRP净需求已满足的物料，无需采购，没PO是正常的
   const pastDueItems = materials.filter(
-    b => b.startDate < today && (b.poStatus === 'no_po') && b.materialType !== '自制',
+    b => b.startDate < today && b.poStatus === 'no_po' && b.materialType !== '自制' && b.supplyStatus === 'shortage',
   );
 
   // 按唯一物料编码统计（同一物料在不同父组件下只算一种），与 MRP 面板口径一致

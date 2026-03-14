@@ -37,13 +37,15 @@ const typeColorMap: Record<string, string> = {
 };
 
 function exportCSV(rows: KeyMonitorMaterial[], productCode: string): void {
-  const headers = '物料编码,物料名称,物料类型,BOM层级,缺口数量,当前库存,可用库存,新入库,PR状态,PO状态,PO交货日,倒排开始,倒排到货,提前期\n';
+  const headers = '物料编码,物料名称,物料类型,BOM层级,投放状态,投放数量,缺口数量,当前库存,可用库存,新入库,PR状态,PO状态,PO交货日,倒排开始,倒排到货,提前期\n';
   const lines = rows.map(r =>
     [
       r.materialCode,
       `"${r.materialName}"`,
       r.materialType,
       `L${r.bomLevel}`,
+      r.dropStatusTitle ?? 'N/A',
+      r.bizdropqty != null ? r.bizdropqty : 'N/A',
       r.hasShortage ? r.shortageQuantity : '-',
       r.inventoryQty ?? '-',
       r.availableInventoryQty ?? '-',
@@ -68,7 +70,7 @@ function exportCSV(rows: KeyMonitorMaterial[], productCode: string): void {
 export default function ShortageList({ keyMaterials, productCode, loading }: KeyMaterialListProps) {
   const [searchText, setSearchText] = useState('');
   const [bomLevelFilter, setBomLevelFilter] = useState<BomLevelFilter>('all');
-  const [shortageOnly, setShortageOnly] = useState(false);
+  const [mrpFilter, setMrpFilter] = useState<'all' | 'has_mrp' | 'no_mrp'>('all');
   const [anomalyOnly, setAnomalyOnly] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -87,19 +89,21 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
     if (bomLevelFilter !== 'all') {
       items = items.filter(m => m.bomLevel === bomLevelFilter);
     }
-    // Shortage only
-    if (shortageOnly) {
-      items = items.filter(m => m.hasShortage);
+    // MRP filter
+    if (mrpFilter === 'has_mrp') {
+      items = items.filter(m => m.dropStatusTitle != null);
+    } else if (mrpFilter === 'no_mrp') {
+      items = items.filter(m => m.dropStatusTitle == null);
     }
-    // Anomaly only: no inventory and bomLevel > 0
+    // Anomaly only: 无MRP记录 且 库存为0或无记录（bomLevel > 0排除产品本身）
     if (anomalyOnly) {
-      items = items.filter(m => (m.availableInventoryQty === 0 || m.availableInventoryQty === null) && m.bomLevel > 0);
+      items = items.filter(m => m.dropStatusTitle == null && (m.availableInventoryQty === 0 || m.availableInventoryQty === null) && m.bomLevel > 0);
     }
     return items;
-  }, [keyMaterials, searchText, bomLevelFilter, shortageOnly, anomalyOnly]);
+  }, [keyMaterials, searchText, bomLevelFilter, mrpFilter, anomalyOnly]);
 
   // Reset page on filter/search change
-  useEffect(() => { setCurrentPage(1); }, [searchText, bomLevelFilter, shortageOnly, anomalyOnly]);
+  useEffect(() => { setCurrentPage(1); }, [searchText, bomLevelFilter, mrpFilter, anomalyOnly]);
 
   // ---------- Pagination ----------
   const totalPages = Math.max(1, Math.ceil(filteredItems.length / PAGE_SIZE));
@@ -108,9 +112,10 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
 
   // ---------- Stats ----------
   const stats = useMemo(() => {
-    const shortage = keyMaterials.filter(m => m.hasShortage).length;
-    const anomaly = keyMaterials.filter(m => (m.availableInventoryQty === 0 || m.availableInventoryQty === null) && m.bomLevel > 0).length;
-    return { total: keyMaterials.length, shortage, anomaly };
+    const hasMrp = keyMaterials.filter(m => m.dropStatusTitle != null).length;
+    const noMrp = keyMaterials.length - hasMrp;
+    const anomaly = keyMaterials.filter(m => m.dropStatusTitle == null && (m.availableInventoryQty === 0 || m.availableInventoryQty === null) && m.bomLevel > 0).length;
+    return { total: keyMaterials.length, hasMrp, noMrp, anomaly };
   }, [keyMaterials]);
 
   if (loading) {
@@ -182,12 +187,19 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
               <option value={3}>L3</option>
             </select>
           </div>
-          {/* 仅缺口 */}
-          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
-            <input type="checkbox" checked={shortageOnly} onChange={e => setShortageOnly(e.target.checked)}
-              className="w-3.5 h-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-            仅缺口
-          </label>
+          {/* MRP */}
+          <div className="flex items-center gap-2 text-xs">
+            <span className="text-slate-500">MRP:</span>
+            <select
+              value={mrpFilter}
+              onChange={e => setMrpFilter(e.target.value as 'all' | 'has_mrp' | 'no_mrp')}
+              className="border border-slate-200 rounded px-1.5 py-0.5 text-xs bg-white"
+            >
+              <option value="all">全部</option>
+              <option value="has_mrp">有MRP</option>
+              <option value="no_mrp">无MRP</option>
+            </select>
+          </div>
           {/* 仅异常 */}
           <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
             <input type="checkbox" checked={anomalyOnly} onChange={e => setAnomalyOnly(e.target.checked)}
@@ -197,7 +209,8 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
         </div>
         {/* 统计 */}
         <div className="flex items-center gap-3 text-[11px] text-slate-500">
-          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-red-500" />缺口 {stats.shortage}</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-blue-500" />有MRP {stats.hasMrp}</span>
+          <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-slate-400" />无MRP {stats.noMrp}</span>
           <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-amber-500" />异常 {stats.anomaly}</span>
           <span className="text-slate-400">筛选 {filteredItems.length} / {stats.total}</span>
         </div>
@@ -212,6 +225,8 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
               <th className="text-left px-3 py-2 font-medium whitespace-nowrap">物料名称</th>
               <th className="text-center px-2 py-2 font-medium whitespace-nowrap">类型</th>
               <th className="text-center px-2 py-2 font-medium whitespace-nowrap">层级</th>
+              <th className="text-center px-2 py-2 font-medium whitespace-nowrap">投放状态</th>
+              <th className="text-right px-2 py-2 font-medium whitespace-nowrap">投放数量</th>
               <th className="text-right px-2 py-2 font-medium whitespace-nowrap">缺口</th>
               <th className="text-right px-2 py-2 font-medium whitespace-nowrap">当前库存</th>
               <th className="text-right px-2 py-2 font-medium whitespace-nowrap">可用库存</th>
@@ -227,7 +242,7 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
           <tbody>
             {filteredItems.length === 0 ? (
               <tr>
-                <td colSpan={14} className="py-8 text-center text-slate-400 text-xs">
+                <td colSpan={16} className="py-8 text-center text-slate-400 text-xs">
                   {searchText ? `未找到匹配 "${searchText}" 的物料` : '暂无符合条件的物料'}
                 </td>
               </tr>
@@ -236,7 +251,7 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
                 key={item.materialCode}
                 className={`border-t border-slate-100 hover:bg-slate-50/50 ${
                   item.hasShortage ? 'bg-red-50/30' :
-                  (item.availableInventoryQty === 0 || item.availableInventoryQty === null) && item.bomLevel > 0 ? 'bg-amber-50/30' : ''
+                  item.dropStatusTitle == null && (item.availableInventoryQty === 0 || item.availableInventoryQty === null) && item.bomLevel > 0 ? 'bg-amber-50/30' : ''
                 }`}
               >
                 <td className="px-3 py-2 font-mono text-slate-700 whitespace-nowrap">{item.materialCode}</td>
@@ -250,6 +265,27 @@ export default function ShortageList({ keyMaterials, productCode, loading }: Key
                   </span>
                 </td>
                 <td className="px-2 py-2 text-center text-slate-500">L{item.bomLevel}</td>
+                <td className="px-2 py-2 text-center">
+                  {item.dropStatusTitle != null ? (
+                    <span className={`px-1 py-0.5 rounded text-[10px] font-medium ${
+                      item.dropStatusTitle === '已投放' ? 'bg-blue-100 text-blue-700'
+                      : item.dropStatusTitle === '未投放' ? 'bg-slate-100 text-slate-600'
+                      : item.dropStatusTitle ? 'bg-slate-100 text-slate-600'
+                      : ''
+                    }`}>
+                      {item.dropStatusTitle || '-'}
+                    </span>
+                  ) : (
+                    <span className="text-slate-300">N/A</span>
+                  )}
+                </td>
+                <td className="px-2 py-2 text-right">
+                  {item.bizdropqty != null ? (
+                    <span className={item.bizdropqty > 0 ? 'text-blue-600 font-medium' : 'text-slate-500'}>{item.bizdropqty.toLocaleString()}</span>
+                  ) : (
+                    <span className="text-slate-300">N/A</span>
+                  )}
+                </td>
                 <td className="px-2 py-2 text-right">
                   {item.hasShortage ? (
                     <span className="text-red-600 font-semibold">{item.shortageQuantity.toLocaleString()}</span>

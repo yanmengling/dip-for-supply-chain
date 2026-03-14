@@ -19,6 +19,9 @@ interface GanttChartProps {
   bars: GanttBar[];
   productionStart: string;
   productionEnd: string;
+  productCode?: string;
+  productName?: string;
+  forecastBillnos?: string[];
 }
 
 /** 每天对应的像素宽度 */
@@ -30,7 +33,7 @@ const LEFT_COL_WIDTH = 240;
 /** 单次最多渲染行数，超出时提示折叠 */
 const MAX_VISIBLE_ROWS = 200;
 
-const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) => {
+const GanttChart = ({ bars, productionStart, productionEnd, productCode, productName, forecastBillnos }: GanttChartProps) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     bars.forEach(root => initial.add(root.materialCode));
@@ -178,7 +181,7 @@ const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) =
   return (
     <div className="space-y-3">
       {/* 计划进度总结卡片 */}
-      <GanttSummaryCard summary={summary} />
+      <GanttSummaryCard summary={summary} productCode={productCode} productName={productName} forecastBillnos={forecastBillnos} />
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         {/* 表头行（sticky top，不滚动） */}

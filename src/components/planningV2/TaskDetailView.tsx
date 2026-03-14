@@ -441,7 +441,7 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
             </button>
           </div>
         ) : (
-          <GanttChart bars={ganttBars} productionStart={task.demandStart} productionEnd={task.demandEnd} />
+          <GanttChart bars={ganttBars} productionStart={task.demandStart} productionEnd={task.demandEnd} productCode={task.productCode} productName={task.productName} forecastBillnos={task.relatedForecastBillnos} />
         )}
       </div>
 

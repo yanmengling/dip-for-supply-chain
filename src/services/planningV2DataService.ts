@@ -579,6 +579,10 @@ export async function getMRPStats(): Promise<{
 export interface DegradedResult<T> {
     data: T;
     isDegraded: boolean;
+    /** MRP 精确查询时返回过滤前的全部 billno（含已关闭），供 PR/PO 精确关联用 */
+    allMrpBillnos?: string[];
+    /** MRP 精确查询时返回过滤前的全部记录（含已关闭），供步骤②展示全部 MRP 用 */
+    allMrpRecords?: MRPPlanOrderAPI[];
 }
 
 /**
@@ -684,9 +688,10 @@ export async function loadMRPByBillnos(
 
     // 精确关联有结果 → 正向过滤后返回
     if (preciseResult.length > 0) {
+        const allBillnos = preciseResult.map(r => r.billno).filter(Boolean);
         const filtered = filterActiveMRP(preciseResult);
-        console.log(`[PlanningV2DataService] MRP 精确查询结果: ${preciseResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
-        return { data: filtered, isDegraded: false };
+        console.log(`[PlanningV2DataService] MRP 精确查询结果: ${preciseResult.length} 条 → 正向过滤后 ${filtered.length} 条，全部billno ${allBillnos.length} 个`);
+        return { data: filtered, isDegraded: false, allMrpBillnos: allBillnos, allMrpRecords: preciseResult };
     }
 
     // 策略2: 降级到产品编码全量加载
@@ -709,28 +714,6 @@ export async function loadMRPByBillnos(
     // 注：如果新 API 没有 finished_product_code，则返回全部并让 ganttService 通过 BOM 过滤
     const filtered = filterActiveMRP(fallbackResult);
     console.log(`[PlanningV2DataService] MRP fallback: ${fallbackResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
-
-    // 诊断：在全量数据中搜索目标 billno，确认数据是否存在
-    const matchInFallback = fallbackResult.filter(r =>
-        forecastBillnos.some(bn => r.rootdemandbillno?.includes(bn))
-    );
-    if (matchInFallback.length > 0) {
-        console.warn(`[PlanningV2DataService] ⚠️ 诊断: 全量数据中找到 ${matchInFallback.length} 条匹配 rootdemandbillno，但精确查询未命中！`);
-        console.log(`[PlanningV2DataService] 匹配记录示例:`, matchInFallback.slice(0, 3).map(r => ({
-            billno: r.billno,
-            rootdemandbillno: r.rootdemandbillno,
-            closestatus_title: r.closestatus_title,
-            materialplanid_number: r.materialplanid_number,
-        })));
-    } else {
-        console.warn(`[PlanningV2DataService] ⚠️ 诊断: 全量数据 ${fallbackResult.length} 条中也未找到 rootdemandbillno 匹配！`);
-        // 打印全量数据中有 rootdemandbillno 的记录数
-        const withBillno = fallbackResult.filter(r => r.rootdemandbillno && r.rootdemandbillno.trim() !== '');
-        console.log(`[PlanningV2DataService] 全量数据中有 rootdemandbillno 的记录: ${withBillno.length}/${fallbackResult.length}`);
-        if (withBillno.length > 0) {
-            console.log(`[PlanningV2DataService] rootdemandbillno 样本:`, withBillno.slice(0, 5).map(r => r.rootdemandbillno));
-        }
-    }
     return { data: filtered, isDegraded: true };
 }
 
@@ -741,8 +724,8 @@ export async function loadMRPByBillnos(
 /**
  * 按 MRP 单号精确查询 PR（PRD 1.6.2）
  *
- * 策略1: srcbillid in [mrpBillnos]（精确关联，PR.srcbillid = MRP.billno）
- * 策略2: material_number in [materialCodes] + biztime >= demandStart（fallback）
+ * 策略1: srcbillnumber in [mrpBillnos]（精确关联，PR.srcbillnumber = MRP.billno）
+ * 策略2: material_number in [materialCodes] + 前推6个月时间窗口（fallback）
  */
 export async function loadPRByMRPBillnos(
     mrpBillnos: string[],
@@ -753,14 +736,13 @@ export async function loadPRByMRPBillnos(
         return { data: [], isDegraded: true };
     }
 
-    // 策略1: 精确关联（srcbillid in [mrpBillnos]）
+    // 策略1: 精确关联（srcbillnumber in [mrpBillnos]，PR.srcbillnumber = MRP.billno）
     if (mrpBillnos.length > 0) {
         const sortedBillnos = [...mrpBillnos].sort();
         const cacheKey = `pr_precise_${sortedBillnos.length}_${sortedBillnos[0]}_${demandStart}`;
 
         const preciseResult = await withCachedLoader(cacheKey, async () => {
-            // 精确关联已通过 srcbillid 锁定单据，不再用 biztime 过滤
-            console.log(`[PlanningV2DataService] PR 精确查询: srcbillid in [${mrpBillnos.length} 个MRP单号]`, mrpBillnos.slice(0, 5));
+            console.log(`[PlanningV2DataService] PR 精确查询: srcbillnumber in [${mrpBillnos.length} 个MRP单号]`, mrpBillnos);
             const chunks = chunkArray(mrpBillnos, BATCH_CHUNK_SIZE);
             // Phase 2b: 分片并行化
             const allData: PRRecord[] = await parallelChunks(chunks, async (chunk) => {
@@ -768,7 +750,7 @@ export async function loadPRByMRPBillnos(
                     condition: {
                         operation: 'and',
                         sub_conditions: [
-                            { field: 'srcbillid', operation: 'in', value: chunk },
+                            { field: 'srcbillnumber', operation: 'in', value: chunk },
                         ]
                     },
                     limit: 10000,
@@ -785,14 +767,12 @@ export async function loadPRByMRPBillnos(
             return [] as PRRecord[];
         });
 
-        if (preciseResult.length > 0) {
-            return { data: preciseResult, isDegraded: false };
-        }
-        console.warn('[PlanningV2DataService] PR 精确查询无结果，降级到 material_number 查询');
+        // 精确查询链完整（有 MRP billno 可查），无论结果是否为空都不算降级
+        // 0 条只是意味着这些 MRP 还没走到 PR 阶段
+        return { data: preciseResult, isDegraded: false };
     }
 
-    // 策略2: fallback（material_number in [codes]，前推6个月时间窗口）
-    // 注意：demandStart 是需求交货日期，PR 下单时间远早于此，需前推
+    // 策略2: fallback（无 MRP billno，只能用 material_number 模糊查询）
     if (materialCodes.length === 0) {
         return { data: [], isDegraded: true };
     }
@@ -821,12 +801,6 @@ export async function loadPRByMRPBillnos(
                 need_total: true,
                 timeout: 120000,
             });
-            // 诊断：打印首条 PR 原始字段，确认 srcbillid/srcbillnumber 实际值
-            if (response.entries?.length > 0 && chunk === chunks[0]) {
-                const raw = response.entries[0];
-                console.log(`[PlanningV2DataService] PR 原始字段列表:`, Object.keys(raw));
-                console.log(`[PlanningV2DataService] PR 首条原始记录 srcbillid="${raw.srcbillid}" srcbillnumber="${raw.srcbillnumber}"`, raw);
-            }
             return response.entries.map((item: any) => parsePRRecord(item));
         });
 
@@ -840,7 +814,7 @@ export async function loadPRByMRPBillnos(
     return { data: fallbackResult, isDegraded: true };
 }
 
-/** 解析 PR 记录（复用，新增 srcbillid 字段） */
+/** 解析 PR 记录 */
 function parsePRRecord(item: any): PRRecord {
     return {
         billno: item.billno || '',
@@ -852,6 +826,7 @@ function parsePRRecord(item: any): PRRecord {
         auditdate: item.auditdate || '',
         org_name: item.org_name || '',
         billtype_name: item.billtype_name || '',
+        srcbillnumber: item.srcbillnumber || '',
     };
 }
 
@@ -906,14 +881,12 @@ export async function loadPOByPRBillnos(
             return [] as PORecord[];
         });
 
-        if (preciseResult.length > 0) {
-            return { data: preciseResult, isDegraded: false };
-        }
-        console.warn('[PlanningV2DataService] PO 精确查询无结果，降级到 material_number 查询');
+        // 精确查询链完整（有 PR billno 可查），无论结果是否为空都不算降级
+        // 0 条只是意味着这些 PR 还没走到 PO 阶段
+        return { data: preciseResult, isDegraded: false };
     }
 
-    // 策略2: fallback（material_number in [codes]，前推6个月时间窗口）
-    // 注意：demandStart 是需求交货日期，PO 下单时间远早于此，需前推
+    // 策略2: fallback（无 PR billno，只能用 material_number 模糊查询）
     if (materialCodes.length === 0) {
         return { data: [], isDegraded: true };
     }

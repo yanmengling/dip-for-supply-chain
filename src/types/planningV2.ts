@@ -371,6 +371,9 @@ export interface KeyMonitorMaterial {
   prStatus: string;
   poStatus: string;
   poDeliverDate?: string;
+  // MRP 投放信息
+  dropStatusTitle: string | null;
+  bizdropqty: number | null;
   // 倒排时间
   startDate: string;
   endDate: string;
@@ -443,19 +446,34 @@ export interface GanttBar {
   prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
   poDeliverDate?: string;    // 最新PO交货日
   availableInventoryQty?: number;  // 可用库存数量
+  /** MRP 投放状态 */
+  dropStatusTitle?: string;
+  /** MRP 投放数量 */
+  bizdropqty?: number;
   children: GanttBar[];
 }
 
-/** 步骤③ MRP 展示行 */
+/** 步骤② MRP 展示行（以 MRP 记录为主表维度） */
 export interface MRPDisplayRow {
+  /** MRP 单号 */
+  mrpBillno: string;
+  /** 物料编码 */
   materialCode: string;
+  /** 物料名称 */
   materialName: string;
-  bomLevel: number;
+  /** 物料属性（外购/自制/委外） */
   materialType: string;
+  /** MRP 需求量 */
   netDemand: number;
+  /** MRP 状态（正常/已关闭等） */
+  closeStatus: string;
+  /** 是否有关联 PR */
   hasPR: boolean;
+  /** 是否有关联 PO */
   hasPO: boolean;
+  /** 关联的 PR 记录 */
   prRecords: PRRecord[];
+  /** 关联的 PO 记录 */
   poRecords: PORecord[];
 }
 
@@ -470,6 +488,8 @@ export interface PRRecord {
   auditdate: string;
   org_name: string;
   billtype_name: string;
+  /** 来源单据编号（对应 MRP.billno） */
+  srcbillnumber: string;
 }
 
 /** PO 记录 */
