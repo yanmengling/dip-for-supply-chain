@@ -453,6 +453,16 @@ export interface GanttBar {
   children: GanttBar[];
 }
 
+/** 备料（替代料）信息 */
+export interface AltPartInfo {
+  /** 备料物料编码 */
+  materialCode: string;
+  /** 备料物料名称 */
+  materialName: string;
+  /** 备料库存数量 */
+  inventoryQty: number;
+}
+
 /** 步骤② MRP 展示行（以 MRP 记录为主表维度） */
 export interface MRPDisplayRow {
   /** MRP 单号 */
@@ -463,10 +473,28 @@ export interface MRPDisplayRow {
   materialName: string;
   /** 物料属性（外购/自制/委外） */
   materialType: string;
-  /** MRP 需求量 */
-  netDemand: number;
-  /** MRP 状态（正常/已关闭等） */
-  closeStatus: string;
+  /** 订单数量（bizorderqty 优先，fallback adviseorderqty） */
+  orderQty: number;
+  /** 投放数量 */
+  dropQty: number;
+  /** MRP 投放状态（dropstatus_title） */
+  dropStatus: string;
+  /** 投放时间 */
+  dropTime: string;
+  /** 投放单据类型 */
+  dropBillType: string;
+  /** BOM 层级 */
+  bomLevel: number | null;
+  /** BOM 用量（standard_usage） */
+  bomUsage: number | null;
+  /** 备料（替代料）信息 */
+  altParts: AltPartInfo[];
+  /** 标准交期时长（天） */
+  leadtime: number | null;
+  /** 创建时间 */
+  createTime: string;
+  /** 可用日期 */
+  availableDate: string;
   /** 是否有关联 PR */
   hasPR: boolean;
   /** 是否有关联 PO */
@@ -517,6 +545,10 @@ export interface BOMRecord {
   bom_version: string;
   alt_part?: string;
   alt_priority?: number;
+  /** 替代方式（"替代" 表示该物料有替代料） */
+  alt_method?: string;
+  /** 替代组号（同组号的物料互为替代关系） */
+  alt_group_no?: string;
 }
 
 /** 物料主数据 */

@@ -1020,6 +1020,8 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
                 bom_version: item.bom_version || '',
                 alt_part: item.alt_part || '',
                 alt_priority: isNaN(altPriority) ? 0 : altPriority,
+                alt_method: item.alt_method || '',
+                alt_group_no: item.alt_group_no || '',
             };
         }).filter(item => {
             // 容错：跳过缺少关键字段的记录
@@ -1063,6 +1065,75 @@ export async function loadBOMByProduct(productCode: string): Promise<BOMRecord[]
         return reachable;
     });
     // 注意：BOM 加载失败直接抛出，让调用方感知失败
+}
+
+/**
+ * 加载指定产品 BOM 中的替代料记录（alt_priority > 0）
+ * 用于步骤② MRP 面板展示替代料信息
+ *
+ * 逻辑：查询同产品 + 同版本，不限 alt_priority，
+ * 然后筛出 alt_method="替代" 且 alt_priority>0 的记录
+ */
+export async function loadBOMSubstitutes(productCode: string): Promise<BOMRecord[]> {
+    const cacheKey = `bom_subs_${productCode}`;
+
+    return withCachedLoader(cacheKey, async () => {
+        console.log(`[PlanningV2DataService] 加载 BOM 替代料: ${productCode}...`);
+
+        // Step 1: 获取最新 bom_version（复用同逻辑）
+        const versionResp = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'bom_material_code', operation: '==', value: productCode },
+                ]
+            },
+            limit: 100,
+            need_total: false,
+            timeout: 120000,
+        });
+        const latestVersion = (versionResp.entries || []).reduce(
+            (max: string, r: any) => ((r.bom_version || '') > max ? (r.bom_version || '') : max), ''
+        );
+        if (!latestVersion) return [];
+
+        // Step 2: 查询全部记录（不限 alt_priority），筛选替代料
+        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.BOM, {
+            condition: {
+                operation: 'and',
+                sub_conditions: [
+                    { field: 'bom_material_code', operation: '==', value: productCode },
+                    { field: 'bom_version', operation: '==', value: latestVersion },
+                ]
+            },
+            limit: 10000,
+            need_total: true,
+            timeout: 120000,
+        });
+
+        const allRecords: BOMRecord[] = (response.entries || []).map((item: any) => {
+            const altPriority = item.alt_priority != null ? parseInt(item.alt_priority) : 0;
+            return {
+                bom_material_code: item.bom_material_code || '',
+                material_code: item.material_code || '',
+                material_name: item.material_name || '',
+                parent_material_code: item.parent_material_code || '',
+                bom_level: parseInt(item.bom_level) || 1,
+                standard_usage: parseFloat(item.standard_usage) || 0,
+                bom_version: item.bom_version || '',
+                alt_part: item.alt_part || '',
+                alt_priority: isNaN(altPriority) ? 0 : altPriority,
+                alt_method: item.alt_method || '',
+                alt_group_no: item.alt_group_no || '',
+            };
+        }).filter((item: BOMRecord) => !!item.material_code);
+
+        console.log(`[PlanningV2DataService] BOM ${productCode} 替代料: 全部 ${allRecords.length} 条`);
+        return allRecords;
+    }).catch(error => {
+        console.error('[PlanningV2DataService] 加载 BOM 替代料失败:', error);
+        return [];
+    });
 }
 
 // ============================================================================
@@ -1444,6 +1515,7 @@ export const planningV2DataService = {
     getMRPDemandQty,
     // BOM
     loadBOMByProduct,
+    loadBOMSubstitutes,
     // Material
     loadMaterialsByCode,
     // PR（旧接口，向后兼容）

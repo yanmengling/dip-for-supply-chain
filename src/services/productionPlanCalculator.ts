@@ -312,6 +312,7 @@ export function analyzeProducts(plans: ProductionPlan[]): ProductAnalysis[] {
     return plans
         .map(plan => ({
             orderNumber: plan.order_number,
+            order_number: plan.order_number,
             code: plan.code,
             name: plan.name,
             quantity: plan.quantity,
