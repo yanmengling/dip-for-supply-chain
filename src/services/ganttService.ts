@@ -176,6 +176,14 @@ export async function buildGanttData(
     }
   });
 
+  // 诊断：MRP 记录数 vs 唯一物料数
+  console.log(`[GanttService] MRP映射: ${mrpRecords.length}条记录 → ${mrpHasRecord.size}个唯一物料, mrpDropMap=${mrpDropMap.size}个`);
+  // 打印每个MRP物料的记录数
+  const mrpCountByCode = new Map<string, number>();
+  mrpRecords.forEach(m => { if (m.materialplanid_number) mrpCountByCode.set(m.materialplanid_number, (mrpCountByCode.get(m.materialplanid_number) || 0) + 1); });
+  const multiMrpCodes = [...mrpCountByCode.entries()].filter(([, c]) => c > 1);
+  if (multiMrpCodes.length > 0) console.log(`[GanttService] 多条MRP的物料(${multiMrpCodes.length}个):`, multiMrpCodes.map(([code, cnt]) => `${code}×${cnt}`));
+
   const prByMaterial = new Map<string, number>();
   prRecords.forEach(pr => {
     prByMaterial.set(pr.material_number, (prByMaterial.get(pr.material_number) || 0) + 1);
@@ -214,8 +222,10 @@ export async function buildGanttData(
     ? parseFloat(productMat.product_fixedleadtime) || 7
     : 7;
 
-  const startDate = new Date(productionStart);
   const endDate = new Date(productionEnd);
+  // 产品行倒排：startDate = demandEnd - 生产固定提前期
+  const startDate = new Date(endDate);
+  startDate.setDate(startDate.getDate() - productLeadtime);
 
   // L0 产品层
   const root: GanttBar = {
@@ -233,6 +243,7 @@ export async function buildGanttData(
     supplyStatus: 'sufficient',  // 产品根节点默认满足
     poStatus: 'not_applicable',
     prStatus: 'not_applicable',
+    hasMRP: mrpHasRecord.has(productCode),
     availableInventoryQty: availableInvMap.get(productCode),
     children: [],
   };
@@ -272,26 +283,28 @@ export async function buildGanttData(
       }
       const mat = materialMap.get(bomItem.material_code);
       const isExternal = mat?.materialattr === '外购' || mat?.materialattr === '委外';
+
+      // MRP 缺口 + 三分类（v3.7 Phase B: B6）
+      const demand = mrpMap.get(bomItem.material_code) ?? 0;
+      const hasMRP = mrpHasRecord.has(bomItem.material_code);
+
+      // 提前期：有MRP记录用物料提前期，无MRP记录（库存满足）倒排1天
       const rawLeadtime = isExternal
         ? parseFloat(mat?.purchase_fixedleadtime || '0')
         : parseFloat(mat?.product_fixedleadtime || '0');
-      const leadtime = rawLeadtime > 0 ? rawLeadtime : 7;
+      const leadtime = hasMRP ? (rawLeadtime > 0 ? rawLeadtime : 7) : 1;
       // 倒排核心：子件结束 = 父级开始 - 1天
       const childEnd = new Date(parentBar.startDate);
       childEnd.setDate(childEnd.getDate() - 1);
       const childStart = new Date(childEnd);
       childStart.setDate(childStart.getDate() - leadtime);
-
-      // MRP 缺口 + 三分类（v3.7 Phase B: B6）
-      const demand = mrpMap.get(bomItem.material_code) ?? 0;
-      const hasMRP = mrpHasRecord.has(bomItem.material_code);
-      const hasShortage = hasMRP && demand < 0;
+      const hasShortage = hasMRP;  // 有MRP记录即为缺货
       const availableQty = availableInvMap.get(bomItem.material_code) ?? 0;
 
-      // 物料供需三分类（PRD 4.4.6）
+      // 物料供需三分类：有MRP=缺货（需采购跟踪），无MRP+有库存=就绪，无MRP+无库存=异常
       let supplyStatus: SupplyStatus;
       if (hasMRP) {
-        supplyStatus = demand < 0 ? 'shortage' : 'sufficient';
+        supplyStatus = 'shortage';  // 有MRP记录即表示需采购，统一标记为缺货
       } else {
         // 无 MRP 记录
         supplyStatus = availableQty > 0 ? 'sufficient_no_mrp' : 'anomaly';
@@ -316,7 +329,13 @@ export async function buildGanttData(
       let status: GanttBar['status'] = 'on_time';
       const today = new Date();
       today.setHours(0, 0, 0, 0);
-      if (hasPO) {
+      if (!hasMRP && supplyStatus === 'sufficient_no_mrp') {
+        // 无MRP + 有库存 = 就绪，绿色
+        status = 'ready';
+      } else if (!hasMRP && supplyStatus === 'anomaly') {
+        // 无MRP + 无库存 = 异常，黄色
+        status = 'anomaly';
+      } else if (hasPO) {
         status = 'ordered';
       } else if (childStart < today || childEnd > parentBar.startDate) {
         status = 'risk';
@@ -338,6 +357,7 @@ export async function buildGanttData(
         poStatus: isExternal ? (hasPO ? 'has_po' : 'no_po') : 'not_applicable',
         prStatus: isExternal ? (hasPR ? 'has_pr' : 'no_pr') : 'not_applicable',
         poDeliverDate,
+        hasMRP,
         availableInventoryQty: availableInvMap.get(bomItem.material_code),
         dropStatusTitle: mrpDropMap.get(bomItem.material_code)?.dropStatusTitle,
         bizdropqty: mrpDropMap.get(bomItem.material_code)?.bizdropqty,
@@ -365,6 +385,25 @@ export async function buildGanttData(
   }
 
   perf['6_BOM树+倒排'] = Math.round(performance.now() - t6);
+
+  // ── MRP vs BOM 物料差异诊断（排查步骤②与步骤③记录数不一致）──
+  const ganttMaterialCodes = new Set(flattenGanttBars([root]).map(b => b.materialCode));
+  const mrpMaterialCodes = new Set(mrpRecords.map(m => m.materialplanid_number).filter(Boolean));
+  const mrpNotInGantt = [...mrpMaterialCodes].filter(c => !ganttMaterialCodes.has(c));
+  if (mrpNotInGantt.length > 0) {
+    console.warn(`[GanttService] MRP有${mrpMaterialCodes.size}个唯一物料, 甘特图有${ganttMaterialCodes.size - 1}个(不含产品), ${mrpNotInGantt.length}个MRP物料不在甘特图中:`, mrpNotInGantt);
+    // 进一步检查：这些物料是否在 BOM 原始数据中
+    const bomMaterialCodes = new Set(bomRecords.map(b => b.material_code));
+    const notInBom = mrpNotInGantt.filter(c => !bomMaterialCodes.has(c));
+    const inBomButFiltered = mrpNotInGantt.filter(c => bomMaterialCodes.has(c));
+    if (notInBom.length > 0) console.warn(`[GanttService]   - 不在BOM中: ${notInBom.length}个`, notInBom);
+    if (inBomButFiltered.length > 0) console.warn(`[GanttService]   - 在BOM中但被甘特图遍历跳过: ${inBomButFiltered.length}个`, inBomButFiltered);
+  } else {
+    console.log(`[GanttService] MRP物料(${mrpMaterialCodes.size}个)全部在甘特图中`);
+  }
+  // 额外诊断：甘特图中有 dropStatusTitle 的节点数（即"有MRP"的BOM位置）
+  const ganttNodesWithMRP = flattenGanttBars([root]).filter(b => b.dropStatusTitle != null && b.dropStatusTitle !== undefined);
+  console.log(`[GanttService] 甘特图节点中有MRP标记: ${ganttNodesWithMRP.length}个（MRP唯一物料=${mrpMaterialCodes.size}个, MRP总记录=${mrpRecords.length}条）`);
 
   // ⏱ 性能报告汇总
   perf['总耗时_ms'] = Math.round(performance.now() - perfStart);

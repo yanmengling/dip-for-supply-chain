@@ -453,6 +453,7 @@ export async function buildKeyMaterialList(
       prStatus: bar.prStatus,
       poStatus: bar.poStatus,
       poDeliverDate: bar.poDeliverDate,
+      hasMRP: bar.hasMRP,
       dropStatusTitle: bar.dropStatusTitle ?? null,
       bizdropqty: bar.bizdropqty ?? null,
       startDate: fmt(bar.startDate),

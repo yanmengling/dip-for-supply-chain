@@ -113,7 +113,7 @@ const GanttChart = ({ bars, productionStart, productionEnd, productCode, product
         key={bar.materialCode}
         id={`gantt-bar-${bar.materialCode}`}
         className={`flex border-b border-slate-100 hover:bg-slate-50 transition-colors ${
-          bar.hasShortage ? 'bg-red-50/50' : ''
+          bar.hasShortage ? 'bg-red-50/50' : bar.status === 'ready' ? 'bg-green-50/50' : bar.status === 'anomaly' ? 'bg-yellow-50/50' : ''
         }`}
         style={{ minWidth: `${LEFT_COL_WIDTH + ganttWidth}px` }}
       >
@@ -133,6 +133,8 @@ const GanttChart = ({ bars, productionStart, productionEnd, productCode, product
             <div className="w-4 flex-shrink-0" />
           )}
           {bar.hasShortage && <span className="text-red-500 text-xs font-bold flex-shrink-0">⚠</span>}
+          {bar.status === 'ready' && <span className="text-green-500 text-xs flex-shrink-0">✓</span>}
+          {bar.status === 'anomaly' && <span className="text-yellow-500 text-xs font-bold flex-shrink-0">?</span>}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span className={`px-1 py-0.5 text-[10px] rounded font-medium flex-shrink-0 ${typeColor}`}>

@@ -371,7 +371,9 @@ export interface KeyMonitorMaterial {
   prStatus: string;
   poStatus: string;
   poDeliverDate?: string;
-  // MRP 投放信息
+  // MRP 信息
+  /** 是否有MRP记录（基于预测单号精确查询匹配） */
+  hasMRP: boolean;
   dropStatusTitle: string | null;
   bizdropqty: number | null;
   // 倒排时间
@@ -438,7 +440,7 @@ export interface GanttBar {
   endDate: Date;
   leadtime: number;
   materialType: string;      // 外购/自制/委外
-  status: 'on_time' | 'risk' | 'ordered';
+  status: 'on_time' | 'risk' | 'ordered' | 'ready' | 'anomaly';
   hasShortage: boolean;
   shortageQuantity: number;
   supplyStatus: SupplyStatus;  // v3.7: 物料供需三分类
@@ -446,6 +448,8 @@ export interface GanttBar {
   prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
   poDeliverDate?: string;    // 最新PO交货日
   availableInventoryQty?: number;  // 可用库存数量
+  /** 是否有 MRP 记录（基于预测单号精确查询的MRP物料编码集合匹配） */
+  hasMRP: boolean;
   /** MRP 投放状态 */
   dropStatusTitle?: string;
   /** MRP 投放数量 */

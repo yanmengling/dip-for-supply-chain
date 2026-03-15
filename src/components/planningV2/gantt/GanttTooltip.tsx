@@ -24,10 +24,13 @@ const GanttTooltip = ({ bar, x, y, onMouseEnter, onMouseLeave }: GanttTooltipPro
 
   const statusLabel = bar.status === 'on_time' ? '按时'
     : bar.status === 'risk' ? '风险'
+    : bar.status === 'ready' ? '就绪'
+    : bar.status === 'anomaly' ? '异常'
     : '已下单';
 
   const statusColor = bar.status === 'on_time' ? 'text-blue-700'
     : bar.status === 'risk' ? 'text-red-600'
+    : bar.status === 'anomaly' ? 'text-yellow-600'
     : 'text-green-600';
 
   const tooltip = (
@@ -102,23 +105,41 @@ const GanttTooltip = ({ bar, x, y, onMouseEnter, onMouseLeave }: GanttTooltipPro
           {/* PR/PO 状态 */}
           {bar.poStatus !== 'not_applicable' && (
             <div className="space-y-1 border-t border-slate-100 pt-2">
-              <div className="flex justify-between">
-                <span className="text-slate-500">PR状态:</span>
-                <span className={bar.prStatus === 'has_pr' ? 'text-green-600' : 'text-red-600'}>
-                  {bar.prStatus === 'has_pr' ? '✅ 已PR' : '❌ 未PR'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">PO状态:</span>
-                <span className={bar.poStatus === 'has_po' ? 'text-green-600' : 'text-red-600'}>
-                  {bar.poStatus === 'has_po' ? '✅ 已PO' : '❌ 未PO'}
-                </span>
-              </div>
-              {bar.poDeliverDate && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">最新交货承诺:</span>
-                  <span className="text-slate-800">{bar.poDeliverDate}</span>
-                </div>
+              {!bar.hasMRP ? (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">PR状态:</span>
+                    <span className="text-slate-400">N/A</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">PO状态:</span>
+                    <span className="text-slate-400">N/A</span>
+                  </div>
+                  <div className="text-[11px] text-green-600 bg-green-50 rounded px-2 py-1 border border-green-100">
+                    无MRP记录 — 该物料无需采购跟踪
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">PR状态:</span>
+                    <span className={bar.prStatus === 'has_pr' ? 'text-green-600' : 'text-red-600'}>
+                      {bar.prStatus === 'has_pr' ? '✅ 已PR' : '❌ 未PR'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">PO状态:</span>
+                    <span className={bar.poStatus === 'has_po' ? 'text-green-600' : 'text-red-600'}>
+                      {bar.poStatus === 'has_po' ? '✅ 已PO' : '❌ 未PO'}
+                    </span>
+                  </div>
+                  {bar.poDeliverDate && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">最新交货承诺:</span>
+                      <span className="text-slate-800">{bar.poDeliverDate}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

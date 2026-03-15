@@ -25,9 +25,7 @@ import type { DegradationInfo } from '../../services/ganttService';
 import { taskService } from '../../services/taskService';
 import GanttChart from './gantt/GanttChart';
 import ShortageList from './ShortageList';
-import MatchingStatusCard from './MatchingStatusCard';
 import WorkOrderTracker from './WorkOrderTracker';
-import AlertBanner from './AlertBanner';
 import DailyMonitoringReport from './DailyMonitoringReport';
 import TaskSummaryReportView from './TaskSummaryReport';
 import ConfirmDialog from './ConfirmDialog';
@@ -187,30 +185,25 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
       const r = task.summaryReport;
       lines.push(`## 2. 总结报告`);
       lines.push(``);
-      lines.push(`### 2.1 计划 vs 实际对比`);
-      lines.push(`| 对比项 | 计划值 | 实际值 | 差异 |`);
-      lines.push(`|--------|--------|--------|------|`);
-      const inboundStr = r.planVsActual.actualInboundDate
-        ? `入库时间: ${r.planVsActual.actualInboundDate.slice(0, 10)}`
-        : '无入库记录';
-      const diffStr = r.planVsActual.timeDiffDays != null
-        ? `${r.planVsActual.timeDiffDays > 0 ? '+' : ''}${r.planVsActual.timeDiffDays} 天`
-        : '-';
-      lines.push(`| 生产周期 | ${r.planVsActual.productionPeriod?.start ?? '-'} ~ ${r.planVsActual.productionPeriod?.end ?? '-'} | ${inboundStr} | ${diffStr} |`);
+      lines.push(`### 2.1 产品完成情况`);
+      lines.push(`| 指标 | 数值 |`);
+      lines.push(`|------|------|`);
+      lines.push(`| 需求数量 | ${r.productCompletion.plannedQuantity.toLocaleString()} 套 |`);
       const qtyStr = r.productCompletion.inboundQuantity != null
-        ? `入库 ${r.productCompletion.inboundQuantity.toLocaleString()} 套`
-        : '-';
-      const rateStr = r.productCompletion.completionRate != null
-        ? `完成率 ${r.productCompletion.completionRate}%`
-        : '-';
-      lines.push(`| 生产数量 | ${r.productCompletion.plannedQuantity.toLocaleString()} 套 | ${qtyStr} | ${rateStr} |`);
+        ? `${r.productCompletion.inboundQuantity.toLocaleString()} 套`
+        : '无入库记录';
+      lines.push(`| 入库数量 | ${qtyStr} |`);
+      if (r.productCompletion.completionRate != null) {
+        lines.push(`| 完成率 | ${r.productCompletion.completionRate}% |`);
+      }
       lines.push(``);
       lines.push(`### 2.2 物料完成统计`);
       lines.push(`| 指标 | 数值 |`);
       lines.push(`|------|------|`);
       lines.push(`| BOM 物料总数 | ${r.materialCompletion.totalMaterials} |`);
       lines.push(`| 已下PO | ${r.materialCompletion.withPO} |`);
-      lines.push(`| 缺口物料 | ${r.materialCompletion.shortageCount} |`);
+      lines.push(`| 未下PO | ${r.materialCompletion.withoutPO} |`);
+      lines.push(`| 有MRP | ${r.materialCompletion.shortageCount} |`);
       lines.push(``);
     }
 
@@ -271,14 +264,15 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
   const stats = useMemo(() => {
     const flat = ganttService.flattenGanttBars(ganttBars);
     const materials = flat.filter(b => b.bomLevel > 0);
-    // 按唯一物料编码统计，与 MRP 面板和甘特图总结卡片口径一致
-    const uniqueCodes = new Set(materials.map(b => b.materialCode));
-    const shortageCodesSet = new Set(materials.filter(b => b.hasShortage).map(b => b.materialCode));
-    const poCodesSet = new Set(materials.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
+    const uniqueMap = new Map<string, typeof materials[0]>();
+    materials.forEach(b => { if (!uniqueMap.has(b.materialCode)) uniqueMap.set(b.materialCode, b); });
+    const unique = Array.from(uniqueMap.values());
     return {
-      totalMaterials: uniqueCodes.size,
-      shortageCount: shortageCodesSet.size,
-      poCount: poCodesSet.size,
+      totalMaterials: unique.length,
+      shortageCount: unique.filter(b => b.supplyStatus === 'shortage').length,
+      readyCount: unique.filter(b => b.status === 'ready').length,
+      anomalyCount: unique.filter(b => b.status === 'anomaly').length,
+      orderedCount: unique.filter(b => b.status === 'ordered').length,
     };
   }, [ganttBars]);
 
@@ -382,18 +376,12 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
             </div>
           </div>
           <div>
-            <div className="text-xs text-slate-500 mb-1">物料概况</div>
+            <div className="text-xs text-slate-500 mb-1">BOM物料</div>
             {loading ? (
               <div className="text-xs text-slate-400">加载中...</div>
             ) : (
               <div className="text-sm text-slate-800">
-                <span>物料 {stats.totalMaterials} 种</span>
-                {stats.shortageCount > 0 && (
-                  <span className="text-red-600 ml-2">缺料 {stats.shortageCount} 项</span>
-                )}
-                <div className="text-xs text-slate-500 mt-0.5">
-                  已下PO {stats.poCount} 项
-                </div>
+                <span>{stats.totalMaterials} 种</span>
               </div>
             )}
           </div>
@@ -412,11 +400,6 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
             — 部分环节使用物料编码匹配，数据可能包含非本预测单的记录
           </span>
         </div>
-      )}
-
-      {/* 预警横幅 (PRD 10.3) */}
-      {!loading && !error && ganttBars.length > 0 && task.status === 'active' && (
-        <AlertBanner ganttBars={ganttBars} demandEnd={task.demandEnd} />
       )}
 
       {/* 总结报告（仅已结束任务） */}
@@ -451,15 +434,9 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
           keyMaterials={keyMaterials}
           productCode={task.productCode}
           loading={keyMaterialsLoading}
-        />
-      )}
-
-      {/* 物料齐套状态 (PRD 6.4) */}
-      {!loading && !error && ganttBars.length > 0 && (
-        <MatchingStatusCard
-          ganttBars={ganttBars}
-          demandEnd={task.demandEnd}
-          degradation={degradation}
+          onAction={(type, code, name) => {
+            console.log(`[TaskDetail] 操作: ${type} - ${code} ${name} (待对接ERP)`);
+          }}
         />
       )}
 
@@ -483,7 +460,9 @@ export default function TaskDetailView({ task, onBack, onTaskUpdated }: TaskDeta
         stats={{
           totalMaterials: stats.totalMaterials,
           shortageCount: stats.shortageCount,
-          poCount: stats.poCount,
+          readyCount: stats.readyCount,
+          anomalyCount: stats.anomalyCount,
+          orderedCount: stats.orderedCount,
         }}
       />
 

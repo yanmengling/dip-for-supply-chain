@@ -30,6 +30,9 @@ interface StepStats {
   bomMainCount?: number;
   totalMaterials?: number;
   shortageCount?: number;
+  readyCount?: number;
+  anomalyCount?: number;
+  orderedCount?: number;
   poCount?: number;
 }
 
@@ -224,19 +227,21 @@ const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: St
     <div>
       <SectionTitle>物料供需三分类（v3.7）</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li><strong>shortage</strong>（缺料）：有 MRP 记录且需求量 {'< 0'}</li>
-        <li><strong>sufficient</strong>（满足）：有 MRP 记录且需求量 {'>'}= 0</li>
-        <li><strong>sufficient_no_mrp</strong>（无MRP有库存）：无 MRP 记录但可用库存 {'>'} 0，灰色提示</li>
-        <li><strong>anomaly</strong>（异常）：无 MRP 记录且无可用库存，橙色告警</li>
+        <li><strong>shortage</strong>（缺货）：有 MRP 记录，表示需采购跟踪</li>
+        <li><strong>sufficient_no_mrp</strong>（就绪）：无 MRP 记录但可用库存 {'>'} 0</li>
+        <li><strong>anomaly</strong>（异常）：无 MRP 记录且无可用库存</li>
       </ul>
     </div>
     <div>
-      <SectionTitle>状态判定</SectionTitle>
+      <SectionTitle>甘特图状态判定（五分类）</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
-        <li>PO 状态：外购/委外物料有 PO → <Code>ordered</Code>（绿色），无 PO 且时间风险 → <Code>risk</Code>（红色）</li>
+        <li><Code>ready</Code>（绿色 #16A34A）：无 MRP + 有库存 → 就绪，无需采购跟踪</li>
+        <li><Code>anomaly</Code>（黄色 #EAB308）：无 MRP + 无库存 → 异常，需核实</li>
+        <li><Code>ordered</Code>（翡翠 #059669）：有 PO → 已下单</li>
+        <li><Code>risk</Code>（红色 #DC2626）：无 PO 且（开始日已过 或 到货日超父件开工）→ 风险</li>
+        <li><Code>on_time</Code>（靛蓝 #4F46E5）：其他正常物料</li>
         <li>PO 交货日：同一物料多条 PO 按 <Code>biztime</Code> 降序取第一条的 <Code>deliverdate</Code></li>
         <li>可用库存：<Code>inventory</Code> 按 <Code>material_code</Code> 汇总 <Code>available_inventory_qty</Code></li>
-        <li>物料统计：按唯一 <Code>materialCode</Code> 去重（Set），与步骤②物料数口径一致</li>
       </ul>
     </div>
     {(stats?.totalMaterials !== undefined) && (
@@ -244,8 +249,10 @@ const Step3Content = ({ productCode, stats }: { productCode?: string; stats?: St
         <SectionTitle>本次甘特图统计</SectionTitle>
         <StatGrid items={[
           { label: '物料种数（非根）', value: `${stats.totalMaterials} 种` },
-          { label: '缺口物料', value: `${stats.shortageCount ?? 0} 种`, red: (stats.shortageCount ?? 0) > 0 },
-          { label: '已下PO', value: `${stats.poCount ?? 0} 项` },
+          { label: '就绪', value: `${stats.readyCount ?? 0} 种` },
+          { label: '缺货（有MRP）', value: `${stats.shortageCount ?? 0} 种`, red: (stats.shortageCount ?? 0) > 0 },
+          { label: '异常（无MRP无库存）', value: `${stats.anomalyCount ?? 0} 种`, red: (stats.anomalyCount ?? 0) > 0 },
+          { label: '已下PO', value: `${stats.orderedCount ?? 0} 项` },
         ]} />
       </div>
     )}
@@ -286,15 +293,15 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
       </div>
     </div>
     <div>
-      <SectionTitle>倒排规则与物料三分类</SectionTitle>
+      <SectionTitle>倒排规则与甘特图状态五分类</SectionTitle>
       <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
         <li>L0 产品层：<Code>startDate = demandStart</Code>，<Code>endDate = demandEnd</Code></li>
         <li>BFS 倒排：子件 <Code>endDate = parent.startDate - 1天</Code>，<Code>startDate = endDate - leadtime</Code></li>
         <li>BOM 位置去重（<Code>parent{'>'}child</Code>）+ 祖先链防环路</li>
         <li>Leadtime：外购/委外取 <Code>purchase_fixedleadtime</Code>，自制取 <Code>product_fixedleadtime</Code>，≤0 兜底 7 天</li>
-        <li><strong>shortage</strong>：有 MRP 且需求量 {'< 0'}；<strong>sufficient</strong>：有 MRP 且 {'>'}= 0；<strong>sufficient_no_mrp</strong>：无 MRP 有库存；<strong>anomaly</strong>：无 MRP 无库存</li>
-        <li>PO 交货日：同一物料多条 PO 按 <Code>biztime</Code> 降序取第一条的 <Code>deliverdate</Code></li>
-        <li>可用库存：按 <Code>material_code</Code> 汇总 <Code>available_inventory_qty</Code></li>
+        <li><strong>ready</strong>（绿色）：无 MRP + 有库存 → 就绪；<strong>anomaly</strong>（黄色）：无 MRP + 无库存 → 异常</li>
+        <li><strong>ordered</strong>（翡翠）：有 PO → 已下单；<strong>risk</strong>（红色）：无 PO + 时间风险；<strong>on_time</strong>（靛蓝）：正常</li>
+        <li>供需三分类：<strong>shortage</strong> = 有MRP（需采购跟踪），<strong>sufficient_no_mrp</strong> = 无MRP有库存，<strong>anomaly</strong> = 无MRP无库存</li>
         <li>安全截断：<Code>MAX_NODES = 2000</Code></li>
       </ul>
     </div>
@@ -303,8 +310,10 @@ const TaskDetailContent = ({ task, stats }: { task?: PlanningTask; stats?: StepS
         <SectionTitle>本次实时统计</SectionTitle>
         <StatGrid items={[
           { label: '物料总数', value: stats.totalMaterials !== undefined ? `${stats.totalMaterials} 种` : undefined },
-          { label: '缺口物料', value: stats.shortageCount !== undefined ? `${stats.shortageCount} 种` : undefined, red: (stats.shortageCount ?? 0) > 0 },
-          { label: '已下PO', value: stats.poCount !== undefined ? `${stats.poCount} 项` : undefined },
+          { label: '就绪', value: stats.readyCount !== undefined ? `${stats.readyCount} 种` : undefined },
+          { label: '缺货（有MRP）', value: stats.shortageCount !== undefined ? `${stats.shortageCount} 种` : undefined, red: (stats.shortageCount ?? 0) > 0 },
+          { label: '异常（无MRP无库存）', value: stats.anomalyCount !== undefined ? `${stats.anomalyCount} 种` : undefined, red: (stats.anomalyCount ?? 0) > 0 },
+          { label: '已下PO', value: stats.orderedCount !== undefined ? `${stats.orderedCount} 项` : undefined },
         ]} />
       </div>
     )}

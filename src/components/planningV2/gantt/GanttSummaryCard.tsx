@@ -116,7 +116,7 @@ const GanttSummaryCard = ({ summary, productCode, productName, forecastBillnos }
       </div>
 
       {/* 四列数字摘要 */}
-      <div className="grid grid-cols-4 divide-x divide-slate-100 px-0">
+      <div className="grid grid-cols-3 divide-x divide-slate-100 px-0">
         {/* 计划周期 */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-1.5 mb-1">
@@ -150,38 +150,15 @@ const GanttSummaryCard = ({ summary, productCode, productName, forecastBillnos }
           </div>
         </div>
 
-        {/* 实际所需总天数 */}
-        <div className="px-4 py-3">
-          <div className="flex items-center gap-1.5 mb-1">
-            <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-[11px] text-slate-500">实际所需天数</span>
-          </div>
-          <div className="text-xs font-medium text-slate-800">{summary.totalDays} 天</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">
-            {summary.totalDays > summary.planDays
-              ? `超出计划 ${summary.totalDays - summary.planDays} 天`
-              : '在计划范围内'}
-          </div>
-        </div>
-
         {/* BOM 物料情况 */}
         <div className="px-4 py-3">
           <div className="flex items-center gap-1.5 mb-1">
-            <AlertTriangle className="w-3.5 h-3.5 text-slate-400" />
+            <TrendingUp className="w-3.5 h-3.5 text-slate-400" />
             <span className="text-[11px] text-slate-500">产品BOM物料</span>
           </div>
           <div className="flex items-baseline gap-1.5">
             <span className="text-xs font-semibold text-slate-800">{summary.totalMaterials}</span>
             <span className="text-[11px] text-slate-400">种</span>
-          </div>
-          <div className="flex items-center gap-2 mt-0.5 text-[11px]">
-            <span className={summary.shortageCount > 0 ? 'text-red-600 font-medium' : 'text-slate-400'}>
-              缺料 {summary.shortageCount}
-            </span>
-            <span className="text-slate-300">·</span>
-            <span className={summary.abnormalCount > 0 ? 'text-orange-600 font-medium' : 'text-slate-400'}>
-              异常 {summary.abnormalCount}
-            </span>
           </div>
         </div>
       </div>

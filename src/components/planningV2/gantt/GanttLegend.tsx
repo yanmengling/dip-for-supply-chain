@@ -16,7 +16,15 @@ const GanttLegend = () => {
         </div>
         <div className="flex items-center gap-2">
           <div className="w-4 h-3 rounded" style={{ backgroundColor: '#059669' }} />
-          <span className="text-xs text-slate-700">已下单（就绪）</span>
+          <span className="text-xs text-slate-700">已下单</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-3 rounded" style={{ backgroundColor: '#16A34A' }} />
+          <span className="text-xs text-slate-700">就绪（无MRP·有库存）</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-3 rounded" style={{ backgroundColor: '#EAB308' }} />
+          <span className="text-xs text-slate-700">异常（无MRP·无库存）</span>
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs text-red-500 font-bold">⚠缺</span>
