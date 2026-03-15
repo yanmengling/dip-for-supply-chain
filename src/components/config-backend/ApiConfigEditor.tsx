@@ -398,7 +398,7 @@ export function ApiConfigEditor({ configType, config, onSave, onCancel }: ApiCon
                                 value={wf.dagId || ''}
                                 onChange={(e) => handleChange('dagId', e.target.value)}
                                 className="form-input"
-                                placeholder="例如: 600565437910010238"
+                                placeholder="例如: 610447862345543805"
                             />
                         </FormField>
                         <FormField label="工作流名称">

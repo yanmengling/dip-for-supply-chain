@@ -32,8 +32,8 @@ function getInventoryWorkflowDagId(): string {
     }
 
     // Fallback to hardcoded value
-    console.log('[InventoryAIAnalysisPanel] Using hardcoded DAG ID: 602192728104683735');
-    return '602192728104683735';
+    console.log('[InventoryAIAnalysisPanel] Using hardcoded DAG ID: 610447532555808893');
+    return '610447532555808893';
 }
 
 // ── 模块级结果缓存（3 分钟 TTL，页面切换时不重复请求）─────────────────────

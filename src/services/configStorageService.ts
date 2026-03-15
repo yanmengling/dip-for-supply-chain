@@ -676,7 +676,7 @@ class ConfigStorageService {
                     type: ApiConfigType.WORKFLOW,
                     name: '库存优化 AI 分析工作流',
                     description: '库存优化专用 AI 智能分析工作流',
-                    dagId: '602192728104683735',
+                    dagId: '610447532555808893',
                     triggerType: 'manual' as const,
                     enabled: true,
                     tags: ['ai', 'analysis', 'inventory'],

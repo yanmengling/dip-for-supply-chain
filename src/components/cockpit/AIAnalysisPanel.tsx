@@ -39,8 +39,8 @@ function getWorkflowDagId(): string {
     }
 
     // Fallback to hardcoded value
-    console.log('[AIAnalysisPanel] Using hardcoded DAG ID: 600565437910010238');
-    return '600565437910010238';
+    console.log('[AIAnalysisPanel] Using hardcoded DAG ID: 610447862345543805');
+    return '610447862345543805';
 }
 
 
