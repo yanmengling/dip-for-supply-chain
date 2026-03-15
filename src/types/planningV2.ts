@@ -371,6 +371,11 @@ export interface KeyMonitorMaterial {
   prStatus: string;
   poStatus: string;
   poDeliverDate?: string;
+  // MRP 信息
+  /** 是否有MRP记录（基于预测单号精确查询匹配） */
+  hasMRP: boolean;
+  dropStatusTitle: string | null;
+  bizdropqty: number | null;
   // 倒排时间
   startDate: string;
   endDate: string;
@@ -435,7 +440,7 @@ export interface GanttBar {
   endDate: Date;
   leadtime: number;
   materialType: string;      // 外购/自制/委外
-  status: 'on_time' | 'risk' | 'ordered';
+  status: 'on_time' | 'risk' | 'ordered' | 'ready' | 'anomaly';
   hasShortage: boolean;
   shortageQuantity: number;
   supplyStatus: SupplyStatus;  // v3.7: 物料供需三分类
@@ -443,19 +448,64 @@ export interface GanttBar {
   prStatus: 'has_pr' | 'no_pr' | 'not_applicable';
   poDeliverDate?: string;    // 最新PO交货日
   availableInventoryQty?: number;  // 可用库存数量
+  /** 是否有 MRP 记录（基于预测单号精确查询的MRP物料编码集合匹配） */
+  hasMRP: boolean;
+  /** MRP 投放状态 */
+  dropStatusTitle?: string;
+  /** MRP 投放数量 */
+  bizdropqty?: number;
   children: GanttBar[];
 }
 
-/** 步骤③ MRP 展示行 */
-export interface MRPDisplayRow {
+/** 备料（替代料）信息 */
+export interface AltPartInfo {
+  /** 备料物料编码 */
   materialCode: string;
+  /** 备料物料名称 */
   materialName: string;
-  bomLevel: number;
+  /** 备料库存数量 */
+  inventoryQty: number;
+}
+
+/** 步骤② MRP 展示行（以 MRP 记录为主表维度） */
+export interface MRPDisplayRow {
+  /** MRP 单号 */
+  mrpBillno: string;
+  /** 物料编码 */
+  materialCode: string;
+  /** 物料名称 */
+  materialName: string;
+  /** 物料属性（外购/自制/委外） */
   materialType: string;
-  netDemand: number;
+  /** 订单数量（bizorderqty 优先，fallback adviseorderqty） */
+  orderQty: number;
+  /** 投放数量 */
+  dropQty: number;
+  /** MRP 投放状态（dropstatus_title） */
+  dropStatus: string;
+  /** 投放时间 */
+  dropTime: string;
+  /** 投放单据类型 */
+  dropBillType: string;
+  /** BOM 层级 */
+  bomLevel: number | null;
+  /** BOM 用量（standard_usage） */
+  bomUsage: number | null;
+  /** 备料（替代料）信息 */
+  altParts: AltPartInfo[];
+  /** 标准交期时长（天） */
+  leadtime: number | null;
+  /** 创建时间 */
+  createTime: string;
+  /** 可用日期 */
+  availableDate: string;
+  /** 是否有关联 PR */
   hasPR: boolean;
+  /** 是否有关联 PO */
   hasPO: boolean;
+  /** 关联的 PR 记录 */
   prRecords: PRRecord[];
+  /** 关联的 PO 记录 */
   poRecords: PORecord[];
 }
 
@@ -470,6 +520,8 @@ export interface PRRecord {
   auditdate: string;
   org_name: string;
   billtype_name: string;
+  /** 来源单据编号（对应 MRP.billno） */
+  srcbillnumber: string;
 }
 
 /** PO 记录 */
@@ -497,6 +549,10 @@ export interface BOMRecord {
   bom_version: string;
   alt_part?: string;
   alt_priority?: number;
+  /** 替代方式（"替代" 表示该物料有替代料） */
+  alt_method?: string;
+  /** 替代组号（同组号的物料互为替代关系） */
+  alt_group_no?: string;
 }
 
 /** 物料主数据 */

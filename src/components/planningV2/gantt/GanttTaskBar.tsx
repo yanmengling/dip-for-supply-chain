@@ -5,6 +5,8 @@
  * - indigo  #4F46E5: on_time（按时，无风险）
  * - red     #DC2626: risk（风险，需行动）
  * - emerald #059669: ordered（已下单，就绪）
+ * - green   #16A34A: ready（就绪，无MRP记录+有库存）
+ * - yellow  #EAB308: anomaly（异常，无MRP+无库存）
  */
 
 import { useMemo } from 'react';
@@ -23,7 +25,9 @@ interface GanttTaskBarProps {
 const STATUS_COLORS: Record<GanttBar['status'], string> = {
   on_time: '#4F46E5',   // indigo-600：按时，无风险
   risk:    '#DC2626',   // red-600：风险，需行动
-  ordered: '#059669',  // emerald-600：已下单，就绪
+  ordered: '#059669',   // emerald-600：已下单，就绪
+  ready:   '#16A34A',   // green-600：就绪（无MRP+有库存）
+  anomaly: '#EAB308',   // yellow-500：异常（无MRP+无库存）
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -76,6 +80,7 @@ const GanttTaskBar = ({
         <div className="px-1.5 py-0.5 text-[10px] text-white font-medium truncate flex items-center gap-1">
           {bar.materialCode}
           {bar.hasShortage && <span className="text-yellow-300">⚠缺</span>}
+          {!bar.hasMRP && <span className="text-green-200 text-[9px]">无MRP</span>}
         </div>
       </div>
 

@@ -19,6 +19,9 @@ interface GanttChartProps {
   bars: GanttBar[];
   productionStart: string;
   productionEnd: string;
+  productCode?: string;
+  productName?: string;
+  forecastBillnos?: string[];
 }
 
 /** 每天对应的像素宽度 */
@@ -30,7 +33,7 @@ const LEFT_COL_WIDTH = 240;
 /** 单次最多渲染行数，超出时提示折叠 */
 const MAX_VISIBLE_ROWS = 200;
 
-const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) => {
+const GanttChart = ({ bars, productionStart, productionEnd, productCode, productName, forecastBillnos }: GanttChartProps) => {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     bars.forEach(root => initial.add(root.materialCode));
@@ -110,7 +113,7 @@ const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) =
         key={bar.materialCode}
         id={`gantt-bar-${bar.materialCode}`}
         className={`flex border-b border-slate-100 hover:bg-slate-50 transition-colors ${
-          bar.hasShortage ? 'bg-red-50/50' : ''
+          bar.hasShortage ? 'bg-red-50/50' : bar.status === 'ready' ? 'bg-green-50/50' : bar.status === 'anomaly' ? 'bg-yellow-50/50' : ''
         }`}
         style={{ minWidth: `${LEFT_COL_WIDTH + ganttWidth}px` }}
       >
@@ -130,6 +133,8 @@ const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) =
             <div className="w-4 flex-shrink-0" />
           )}
           {bar.hasShortage && <span className="text-red-500 text-xs font-bold flex-shrink-0">⚠</span>}
+          {bar.status === 'ready' && <span className="text-green-500 text-xs flex-shrink-0">✓</span>}
+          {bar.status === 'anomaly' && <span className="text-yellow-500 text-xs font-bold flex-shrink-0">?</span>}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1">
               <span className={`px-1 py-0.5 text-[10px] rounded font-medium flex-shrink-0 ${typeColor}`}>
@@ -178,7 +183,7 @@ const GanttChart = ({ bars, productionStart, productionEnd }: GanttChartProps) =
   return (
     <div className="space-y-3">
       {/* 计划进度总结卡片 */}
-      <GanttSummaryCard summary={summary} />
+      <GanttSummaryCard summary={summary} productCode={productCode} productName={productName} forecastBillnos={forecastBillnos} />
 
       <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         {/* 表头行（sticky top，不滚动） */}

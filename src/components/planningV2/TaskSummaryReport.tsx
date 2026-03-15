@@ -13,13 +13,7 @@ interface TaskSummaryReportProps {
 }
 
 export default function TaskSummaryReport({ report }: TaskSummaryReportProps) {
-  const { planVsActual, productCompletion, materialCompletion } = report;
-
-  const timeDiffLabel = (() => {
-    if (planVsActual.timeDiffDays == null) return null;
-    if (planVsActual.timeDiffDays <= 0) return `比计划提前 ${Math.abs(planVsActual.timeDiffDays)} 天`;
-    return `比计划延迟 ${planVsActual.timeDiffDays} 天`;
-  })();
+  const { productCompletion, materialCompletion } = report;
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
@@ -31,40 +25,19 @@ export default function TaskSummaryReport({ report }: TaskSummaryReportProps) {
       </div>
 
       <div className="p-4 space-y-4">
-        {/* 计划 vs 实际 */}
+        {/* 产品完成情况 */}
         <div className="border border-slate-100 rounded-lg p-3">
-          <h4 className="text-xs font-medium text-slate-600 mb-2">计划 vs 实际</h4>
-          <div className="grid grid-cols-2 gap-3 text-xs">
+          <h4 className="text-xs font-medium text-slate-600 mb-2">产品完成情况</h4>
+          <div className="flex items-center gap-6 text-xs">
             <div>
-              <span className="text-slate-400">计划生产周期</span>
-              <div className="text-slate-700 mt-0.5">
-                {planVsActual.productionPeriod?.start ?? '-'} ~ {planVsActual.productionPeriod?.end ?? '-'}
-              </div>
-            </div>
-            <div>
-              <span className="text-slate-400">实际入库时间</span>
-              <div className="mt-0.5">
-                {planVsActual.actualInboundDate ? (
-                  <span className={planVsActual.hasSignificantDelay ? 'text-red-600 font-medium' : 'text-slate-700'}>
-                    {planVsActual.actualInboundDate.slice(0, 10)}
-                    {timeDiffLabel && (
-                      <span className="ml-1 text-[10px] text-slate-500">({timeDiffLabel})</span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="text-orange-500">无入库记录</span>
-                )}
-              </div>
-            </div>
-            <div>
-              <span className="text-slate-400">计划数量</span>
-              <div className="text-slate-700 mt-0.5">{productCompletion.plannedQuantity.toLocaleString()} 套</div>
+              <span className="text-slate-400">需求数量</span>
+              <div className="text-slate-700 font-medium mt-0.5">{productCompletion.plannedQuantity.toLocaleString()} 套</div>
             </div>
             <div>
               <span className="text-slate-400">入库数量</span>
               <div className="mt-0.5">
                 {productCompletion.inboundQuantity != null ? (
-                  <span className="text-slate-700">
+                  <span className="text-slate-700 font-medium">
                     {productCompletion.inboundQuantity.toLocaleString()} 套
                     {productCompletion.completionRate != null && (
                       <span className="ml-1 text-[10px] text-slate-500">
@@ -73,7 +46,7 @@ export default function TaskSummaryReport({ report }: TaskSummaryReportProps) {
                     )}
                   </span>
                 ) : (
-                  <span className="text-orange-500">-</span>
+                  <span className="text-orange-500">无入库记录</span>
                 )}
               </div>
             </div>
@@ -97,12 +70,8 @@ export default function TaskSummaryReport({ report }: TaskSummaryReportProps) {
               <div className="text-orange-600 font-medium mt-0.5">{materialCompletion.withoutPO}</div>
             </div>
             <div>
-              <span className="text-slate-400">缺口</span>
-              <div className="text-red-600 font-medium mt-0.5">{materialCompletion.shortageCount}</div>
-            </div>
-            <div>
-              <span className="text-slate-400">风险</span>
-              <div className="text-amber-600 font-medium mt-0.5">{materialCompletion.riskCount}</div>
+              <span className="text-slate-400">有MRP</span>
+              <div className="text-blue-600 font-medium mt-0.5">{materialCompletion.shortageCount}</div>
             </div>
           </div>
         </div>

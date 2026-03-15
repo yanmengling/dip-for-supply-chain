@@ -21,7 +21,6 @@ import { taskService } from '../../services/taskService';
 import type { Step1Data, GanttBar, KeyMonitorMaterial } from '../../types/planningV2';
 import GanttChart from './gantt/GanttChart';
 import ShortageList from './ShortageList';
-import MatchingStatusCard from './MatchingStatusCard';
 import WorkOrderTracker from './WorkOrderTracker';
 
 interface SmartCollaborationPanelProps {
@@ -105,15 +104,8 @@ const SmartCollaborationPanel = ({
   const stats = useMemo(() => {
     const flat = ganttService.flattenGanttBars(ganttBars);
     const materials = flat.filter(b => b.bomLevel > 0);
-    // 按唯一物料编码统计
     const uniqueCodes = new Set(materials.map(b => b.materialCode));
-    const shortageCodesSet = new Set(materials.filter(b => b.hasShortage).map(b => b.materialCode));
-    const poCodesSet = new Set(materials.filter(b => b.poStatus === 'has_po').map(b => b.materialCode));
-    return {
-      totalMaterials: uniqueCodes.size,
-      shortageCount: shortageCodesSet.size,
-      poPlacedCount: poCodesSet.size,
-    };
+    return { totalMaterials: uniqueCodes.size };
   }, [ganttBars]);
 
   if (!active) return null;
@@ -171,6 +163,9 @@ const SmartCollaborationPanel = ({
               bars={ganttBars}
               productionStart={step1Data.demandStart}
               productionEnd={step1Data.demandEnd}
+              productCode={step1Data.productCode}
+              productName={step1Data.productName}
+              forecastBillnos={step1Data.relatedForecastBillnos}
             />
           </div>
         ) : (
@@ -186,19 +181,11 @@ const SmartCollaborationPanel = ({
           keyMaterials={keyMaterials}
           productCode={step1Data.productCode}
           loading={keyMaterialsLoading}
+          onAction={(type, code, name) => {
+            console.log(`[SmartCollaboration] 操作: ${type} - ${code} ${name} (待对接ERP)`);
+          }}
         />
       </section>
-
-      {/* ---- (b2) Matching Status Card (PRD 4.5.3) ---- */}
-      {ganttBars.length > 0 && (
-        <section>
-          <MatchingStatusCard
-            ganttBars={ganttBars}
-            demandEnd={step1Data.demandEnd}
-            degradation={degradation}
-          />
-        </section>
-      )}
 
       {/* ---- (b3) Work Order Tracker (PRD 4.5.4) ---- */}
       {ganttBars.length > 0 && (
@@ -234,12 +221,8 @@ const SmartCollaborationPanel = ({
           <div className="flex items-start gap-3">
             <Calendar className="w-5 h-5 text-amber-500 mt-0.5 shrink-0" />
             <div className="text-sm text-slate-700 leading-relaxed">
-              <p className="font-medium">物料</p>
+              <p className="font-medium">BOM物料</p>
               <p>{stats.totalMaterials} 种</p>
-              <p className="text-orange-600">
-                <AlertTriangle className="w-3.5 h-3.5 inline -mt-0.5 mr-0.5" />
-                缺料: {stats.shortageCount} 项
-              </p>
             </div>
           </div>
         </div>
