@@ -694,27 +694,10 @@ export async function loadMRPByBillnos(
         return { data: filtered, isDegraded: false, allMrpBillnos: allBillnos, allMrpRecords: preciseResult };
     }
 
-    // 策略2: 降级到产品编码全量加载
-    console.warn(`[PlanningV2DataService] MRP 精确查询无结果，降级到 productCode=${productCode} 全量查询`);
-    const fallbackCacheKey = `mrp_fallback_${productCode}`;
-    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MRP, {
-            limit: 10000,
-            need_total: true,
-            timeout: 120000,
-        });
-        return response.entries.map((item: any) => parseMRPPlanOrder(item));
-    }).catch(error => {
-        console.error('[PlanningV2DataService] MRP fallback 查询失败:', error);
-        return [] as MRPPlanOrderAPI[];
-    });
-
-    // 按 materialplanid_number 的产品编码不好过滤（MRP 是物料级别，不是产品级别）
-    // fallback 使用旧 finished_product_code 逻辑（兼容旧数据视图字段）
-    // 注：如果新 API 没有 finished_product_code，则返回全部并让 ganttService 通过 BOM 过滤
-    const filtered = filterActiveMRP(fallbackResult);
-    console.log(`[PlanningV2DataService] MRP fallback: ${fallbackResult.length} 条 → 正向过滤后 ${filtered.length} 条`);
-    return { data: filtered, isDegraded: true };
+    // 精确查询无结果 → 该预测单号尚未执行 MRP 运算，直接返回空
+    // 不再降级全量加载（全量加载会引入其他产品的无关 MRP 记录）
+    console.warn(`[PlanningV2DataService] MRP 精确查询无结果，预测单 [${forecastBillnos.join(',')}] 暂无 MRP 记录`);
+    return { data: [], isDegraded: true };
 }
 
 // ============================================================================
