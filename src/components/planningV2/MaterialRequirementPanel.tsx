@@ -34,6 +34,7 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<MRPDisplayRow[]>([]);
   const [dropStatusFilter, setDropStatusFilter] = useState<DropStatusFilter>('all');
+  const [procurementFilter, setProcurementFilter] = useState<'all' | 'none' | 'has_pr' | 'has_po'>('all');
   const [searchText, setSearchText] = useState('');
   const [materialTypeFilter, setMaterialTypeFilter] = useState<MaterialTypeFilter>('all');
   const [currentPage, setCurrentPage] = useState(1);
@@ -266,14 +267,18 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
     if (dropStatusFilter === 'dropped') r = r.filter(x => x.dropStatus === '已投放');
     if (dropStatusFilter === 'not_dropped') r = r.filter(x => x.dropStatus !== '已投放');
     if (materialTypeFilter !== 'all') r = r.filter(x => x.materialType.includes(materialTypeFilter));
+    // v4.2: 采购状态过滤
+    if (procurementFilter === 'none') r = r.filter(x => !x.hasPR && !x.hasPO);
+    else if (procurementFilter === 'has_pr') r = r.filter(x => x.hasPR);
+    else if (procurementFilter === 'has_po') r = r.filter(x => x.hasPO);
     if (searchText.trim()) {
       const kw = searchText.trim().toLowerCase();
       r = r.filter(x => x.materialCode.toLowerCase().includes(kw) || x.materialName.toLowerCase().includes(kw));
     }
     return r;
-  }, [rows, dropStatusFilter, materialTypeFilter, searchText]);
+  }, [rows, dropStatusFilter, procurementFilter, materialTypeFilter, searchText]);
 
-  useEffect(() => { setCurrentPage(1); }, [dropStatusFilter, materialTypeFilter, searchText]);
+  useEffect(() => { setCurrentPage(1); }, [dropStatusFilter, procurementFilter, materialTypeFilter, searchText]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -452,7 +457,7 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
             {bomLoading && <Loader2 className="w-3 h-3 animate-spin" />}
           </button>
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-slate-600">投放状态:</span>
+            <span className="text-slate-600">投放:</span>
             <select
               value={dropStatusFilter}
               onChange={e => setDropStatusFilter(e.target.value as DropStatusFilter)}
@@ -461,6 +466,19 @@ const MaterialRequirementPanel = ({ active, step1Data, onConfirm, onBack }: Mate
               <option value="all">全部</option>
               <option value="dropped">已投放</option>
               <option value="not_dropped">未投放</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-slate-600">采购:</span>
+            <select
+              value={procurementFilter}
+              onChange={e => setProcurementFilter(e.target.value as 'all' | 'none' | 'has_pr' | 'has_po')}
+              className="border border-slate-300 rounded px-2 py-1 text-sm bg-white"
+            >
+              <option value="all">全部</option>
+              <option value="none">无PR无PO</option>
+              <option value="has_pr">已有PR</option>
+              <option value="has_po">已有PO</option>
             </select>
           </div>
         </div>

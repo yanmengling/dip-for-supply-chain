@@ -1409,36 +1409,12 @@ export async function loadMPSByForecastBillnos(
             return [] as MPSWorkOrderAPI[];
         });
 
-        if (preciseResult.length > 0) {
-            return { data: preciseResult, isDegraded: false };
-        }
-        console.warn('[PlanningV2DataService] MPS 精确查询无结果，降级到 material_number 查询');
+        return { data: preciseResult, isDegraded: false };
     }
 
-    // 策略2: fallback（material_number == productCode）
-    const fallbackCacheKey = `mps_fallback_${productCode}`;
-    const fallbackResult = await withCachedLoader(fallbackCacheKey, async () => {
-        console.log(`[PlanningV2DataService] MPS fallback: material_number == ${productCode}...`);
-        const response = await ontologyApi.queryObjectInstances(OBJECT_TYPE_IDS.MPS, {
-            condition: {
-                operation: 'and',
-                sub_conditions: [
-                    { field: 'material_number', operation: '==', value: productCode }
-                ]
-            },
-            limit: 10000,
-            need_total: true,
-            timeout: 120000,
-        });
-        const data = response.entries.map((item: any) => parseMPSWorkOrder(item));
-        console.log(`[PlanningV2DataService] MPS fallback: ${data.length} 条`);
-        return data;
-    }).catch(error => {
-        console.error('[PlanningV2DataService] MPS fallback 查询失败:', error);
-        return [] as MPSWorkOrderAPI[];
-    });
-
-    return { data: fallbackResult, isDegraded: true };
+    // 无预测单号或精确查询无结果 → 返回空列表（不再降级到 material_number 模糊匹配）
+    console.log('[PlanningV2DataService] MPS 精确查询无结果，返回空列表');
+    return { data: [], isDegraded: false };
 }
 
 /** 解析 MPS 工单记录 */

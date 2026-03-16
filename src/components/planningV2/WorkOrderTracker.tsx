@@ -97,11 +97,6 @@ const WorkOrderTracker = ({ forecastBillnos, productCode }: WorkOrderTrackerProp
         <div className="flex items-center gap-2">
           <Factory className="w-4 h-4 text-slate-500" />
           <h4 className="text-sm font-semibold text-slate-800">关联生产工单</h4>
-          {isDegraded && (
-            <span className="text-xs px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">
-              兜底模式
-            </span>
-          )}
         </div>
       </div>
 
@@ -110,7 +105,7 @@ const WorkOrderTracker = ({ forecastBillnos, productCode }: WorkOrderTrackerProp
         <div className="px-4 py-6 text-center">
           <Info className="w-6 h-6 text-slate-300 mx-auto mb-2" />
           <p className="text-sm text-slate-500">
-            该预测单暂无关联生产工单。物料齐套后，业务方可在 ERP 中下达生产工单。
+            当前尚无匹配相应需求预测单的生产工单
           </p>
         </div>
       ) : (
