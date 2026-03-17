@@ -12,7 +12,8 @@ const config: KNVisualizationSkillConfig = {
   ontologyManagerBaseUrl: '/api/ontology-manager/v1',
   ontologyQueryBaseUrl: '/api/ontology-query/v1',
   getToken: () => localStorage.getItem('api_auth_token') ?? '',
-  knowledgeNetworks: [{ id: 'supplychain_hd0202', name: 'DIP供应链业务知识网络' }], // 可选，不传则请求列表接口
+  businessDomain: 'bd_public',  // 可选，缺省为 bd_public，请求会带 X-Business-Domain 头
+  knowledgeNetworks: [{ id: 'supplychain_hd0202', name: 'DIP供应链业务知识网络' }], // 可选，不传则从 bkn-backend 拉取列表
   defaultKnId: 'supplychain_hd0202', // 可选
 };
 
@@ -23,7 +24,8 @@ const config: KNVisualizationSkillConfig = {
 
 - **ontologyManagerBaseUrl** / **ontologyQueryBaseUrl**：由宿主注入，与当前环境一致。
 - **getToken**：返回当前鉴权 token（或 `Promise<string>`）。
-- **knowledgeNetworks**：宿主注入的知识网络列表；不传则调用 `GET {ontologyManagerBaseUrl}/knowledge-networks` 拉取（若后端支持）。
+- **businessDomain**：可选，请求会带 `X-Business-Domain` 头；缺省为 `bd_public`，否则服务端可能返回「业务域不合法」。
+- **knowledgeNetworks**：宿主注入的知识网络列表；不传则从同主机 `GET /api/bkn-backend/v1/knowledge-networks` 拉取（ADP 规范）。
 - **defaultKnId**：默认选中的知识网络 ID。
 
 ## 与当前项目的关系

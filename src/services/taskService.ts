@@ -456,6 +456,7 @@ export async function buildKeyMaterialList(
       hasMRP: bar.hasMRP,
       dropStatusTitle: bar.dropStatusTitle ?? null,
       bizdropqty: bar.bizdropqty ?? null,
+      mrpDetails: bar.mrpDetails || [],
       startDate: fmt(bar.startDate),
       endDate: fmt(bar.endDate),
       leadtime: bar.leadtime,

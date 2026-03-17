@@ -376,6 +376,8 @@ export interface KeyMonitorMaterial {
   hasMRP: boolean;
   dropStatusTitle: string | null;
   bizdropqty: number | null;
+  /** v4.2: 该物料关联的全部 MRP 明细记录 */
+  mrpDetails: MRPDetail[];
   // 倒排时间
   startDate: string;
   endDate: string;
@@ -430,6 +432,28 @@ export interface Step2Data {
 /** 物料供需状态（PRD 4.4.6 v3.7 三分类） */
 export type SupplyStatus = 'shortage' | 'sufficient' | 'sufficient_no_mrp' | 'anomaly';
 
+/** 单条 MRP 明细（v4.2: 按单呈现，不累加） */
+export interface MRPDetail {
+  /** MRP 单号 */
+  mrpBillno: string;
+  /** 需求量（bizorderqty 优先，fallback adviseorderqty） */
+  demandQty: number;
+  /** 投放状态（未投放/已投放） */
+  dropStatusTitle: string;
+  /** 投放数量 */
+  bizdropqty: number;
+  /** 关闭状态 */
+  closestatus: string;
+  /** 是否有 PR（按 MRP 单号精确关联） */
+  hasPR: boolean;
+  /** 是否有 PO（按 MRP→PR→PO 链路关联） */
+  hasPO: boolean;
+  /** PR 数量 */
+  prCount: number;
+  /** 该 MRP 对应 PO 的最新交货日 */
+  poDeliverDate?: string;
+}
+
 /** 甘特图条目（运行时，不持久化） */
 export interface GanttBar {
   materialCode: string;
@@ -450,10 +474,12 @@ export interface GanttBar {
   availableInventoryQty?: number;  // 可用库存数量
   /** 是否有 MRP 记录（基于预测单号精确查询的MRP物料编码集合匹配） */
   hasMRP: boolean;
-  /** MRP 投放状态 */
+  /** MRP 投放状态（汇总，取最新一条） */
   dropStatusTitle?: string;
-  /** MRP 投放数量 */
+  /** MRP 投放数量（汇总） */
   bizdropqty?: number;
+  /** v4.2: 该物料关联的全部 MRP 明细记录 */
+  mrpDetails: MRPDetail[];
   children: GanttBar[];
 }
 

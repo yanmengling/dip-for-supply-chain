@@ -11,6 +11,46 @@ import {
   getKnowledgeNetworkConfig,
   getServiceConfig
 } from '../config/apiConfig';
+import type {
+  ObjectTypesQueryOptions,
+  ObjectTypesResponse,
+  RelationTypesResponse,
+  EdgeTypesResponse,
+  KnowledgeNetwork,
+  KnowledgeNetworkInfo,
+  EdgeType,
+  ObjectType,
+  QueryObjectInstancesOptions,
+  ObjectInstancesResponse,
+  QueryObjectPropertyValuesOptions,
+  ObjectPropertyValuesResponse,
+} from './ontologyApiTypes';
+
+export type {
+  LogicPropertyDataSource,
+  LogicPropertyParameter,
+  LogicProperty,
+  ObjectType,
+  ObjectProperty,
+  RelationType,
+  EdgeType,
+  EdgeProperty,
+  KnowledgeNetworkInfo,
+  KnowledgeNetwork,
+  ObjectTypesResponse,
+  RelationTypesResponse,
+  EdgeTypesResponse,
+  ObjectTypesQueryOptions,
+  ObjectInstanceFilter,
+  LogicPropertyParam,
+  ObjectInstanceSort,
+  QueryCondition,
+  QueryObjectInstancesOptions,
+  ObjectInstance,
+  ObjectInstancesResponse,
+  QueryObjectPropertyValuesOptions,
+  ObjectPropertyValuesResponse,
+} from './ontologyApiTypes';
 
 // ============================================================================
 // Constants
@@ -21,344 +61,6 @@ import {
  */
 export const HD_SUPPLY_CHAIN_KN_ID = 'supplychain_hd0202';
 export const HD_SUPPLY_CHAIN_KN_NAME = 'DIP供应链业务知识网络';
-
-// ============================================================================
-// Type Definitions
-// ============================================================================
-
-/**
- * Logic Property Data Source
- */
-export interface LogicPropertyDataSource {
-  type: 'metric-model' | 'data-view' | 'operator' | 'metric';
-  id: string;
-  name?: string;
-}
-
-/**
- * Logic Property Parameter
- */
-export interface LogicPropertyParameter {
-  name: string;
-  value_from: 'property' | 'input';
-  value: string;
-  operation?: string; // Added operation for metric parameters
-}
-
-/**
- * Logic Property Configuration
- */
-export interface LogicProperty {
-  name: string;
-  display_name?: string;
-  type: 'metric' | 'operator';
-  comment?: string;
-  index?: boolean;
-  data_source: LogicPropertyDataSource;
-  parameters: LogicPropertyParameter[];
-}
-
-/**
- * Object Type - represents an entity type in the knowledge network
- */
-export interface ObjectType {
-  id: string;                    // Object type ID
-  name: string;                  // Display name (e.g., "产品", "供应商")
-  color: string;                 // Hex color (e.g., "#FF5733")
-  icon?: string;                 // Icon name or URL (e.g., "icon-dip-copy")
-  comment?: string;              // Description
-  data_properties?: ObjectProperty[]; // List of properties
-  logic_properties?: LogicProperty[]; // List of logic properties (when include_detail=true)
-  primary_keys?: string[];       // Primary keys
-  display_key?: string;          // Display key
-  tags?: string[];               // Tags
-  kn_id?: string;                // Knowledge network ID
-  branch?: string;               // Branch name
-  module_type?: string;          // Module type
-  create_time?: number;          // Creation timestamp (unix milliseconds)
-  update_time?: number;          // Update timestamp (unix milliseconds)
-  creator?: {                    // Creator info
-    id: string;
-    type: string;
-    name: string;
-  };
-  updater?: {                    // Updater info
-    id: string;
-    type: string;
-    name: string;
-  };
-}
-
-/**
- * Object Property - attribute of an object type
- */
-export interface ObjectProperty {
-  id: string;                   // Property ID
-  name: string;                 // Property name
-  alias?: string;               // Display alias
-  display_name?: string;        // 业务属性显示名称（API/知识网络定义）
-  data_type: string;            // Data type (e.g., "string", "number", "date")
-  required?: boolean;           // Is required
-  unique?: boolean;             // Is unique
-  indexed?: boolean;            // Is indexed
-  default_value?: any;          // Default value
-}
-
-/**
- * Relation Type - represents a relationship type between object types
- */
-export interface RelationType {
-  id: string;                   // Relation ID
-  name: string;                 // Relationship name (e.g., "供应", "生产")
-  source_object_type_id: string; // Source object type ID
-  target_object_type_id: string; // Target object type ID
-  type: 'direct' | 'indirect';   // Relation type
-  mapping_rules?: Array<{        // Mapping rules
-    source_property: { name: string };
-    target_property: { name: string };
-  }>;
-  tags?: string[];               // Tags
-  comment?: string;              // Comment/description
-  icon?: string;                 // Icon
-  color?: string;                // Edge color
-  detail?: string;               // Detail info
-  kn_id?: string;                // Knowledge network ID
-  branch?: string;               // Branch name
-  source_object_type?: {         // Source object type info
-    id: string;
-    name: string;
-    branch?: string;
-    icon?: string;
-    color?: string;
-  };
-  target_object_type?: {         // Target object type info
-    id: string;
-    name: string;
-    branch?: string;
-    icon?: string;
-    color?: string;
-  };
-  creator?: {                    // Creator info
-    id: string;
-    type: string;
-    name: string;
-  };
-  create_time?: number;          // Creation timestamp (unix milliseconds)
-  updater?: {                    // Updater info
-    id: string;
-    type: string;
-    name: string;
-  };
-  update_time?: number;          // Update timestamp (unix milliseconds)
-  module_type?: string;          // Module type (e.g., "relation_type")
-}
-
-/**
- * Legacy EdgeType for backward compatibility
- */
-export interface EdgeType extends RelationType {
-  source_type?: string;          // Alias for source_object_type_id
-  target_type?: string;          // Alias for target_object_type_id
-  direction?: 'directed' | 'undirected'; // Direction
-  properties?: EdgeProperty[];   // Edge properties
-  created_at?: string;          // Creation timestamp
-}
-
-/**
- * Edge Property - attribute of an edge type
- */
-export interface EdgeProperty {
-  id: string;
-  name: string;
-  data_type: string;
-}
-
-/**
- * Knowledge Network Info - metadata from KN endpoint
- */
-export interface KnowledgeNetworkInfo {
-  id: string;
-  name: string;
-  description?: string;
-  tags?: string[];
-  comment?: string;
-  icon?: string;
-  color?: string;
-  branch?: string;
-  create_time?: number;
-  update_time?: number;
-  detail?: string;
-}
-
-/**
- * Knowledge Network - represents the complete network structure
- */
-export interface KnowledgeNetwork {
-  id: string;                   // Network ID
-  name: string;                 // Network name
-  description?: string;         // Network description
-  object_types: ObjectType[];   // All object types
-  edge_types: EdgeType[];       // All edge types
-  created_at?: string;
-  updated_at?: string;
-}
-
-/**
- * API Response for paginated object types
- */
-export interface ObjectTypesResponse {
-  entries: ObjectType[];  // API returns 'entries' not 'object_types'
-  total?: number;
-  offset?: number;
-  limit?: number;
-}
-
-/**
- * API Response for relation types
- */
-export interface RelationTypesResponse {
-  entries: RelationType[];
-  total_count: number;
-}
-
-/**
- * API Response for edge types (legacy)
- */
-export interface EdgeTypesResponse {
-  edges?: EdgeType[];
-  entries?: RelationType[];
-  total?: number;
-  total_count?: number;
-}
-
-/**
- * Query options for object types
- */
-export interface ObjectTypesQueryOptions {
-  offset?: number;
-  limit?: number;
-  direction?: 'asc' | 'desc';
-  sort?: 'create_time' | 'update_time' | 'name';
-  name_pattern?: string;
-}
-
-/**
- * Filter condition for querying object instances
- */
-export interface ObjectInstanceFilter {
-  field: string;
-  operation: '=' | '!=' | 'in' | 'not_in' | 'like' | 'not_like' | '>' | '>=' | '<' | '<=';
-  value: any;
-}
-
-/**
- * Logic property parameter for include_logic_params
- */
-export interface LogicPropertyParam {
-  name: string;
-  params: Record<string, any>;
-}
-
-/**
- * Sort option for querying object instances
- */
-export interface ObjectInstanceSort {
-  field: string;
-  direction: 'asc' | 'desc';
-}
-
-/**
- * Query condition for ADP Ontology Query API
- */
-export interface QueryCondition {
-  operation: 'and' | 'or' | '==' | '!=' | 'in' | 'not_in' | 'like' | 'not_like' | '>' | '>=' | '<' | '<=' | 'match' | 'match_phrase' | 'knn';
-  sub_conditions?: QueryCondition[];
-  field?: string;
-  value?: any;
-  value_from?: 'const' | 'property' | 'input';
-}
-
-/**
- * Logic property parameter for ADP Ontology Query API
- * Used in include_logic_params query parameter
- */
-export interface LogicPropertyParam {
-  name: string;
-  params: Record<string, any>;
-}
-
-/**
- * Query options for object instances (ADP Ontology Query API)
- * Based on ADP Ontology Query API specification
- */
-export interface QueryObjectInstancesOptions {
-  /** Query condition (filter) */
-  condition?: QueryCondition;
-  /** Maximum number of results to return */
-  limit?: number;
-  /** Whether to include total count */
-  need_total?: boolean;
-  /** Pagination token from previous query */
-  search_after?: any[];
-  /** Include logic property calculation parameters (query parameter, boolean) */
-  include_logic_params?: boolean;
-  /** Include object type information (query parameter, boolean) */
-  include_type_info?: boolean;
-  /** Logic property parameters (if include_logic_params=true, these are used) */
-  logic_params?: LogicPropertyParam[];
-  /** 请求超时时间（毫秒），不设则使用 httpClient 默认值 */
-  timeout?: number;
-}
-
-/**
- * Object instance with logic property values
- */
-export interface ObjectInstance {
-  [key: string]: any; // Instance properties (dynamic based on object type)
-  // Logic property values are included as additional fields
-  // e.g., product_sales_history: ProductSalesHistory[]
-}
-
-/**
- * Response from ADP Ontology Query API
- */
-export interface ObjectInstancesResponse {
-  /** Object type information */
-  object_type?: {
-    id: string;
-    name: string;
-    [key: string]: any;
-  };
-  /** Object instances */
-  entries: ObjectInstance[];
-  /** Total count (if need_total=true) */
-  total_count?: number;
-  /** Pagination token for next page */
-  search_after?: any[];
-}
-
-/**
- * Options for querying object property values (ADP Ontology Query API)
- */
-export interface QueryObjectPropertyValuesOptions {
-  /** Unique identities of the instances to query */
-  unique_identities: Array<Record<string, any>>;
-  /** List of property names to retrieve (can include logic properties) */
-  properties: string[];
-  /** Dynamic parameters for logic properties */
-  dynamic_params?: Record<string, Record<string, any>>;
-}
-
-/**
- * Response for object property values query
- * API 文档：响应字段为 datas（兼容旧字段 entries）
- */
-export interface ObjectPropertyValuesResponse {
-  /** Results for each identity (API spec field name) */
-  datas?: Array<Record<string, any>>;
-  /** Legacy/fallback field name */
-  entries?: Array<Record<string, any>>;
-}
 
 // ============================================================================
 // API Client
