@@ -1,0 +1,95 @@
+import { StrictMode } from 'react'
+import { createRoot } from 'react-dom/client'
+import './index.css'
+import App from './App.tsx'
+import { renderWithQiankun, qiankunWindow } from 'vite-plugin-qiankun/dist/helper'
+import { dipEnvironmentService } from './services/dipEnvironmentService'
+
+// Debug configuration in development
+if (import.meta.env.DEV) {
+  import('./utils/configDebug')
+  import('./utils/apiDebugger').then(module => {
+    module.setupGlobalDebugger()
+  })
+  import('./utils/showRawData')
+  // 诊断工具：浏览器 console 中执行 diagnoseLinkChain('预测单号', '物料编码')
+  import('./services/ganttService').then(m => {
+    (window as any).diagnoseLinkChain = m.diagnoseLinkChain
+  })
+}
+
+import type { MicroAppProps } from './micro-app'
+
+
+let root: ReturnType<typeof createRoot> | null = null;
+
+function render(container?: HTMLElement, props?: MicroAppProps) {
+  const target = container ? container.querySelector('#root') : document.getElementById('root');
+  if (!target) return;
+
+  root = createRoot(target);
+  root.render(
+    <StrictMode>
+      <App {...props} />
+    </StrictMode>,
+  )
+}
+
+const qiankunLifeCycle = {
+  async bootstrap() {
+    console.log('[SupplyChainBrain] bootstrap');
+  },
+  async mount(props: any) {
+    console.log('[SupplyChainBrain] mount', props);
+    // Initialize DIP environment service with injected props
+    dipEnvironmentService.initialize(props as MicroAppProps);
+
+    // Ensure micro-app container fills DIP's content area
+    if (props.container) {
+      const root = props.container.querySelector('#root');
+      if (root) {
+        root.style.height = '100%';
+        root.style.overflow = 'hidden';
+      }
+      props.container.style.height = '100%';
+    }
+
+    render(props.container, props as MicroAppProps);
+  },
+  async unmount(props: any) {
+    console.log('[SupplyChainBrain] unmount', props);
+    // Cleanup DIP environment service
+    dipEnvironmentService.cleanup();
+    if (root) {
+      root.unmount();
+      root = null;
+    }
+  },
+  async update(props: any) {
+    console.log('[SupplyChainBrain] update', props);
+    // Re-initialize DIP environment in case props changed (e.g., token refresh)
+    dipEnvironmentService.initialize(props as MicroAppProps);
+  },
+};
+
+renderWithQiankun(qiankunLifeCycle);
+
+// Manual backup for global assignment - ensure host can find the lifecycles
+if (qiankunWindow.__POWERED_BY_QIANKUN__) {
+  console.log('[SupplyChainBrain] Detected qiankun environment, setting global lifecycles');
+  const appName = 'dip-for-supply-chain';
+  // @ts-ignore
+  qiankunWindow[appName] = qiankunLifeCycle;
+}
+
+// Fallback for standalone mode
+if (!qiankunWindow.__POWERED_BY_QIANKUN__) {
+  console.log('[SupplyChainBrain] Standalone mode');
+  render();
+}
+
+// Explicit exports for ESM compatibility
+export const bootstrap = qiankunLifeCycle.bootstrap;
+export const mount = qiankunLifeCycle.mount;
+export const unmount = qiankunLifeCycle.unmount;
+export const update = qiankunLifeCycle.update;

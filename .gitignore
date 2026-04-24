@@ -1,0 +1,68 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.DS_Store
+coverage/
+.vscode/
+.idea/
+# Local AI tool folders (do not commit)
+.cursor/
+.claude/
+.superpowers/
+.supperpows/
+.codex/
+.agents/
+.openclaw/
+*.log
+*.txt
+*.json
+
+# Exceptions for json files we want to keep (if any)
+!package.json
+!tsconfig.json
+!tsconfig.*.json
+!version.json
+!version.en.json
+
+# Documentation
+specs/
+docs/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Build logs and errors
+build_*
+build-*
+
+# Test files - ignore all files starting with test (anywhere)
+**/test-*
+**/test_*
+**/test[A-Z]*
+test-*
+test_*
+test[A-Z]*
+
+# Python virtual environment
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+# Scripts
+scripts/
+.worktrees/
+reports/pr_130-000238_query_report.md
+reports/pr_130-000238_compare.html

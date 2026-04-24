@@ -1,0 +1,20 @@
+# {product_code} / {product_name} 可售能力分析报告
+
+## 报告信息
+- 知识网络：{knowledge_network_id}
+- 产品：{product_code} / {product_name}
+- 分析时间：{analysis_timestamp}
+- 仓库过滤：{warehouse_filter}
+- 替代料核算：{substitute_text}
+
+## 产品汇总
+| 产成品库存 | 理论可生产数 | 合计可售 |
+| --- | --- | --- |
+| {finished_goods_stock} | {theoretical_build_qty} | {total_sellable_qty} |
+
+## 物料明细
+| BOM层级 | 物料编码 | 物料名称 | 类型 | 单位需求 | 可用库存 | 在途 | 最大可生产数 | 状态 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+{material_rows}
+
+{substitute_sections}

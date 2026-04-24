@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/logo-32x32.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/logo-192x192.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>供应链大脑</title>
+    <script>
+      // Fallback: ensure window.proxy exists for vite-plugin-qiankun's createDeffer mechanism.
+      // Some qiankun sandbox modes (snapshot sandbox) don't set window.proxy,
+      // which causes the deferred lifecycle promises to never resolve (mount timeout).
+      if (window.__POWERED_BY_QIANKUN__ && !window.proxy) {
+        window.proxy = window;
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

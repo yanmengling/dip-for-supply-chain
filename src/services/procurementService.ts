@@ -1,0 +1,257 @@
+import { ontologyApi } from '../api/ontologyApi';
+import { dynamicConfigService } from './dynamicConfigService';
+import { apiConfigService } from './apiConfigService';
+import type { ProcurementSummary } from '../utils/cockpitDataService';
+
+// Interfaces for Ontology Objects
+export interface PurchaseOrder {
+    id: string;
+    po_number: string;
+    supplier_id: string;
+    supplier_name: string;
+    status: string; // e.g., 'Draft', 'Approved', 'Ordered', 'received'
+    create_time: string;
+    total_amount?: number;
+    items?: PurchaseOrderItem[];
+}
+
+export interface PurchaseOrderItem {
+    material_code: string;
+    material_name: string;
+    quantity: number;
+    unit_price?: number;
+    amount?: number;
+}
+
+export interface PurchaseRequest {
+    id: string;
+    pr_number: string;
+    requester: string;
+    department: string;
+    create_time: string;
+    status: string;
+    items?: PurchaseRequestItem[];
+}
+
+export interface PurchaseRequestItem {
+    material_code: string;
+    material_name: string;
+    quantity: number;
+}
+
+class ProcurementService {
+    // ── 服务层缓存（3 分钟 TTL + In-Flight 去重）────────────────────────────
+    private _cache: ProcurementSummary | null = null;
+    private _cacheTime = 0;
+    private _inFlight: Promise<ProcurementSummary> | null = null;
+    private readonly _CACHE_TTL = 3 * 60 * 1000;
+
+    /** 清除缓存（供手动刷新场景使用） */
+    invalidateCache(): void {
+        this._cache = null;
+        this._cacheTime = 0;
+        this._inFlight = null;
+        console.log('[ProcurementService] Cache invalidated');
+    }
+
+    /**
+     * Get procurement summary metrics for the cockpit panel
+     * Fetches real data from Ontology API for Purchase Orders and Purchase Requests
+     * 带 3 分钟缓存 + in-flight 去重
+     */
+    async getProcurementSummary(): Promise<ProcurementSummary> {
+        // 命中缓存
+        const now = Date.now();
+        if (this._cache && now - this._cacheTime < this._CACHE_TTL) {
+            return this._cache;
+        }
+        // In-flight 去重
+        if (this._inFlight) {
+            return this._inFlight;
+        }
+        this._inFlight = this._loadProcurementSummary()
+            .then(data => { this._cache = data; this._cacheTime = Date.now(); this._inFlight = null; return data; })
+            .catch(err => { this._inFlight = null; throw err; });
+        return this._inFlight;
+    }
+
+    /** 实际加载逻辑（不带缓存） */
+    private async _loadProcurementSummary(): Promise<ProcurementSummary> {
+        console.log('[ProcurementService] Fetching procurement summary...');
+
+        // 1. Resolve Object Type IDs — 并行获取，共享 dynamicConfigService in-flight
+        const [poConfig, prConfig] = await Promise.all([
+            dynamicConfigService.getConfigByEntityType('purchase_order'),
+            dynamicConfigService.getConfigByEntityType('purchase_request'),
+        ]);
+
+        const poTypeId = poConfig?.objectTypeId;
+        const prTypeId = prConfig?.objectTypeId;
+
+        // Initialize default empty summary
+        const summary: ProcurementSummary = {
+            monthlyPlannedTotal: 0,
+            monthlyPurchasedTotal: 0,
+            monthlyInTransitTotal: 0,
+            top5Materials: []
+        };
+
+        // 2. Fetch PO + PR 并行
+        let purchaseOrders: any[] = [];
+        let purchaseRequests: any[] = [];
+
+        const [poResult, prResult] = await Promise.allSettled([
+            poTypeId
+                ? ontologyApi.queryObjectInstances(poTypeId, { limit: 100, include_logic_params: false, timeout: 30000 })
+                : Promise.resolve(null),
+            prTypeId
+                ? ontologyApi.queryObjectInstances(prTypeId, { limit: 100, timeout: 30000 })
+                : Promise.resolve(null),
+        ]);
+
+        if (poResult.status === 'fulfilled' && poResult.value) {
+            purchaseOrders = poResult.value.entries;
+        } else if (poResult.status === 'rejected') {
+            console.error('[ProcurementService] Failed to fetch Purchase Orders:', poResult.reason);
+        }
+
+        if (prResult.status === 'fulfilled' && prResult.value) {
+            purchaseRequests = prResult.value.entries;
+        } else if (prResult.status === 'rejected') {
+            console.error('[ProcurementService] Failed to fetch Purchase Requests:', prResult.reason);
+        }
+
+        // 3. Calculate Metrics from Real Data
+        const materialSummary = new Map<string, { planned: number; purchased: number, name: string }>();
+
+        // Helper to safely extract quantity from various possible fields
+        const getQuantity = (item: any): number => {
+            const val = item.quantity || item.qty || item.amount || item.count || 0;
+            return Number(val) || 0;
+        };
+
+        // Helper to safely extract material name
+        const getName = (item: any): string => {
+            return item.material_name || item.materialName || item.product_name || item.productName || item.name || 'Unknown';
+        };
+
+        // Helper to safely extract material code
+        const getCode = (item: any): string => {
+            return item.material_code || item.materialCode || item.product_code || item.productCode || item.code || getName(item);
+        };
+
+        // Process Purchase Requests (Planned) - assuming items are directly on the object or in a specific field
+        // Note: Real structure might be flat or nested. Assuming flat for now based on typical ontology usage or simplified view.
+        // If PR contains items list, we need to iterate that. 
+        // Based on Sample PR log (if we had one), we could refine. 
+        // For now, treat PR itself as the item or containing main quantity.
+        purchaseRequests.forEach(pr => {
+            const qty = getQuantity(pr);
+            const name = getName(pr);
+            const code = getCode(pr);
+
+            if (qty > 0) {
+                const current = materialSummary.get(code) || { planned: 0, purchased: 0, name };
+                current.planned += qty;
+                // Update name if we have a better one
+                if (name !== 'Unknown' && current.name === 'Unknown') current.name = name;
+                materialSummary.set(code, current);
+            }
+        });
+
+        // Process Purchase Orders (Purchased)
+        purchaseOrders.forEach(po => {
+            const qty = getQuantity(po);
+            const name = getName(po);
+            const code = getCode(po);
+
+            if (qty > 0) {
+                const current = materialSummary.get(code) || { planned: 0, purchased: 0, name };
+                current.purchased += qty;
+                if (name !== 'Unknown' && current.name === 'Unknown') current.name = name;
+                materialSummary.set(code, current);
+            }
+        });
+
+        // Calculate Totals and Top 5
+        let totalPlanned = 0;
+        let totalPurchased = 0;
+
+        materialSummary.forEach(val => {
+            totalPlanned += val.planned;
+            totalPurchased += val.purchased;
+        });
+
+        const top5 = Array.from(materialSummary.values())
+            .map(item => ({
+                materialName: item.name,
+                plannedQuantity: item.planned,
+                purchasedQuantity: item.purchased,
+                executionPercentage: item.planned > 0 ? (item.purchased / item.planned) * 100 : 0
+            }))
+            .sort((a, b) => b.plannedQuantity - a.plannedQuantity) // Sort by planned quantity desc
+            .slice(0, 5);
+
+        const result = {
+            monthlyPlannedTotal: totalPlanned,
+            monthlyPurchasedTotal: totalPurchased,
+            monthlyInTransitTotal: 0,
+            top5Materials: top5
+        };
+
+        console.log('[ProcurementService] Calculated Summary:', result);
+        return result;
+    }
+
+    async getRecentPurchaseOrders(limit: number = 5): Promise<PurchaseOrder[]> {
+        const poConfig = await dynamicConfigService.getConfigByEntityType('purchase_order');
+        if (!poConfig?.objectTypeId) return [];
+
+        try {
+            const response = await ontologyApi.queryObjectInstances(poConfig.objectTypeId, {
+                limit,
+                include_type_info: true
+            });
+            // Map generic response to PurchaseOrder interface
+            return response.entries.map((entry: any) => ({
+                id: entry.id || entry._id,
+                po_number: entry.po_number || entry.number || entry.id,
+                supplier_id: entry.supplier_id || entry.supplierId || '',
+                supplier_name: entry.supplier_name || entry.supplierName || 'Unknown Supplier',
+                status: entry.status || 'Unknown',
+                create_time: entry.create_time || entry.createTime || new Date().toISOString(),
+                total_amount: Number(entry.total_amount || entry.totalAmount || entry.amount || 0),
+                items: [] // Items usually need separate fetch or expanded query
+            })) as PurchaseOrder[];
+        } catch (e) {
+            console.error('Failed to load recent POs', e);
+            return [];
+        }
+    }
+
+    async getRecentPurchaseRequests(limit: number = 5): Promise<PurchaseRequest[]> {
+        const prConfig = await dynamicConfigService.getConfigByEntityType('purchase_request');
+        if (!prConfig?.objectTypeId) return [];
+
+        try {
+            const response = await ontologyApi.queryObjectInstances(prConfig.objectTypeId, {
+                limit,
+                include_type_info: true
+            });
+            return response.entries.map((entry: any) => ({
+                id: entry.id || entry._id,
+                pr_number: entry.pr_number || entry.number || entry.id,
+                requester: entry.requester || 'Unknown',
+                department: entry.department || '',
+                create_time: entry.create_time || entry.createTime || new Date().toISOString(),
+                status: entry.status || 'Unknown',
+                items: []
+            })) as PurchaseRequest[];
+        } catch (e) {
+            console.error('Failed to load recent PRs', e);
+            return [];
+        }
+    }
+}
+
+export const procurementService = new ProcurementService();

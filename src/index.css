@@ -1,0 +1,141 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 确保根元素高度链完整，支持 h-full 在独立模式和DIP微应用模式下生效 */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+:root {
+  /* Status colors */
+  --color-status-risk: #EF4444;
+  --color-status-normal: #10B981;
+  --color-status-warning: #F59E0B;
+  
+  /* Background colors */
+  --color-bg-primary: #f1f5f9;
+  --color-bg-secondary: #e2e8f0;
+  --color-bg-tertiary: #cbd5e1;
+  --color-bg-elevated: #94a3b8;
+  
+  /* Border colors */
+  --color-border-default: #334155;
+  --color-border-muted: #1e293b;
+  --color-border-accent: #64748b;
+  
+  /* Text colors */
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #94a3b8;
+  --color-text-disabled: #64748b;
+  
+  /* Node type colors */
+  --color-node-supplier: #64748b;
+  --color-node-material: #F59E0B;
+  --color-node-product: #3B82F6;
+  --color-node-order: #10B981;
+  
+  /* Interactive colors */
+  --color-interactive-hover: #475569;
+  --color-interactive-active: #334155;
+  --color-interactive-focus: #3B82F6;
+  
+  /* Extended colors for V2 design */
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-200: #fecaca;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+  
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-500: #f59e0b;
+  --color-amber-600: #d97706;
+  --color-amber-700: #b45309;
+  
+  --color-blue-50: #eff6ff;
+  --color-blue-100: #dbeafe;
+  --color-blue-200: #bfdbfe;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  
+  --color-indigo-50: #eef2ff;
+  --color-indigo-100: #e0e7ff;
+  --color-indigo-200: #c7d2fe;
+  --color-indigo-500: #6366f1;
+  --color-indigo-600: #4f46e5;
+  --color-indigo-700: #4338ca;
+  
+  --color-purple-50: #faf5ff;
+  --color-purple-100: #f3e8ff;
+  --color-purple-200: #e9d5ff;
+  --color-purple-500: #a855f7;
+  --color-purple-600: #9333ea;
+  --color-purple-700: #7e22ce;
+  
+  --color-slate-50: #f8fafc;
+  --color-slate-100: #f1f5f9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-300: #cbd5e1;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-700: #334155;
+  --color-slate-800: #1e293b;
+  
+  /* Risk level colors for supplier evaluation */
+  --color-risk-low: #10b981;        /* emerald-500 */
+  --color-risk-medium: #f59e0b;     /* amber-500 */
+  --color-risk-high: #f97316;       /* orange-500 */
+  --color-risk-critical: #ef4444;   /* red-500 */
+  
+  --color-risk-low-bg: #d1fae5;     /* emerald-100 */
+  --color-risk-medium-bg: #fef3c7;   /* amber-100 */
+  --color-risk-high-bg: #fed7aa;     /* orange-100 */
+  --color-risk-critical-bg: #fee2e2; /* red-100 */
+  
+  --color-risk-low-text: #047857;    /* emerald-700 */
+  --color-risk-medium-text: #b45309; /* amber-700 */
+  --color-risk-high-text: #c2410c;    /* orange-700 */
+  --color-risk-critical-text: #b91c1c; /* red-700 */
+}
+
+/* 确保背景色铺满 - 使用语义化变量 */
+body {
+  background-color: var(--color-bg-primary);
+}
+
+/* Copilot 面板：固定在右侧栏，宽度 380px（≈黄金比例 38.2%），header 以下 */
+#copilot-host {
+  position: fixed !important;
+  right: 0 !important;
+  top: 68px !important;
+  bottom: 0 !important;
+  width: 380px !important;
+  z-index: 40;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.08);
+  overflow: hidden;
+}
+
+/* 内部组件铺满容器 */
+#copilot-host > * {
+  width: 100% !important;
+  height: 100% !important;
+}
+/* 隐藏 chatkit 内部可能出现的全屏遮罩 */
+#copilot-host .fixed.inset-0 {
+  display: none !important;
+}

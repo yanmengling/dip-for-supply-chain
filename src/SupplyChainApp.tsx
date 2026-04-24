@@ -1,0 +1,251 @@
+/**
+ * DIP for Supply Chain - Supply Chain Brain
+ * 
+ * Main application component integrating all supply chain management views.
+ * 
+ * Constitution Compliance:
+ * - Principle 1: Types should reference src/types/ontology.ts (TODO: migrate types)
+ * - Principle 2: Uses semantic color variables from Tailwind v4
+ * - Principle 3: ✅ Refactored - main component now focuses on navigation and routing
+ * - Principle 4: No simulation mode in V2 - data isolation not applicable
+ */
+
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
+import {
+  LayoutDashboard, Package, Truck, Users, TrendingUp, Settings,
+  Calendar, Loader2, ClipboardList
+} from 'lucide-react';
+import logoIcon from './assets/logo.svg';
+import { populateEntityConfigs, initializeEntityData } from './utils/entityConfigService';
+import { navigationConfigService } from './services/navigationConfigService';
+
+// ── 页面级懒加载（按需拆包，首屏只加载当前视图代码）─────────────────────────
+const CockpitView            = lazy(() => import('./components/views/CockpitView'));
+const SearchView             = lazy(() => import('./components/views/SearchView'));
+const PlanningViewV2         = lazy(() => import('./components/views/PlanningViewV2'));
+const ProcurementWorkbenchView = lazy(() => import('./components/views/ProcurementWorkbenchView'));
+const InventoryView          = lazy(() => import('./components/views/InventoryView'));
+const DeliveryViewEnhanced   = lazy(() => import('./components/views/DeliveryViewEnhanced'));
+const SupplierEvaluationPage = lazy(() => import('./components/supplier-evaluation/SupplierEvaluationPage'));
+const ProductSupplyOptimizationPage = lazy(() =>
+  import('./components/product-supply-optimization/ProductSupplyOptimizationPage')
+    .then(m => ({ default: m.ProductSupplyOptimizationPage }))
+);
+const ConfigBackendLayout    = lazy(() => import('./components/config-backend/ConfigBackendLayout'));
+const CopilotPanel           = lazy(() => import('./components/shared/CopilotPanel'));
+
+/** 页面切换时的加载占位 */
+const PageFallback = () => (
+  <div className="flex items-center justify-center h-64 text-slate-400 gap-2">
+    <Loader2 className="animate-spin" size={20} />
+    <span className="text-sm">加载中...</span>
+  </div>
+);
+
+// Full navigation items (icons and labels)
+const ALL_NAV_ITEMS = [
+  { id: 'cockpit' as const, label: '驾驶舱', icon: LayoutDashboard },
+  { id: 'planningV2' as const, label: '动态计划协同', icon: Calendar },
+  { id: 'procurementWorkbench' as const, label: '采购工作台', icon: ClipboardList },
+  { id: 'inventory' as const, label: '库存优化', icon: Package },
+  { id: 'optimization' as const, label: '产品供应优化', icon: TrendingUp },
+  { id: 'delivery' as const, label: '订单交付', icon: Truck },
+  { id: 'evaluation' as const, label: '供应商评估', icon: Users },
+];
+
+type ViewType = 'cockpit' | 'search' | 'planningV2' | 'procurementWorkbench' | 'inventory' | 'optimization' | 'delivery' | 'evaluation' | 'config';
+
+const SupplyChainAppContent = () => {
+  const [currentView, setCurrentView] = useState<ViewType>('cockpit');
+  const [visibleNavigation, setVisibleNavigation] = useState<typeof ALL_NAV_ITEMS>(ALL_NAV_ITEMS);
+  const [copilotOpen, setCopilotOpen] = useState(false);
+
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  // Load navigation config and filter visible sections (reload when view changes, e.g. returning from config)
+  useEffect(() => {
+    const config = navigationConfigService.loadConfig();
+    const enabledIds = new Set(config.sections.filter((s) => s.enabled).map((s) => s.id));
+    const idToSection = new Map(config.sections.map((s) => [s.id, s]));
+    const filtered = ALL_NAV_ITEMS.filter((n) => enabledIds.has(n.id)).map((n) => ({
+      ...n,
+      label: idToSection.get(n.id)?.label?.trim() || n.label,
+    }));
+    setVisibleNavigation(filtered.length > 0 ? filtered : ALL_NAV_ITEMS);
+
+    // If current view was disabled, switch to first enabled
+    if (currentView !== 'config' && currentView !== 'search' && !enabledIds.has(currentView)) {
+      setCurrentView((filtered[0]?.id ?? 'cockpit') as ViewType);
+    }
+  }, [currentView]);
+
+  // Initialize entity configurations on app mount
+  useEffect(() => {
+    // Initialize entity data first, then populate entity configs
+    initializeEntityData();
+    const init = async () => {
+      // Sync configuration from backend API
+      try {
+        const { configStorageService } = await import('./services/configStorageService');
+        await configStorageService.syncFromBackend();
+        console.log('[SupplyChainApp] Configuration synced from backend');
+      } catch (error) {
+        console.error('[SupplyChainApp] Failed to sync configuration from backend:', error);
+        // Continue with default configuration if sync fails
+      }
+
+      // Populate entity configs
+      await populateEntityConfigs();
+    };
+    init();
+  }, []);
+
+  // Close copilot when switching views
+  useEffect(() => {
+    setCopilotOpen(false);
+  }, [currentView]);
+
+  const handleNavigate = (view: string) => {
+    const viewMap: Record<string, ViewType> = {
+      'cockpit': 'cockpit',
+      'search': 'search',
+      'inventory': 'inventory',
+      'optimization': 'optimization',
+      'delivery': 'delivery',
+      'evaluation': 'evaluation',
+      'supplier': 'search',
+    };
+    setCurrentView(viewMap[view] || 'cockpit');
+  };
+
+  return (
+    <div className="h-full bg-slate-50 flex flex-col">
+      {/* Top Navigation */}
+      <div ref={headerRef} id="app-header" className="z-50 bg-white border-b border-slate-200 shadow-sm flex-shrink-0">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <img
+                  src={logoIcon}
+                  alt="供应链大脑"
+                  className="w-10 h-10 object-contain flex-shrink-0"
+                  style={{ display: 'block' }}
+                />
+                <div>
+                  <h1 className="text-xl font-bold text-slate-800">供应链大脑</h1>
+                  <p className="text-xs text-slate-500">DIP for Supply Chain</p>
+                </div>
+              </div>
+              <div className="flex gap-1 bg-slate-100 p-1 rounded-lg">
+                {visibleNavigation.map((nav) => (
+                  <button
+                    key={nav.id}
+                    onClick={() => setCurrentView(nav.id)}
+                    className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${currentView === nav.id
+                      ? 'bg-white text-indigo-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                      }`}
+                  >
+                    <nav.icon size={16} />
+                    {nav.label}
+                    {'badge' in nav && (
+                      <span className="px-1.5 py-0.5 bg-indigo-100 text-indigo-700 text-xs font-medium rounded">
+                        {String((nav as { badge?: unknown }).badge ?? '')}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentView('config')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all ${currentView === 'config'
+                  ? 'bg-indigo-50 text-indigo-600 border border-indigo-200'
+                  : 'text-slate-600 hover:text-slate-800 hover:bg-slate-50'
+                  }`}
+              >
+                <Settings size={18} />
+                <span>管理配置</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-hidden flex flex-col" style={{ transition: 'padding-right 0.3s ease', paddingRight: copilotOpen ? 380 : 0 }}>
+        <Suspense fallback={<PageFallback />}>
+          {currentView === 'config' ? (
+            <div className="h-full">
+              <ConfigBackendLayout onBack={() => setCurrentView('cockpit')} />
+            </div>
+          ) : currentView === 'planningV2' ? (
+            <div className="flex-1 overflow-y-auto">
+              <PlanningViewV2 />
+            </div>
+          ) : currentView === 'procurementWorkbench' ? (
+            <div className="flex-1 overflow-hidden">
+              <ProcurementWorkbenchView toggleCopilot={() => setCopilotOpen(true)} />
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="max-w-6xl mx-auto px-6 py-8">
+                {currentView === 'cockpit' && <CockpitView onNavigate={handleNavigate} toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'search' && <SearchView toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'inventory' && <InventoryView toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'optimization' && <ProductSupplyOptimizationPage toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'delivery' && <DeliveryViewEnhanced toggleCopilot={() => setCopilotOpen(true)} />}
+                {currentView === 'evaluation' && <SupplierEvaluationPage toggleCopilot={() => setCopilotOpen(true)} />}
+              </div>
+            </div>
+          )}
+        </Suspense>
+      </div>
+
+      {/* Copilot — lazy loaded so chatkit CSS never touches the page until first open */}
+      {copilotOpen && (
+        <div id="copilot-host">
+          <Suspense fallback={null}>
+            <CopilotPanel currentView={currentView} onClose={() => setCopilotOpen(false)} />
+          </Suspense>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Data Mode Switcher removed - moved to Config Backend
+
+// Main App
+import type { MicroAppProps } from './micro-app';
+import { dipEnvironmentService } from './services/dipEnvironmentService';
+import { globalSettingsService } from './services/globalSettingsService';
+
+const SupplyChainApp = (props: Partial<MicroAppProps>) => {
+  useEffect(() => {
+    // Initialize DIP environment service with platform-injected props (DIP container mode)
+    dipEnvironmentService.initialize(props);
+
+    // Standalone dev mode: always sync VITE_API_TOKEN to localStorage so it takes effect
+    if (!dipEnvironmentService.isDipMode()) {
+      const envToken = import.meta.env.VITE_API_TOKEN as string | undefined;
+      if (envToken) {
+        globalSettingsService.updateApiToken(envToken);
+        console.log('[SupplyChainApp] Standalone mode: synced token from VITE_API_TOKEN');
+      }
+    }
+
+    return () => {
+      dipEnvironmentService.cleanup();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <SupplyChainAppContent />
+  );
+};
+
+export default SupplyChainApp;

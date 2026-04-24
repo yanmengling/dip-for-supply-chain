@@ -1,0 +1,7 @@
+interface:
+  display_name: "需求承接-可售能力"
+  short_description: "产品可售能力静态预分析与报告输出"
+  default_prompt: "Use $demand-fulfillment-capacity-analysis with $kweaver-core. Require knowledge_network_id (default supplychain_hd0202_test, must echo in report). Execute in fixed phases: resolve_context once, then analyze, then render_report. Do not run probe retries with old BOM versions. Do not perform any remote query in analyze/render_report phases. Always fetch warehouse_filter from inventory production-available scope. If prerequisites are missing, terminate analysis. Final response must include full Markdown report body and execution audit fields."
+
+policy:
+  allow_implicit_invocation: true
